@@ -1,0 +1,8 @@
+.next
+!.next/standalone
+!.next/standalone/**
+!.next/static
+!.next/static/**
+node_modules
+npm-debug.log*
+.env*

@@ -1,0 +1,30 @@
+services:
+  api:
+    image: pq-ai-api:experience
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile.experience
+    environment:
+      DATABASE_URL: mysql+pymysql://pq_ai:pq_ai_dev_password@host.docker.internal:3307/pq_ai?charset=utf8mb4
+      API_CORS_ORIGINS: http://localhost:3000
+      SEED_DEMO_DATA: "true"
+      API_AUTH_ENABLED: "true"
+      BOOTSTRAP_API_KEY: pq-ai-demo-key
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  web:
+    image: pq-ai-web:experience
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile.experience
+    environment:
+      API_URL: http://api:8000/api/v1
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      API_KEY: pq-ai-demo-key
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
