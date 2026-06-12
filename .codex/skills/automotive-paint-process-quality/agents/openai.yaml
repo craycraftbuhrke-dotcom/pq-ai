@@ -1,0 +1,4 @@
+interface:
+  display_name: "汽车涂装工艺质量"
+  short_description: "以3C2B、Dürr旋杯、材料与漆面测量约束PQ-AI开发"
+  default_prompt: "Use $automotive-paint-process-quality to review or design PQ-AI features within the approved automotive paint scope."
