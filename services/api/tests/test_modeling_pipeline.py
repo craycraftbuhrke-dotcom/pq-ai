@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.api.routes.modeling import (
+    change_model_status,
     diagnose_from_prediction,
+    get_model_drift,
     list_feature_snapshots,
     predict_from_snapshot,
     recommend_from_snapshot,
@@ -47,6 +49,7 @@ from app.schemas.common import (
 from app.schemas.modeling import (
     ModelPredictionRequest,
     ModelRecommendationRequest,
+    ModelStatusUpdate,
     ModelTrainingRequest,
 )
 from app.services.demo import dashboard_snapshot
@@ -171,6 +174,13 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         )
         assert prediction["predicted_value"] == pytest.approx(runs[-1][1], abs=0.2)
         assert prediction["prediction_result_id"]
+        drift = get_model_drift(trained.id, db)
+        assert drift["monitored_snapshot_count"] == 8
+        assert drift["prediction_count"] == 1
+        assert drift["labeled_prediction_count"] == 1
+        assert drift["feature_drift"]
+        assert drift["feature_drift"][0]["standardized_mean_shift"] is not None
+        assert drift["drift_status"] in {"STABLE", "WATCH", "DRIFT"}
 
         diagnosis = diagnose_from_prediction(prediction["prediction_result_id"], db)
         assert diagnosis["causality_status"] == "CORRELATION_ONLY"
@@ -291,3 +301,32 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert dashboard["recommendation"]["status"] == "VERIFIED"
         assert dashboard["diagnosis"]["point_code"] == "P1"
         assert dashboard["diagnosis"]["factors"]
+
+        next_model = train_baseline_model(
+            ModelTrainingRequest(
+                model_code="DOI-BASELINE",
+                version="2.0",
+                target_metric="doi",
+                min_samples=5,
+                ridge_lambda=0.01,
+            ),
+            db,
+        )
+        assert trained.status == "RETIRED"
+        assert next_model.status == "ACTIVE"
+        reactivated = change_model_status(
+            trained.id,
+            ModelStatusUpdate(status="ACTIVE"),
+            db,
+        )
+        assert reactivated.status == "ACTIVE"
+        assert next_model.status == "RETIRED"
+        with pytest.raises(HTTPException, match="只有生效模型可以执行在线预测"):
+            predict_from_snapshot(
+                next_model.id,
+                ModelPredictionRequest(
+                    production_run_id=runs[-1][0].id,
+                    measurement_point_id=point.id,
+                ),
+                db,
+            )

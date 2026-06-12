@@ -157,7 +157,191 @@ def train_model(db: Session, payload) -> ModelVersion:
         trained_at=now,
         status="ACTIVE",
     )
+    for active_model in db.scalars(
+        select(ModelVersion).where(
+            ModelVersion.model_code == payload.model_code,
+            ModelVersion.target_metric == payload.target_metric,
+            ModelVersion.status == "ACTIVE",
+        )
+    ):
+        active_model.status = "RETIRED"
     db.add(model)
+    db.commit()
+    db.refresh(model)
+    return model
+
+
+def model_drift_report(db: Session, model: ModelVersion, recent_limit: int = 100) -> dict:
+    payload = model.model_payload
+    feature_names = payload.get("feature_names", [])
+    means = payload.get("means", [])
+    scales = payload.get("scales", [])
+    snapshots = list(
+        db.scalars(
+            select(PointFeatureSnapshot)
+            .where(PointFeatureSnapshot.feature_set_version == model.feature_set_version)
+            .order_by(PointFeatureSnapshot.generated_at.desc())
+            .limit(recent_limit)
+        )
+    )
+    predictions = list(
+        db.scalars(
+            select(PredictionResult)
+            .where(PredictionResult.model_version_id == model.id)
+            .order_by(PredictionResult.predicted_at.desc())
+            .limit(recent_limit)
+        )
+    )
+
+    feature_drift = []
+    for feature_name, training_mean, training_scale in zip(
+        feature_names, means, scales, strict=True
+    ):
+        values = [
+            float(snapshot.feature_values[feature_name])
+            for snapshot in snapshots
+            if isinstance(snapshot.feature_values.get(feature_name), int | float)
+            and not isinstance(snapshot.feature_values.get(feature_name), bool)
+        ]
+        recent_mean = sum(values) / len(values) if values else None
+        mean_shift = (
+            abs(recent_mean - float(training_mean)) / (abs(float(training_scale)) or 1.0)
+            if recent_mean is not None
+            else None
+        )
+        missing_rate = 1 - len(values) / len(snapshots) if snapshots else 1.0
+        if mean_shift is None:
+            drift_status = "NO_DATA"
+        elif mean_shift >= 1.0 or missing_rate >= 0.2:
+            drift_status = "DRIFT"
+        elif mean_shift >= 0.5 or missing_rate >= 0.05:
+            drift_status = "WATCH"
+        else:
+            drift_status = "STABLE"
+        feature_drift.append(
+            {
+                "feature": feature_name,
+                "training_mean": round(float(training_mean), 6),
+                "recent_mean": round(recent_mean, 6) if recent_mean is not None else None,
+                "standardized_mean_shift": round(mean_shift, 6) if mean_shift is not None else None,
+                "missing_rate": round(missing_rate, 6),
+                "sample_count": len(values),
+                "status": drift_status,
+            }
+        )
+    feature_drift.sort(
+        key=lambda item: (
+            item["standardized_mean_shift"] is not None,
+            item["standardized_mean_shift"] or 0,
+            item["missing_rate"],
+        ),
+        reverse=True,
+    )
+
+    errors = []
+    for prediction in predictions:
+        actual = _target_value(
+            db,
+            prediction.production_run_id,
+            prediction.measurement_point_id,
+            prediction.metric_code,
+        )
+        if actual is not None:
+            errors.append(prediction.predicted_value - actual)
+    live_mae = sum(abs(error) for error in errors) / len(errors) if errors else None
+    live_rmse = sqrt(sum(error**2 for error in errors) / len(errors)) if errors else None
+    training_rmse = model.evaluation_metrics.get("training_rmse")
+    rmse_ratio = (
+        live_rmse / float(training_rmse)
+        if live_rmse is not None and training_rmse is not None and float(training_rmse) > 0
+        else None
+    )
+    max_feature_shift = max(
+        (
+            item["standardized_mean_shift"]
+            for item in feature_drift
+            if item["standardized_mean_shift"] is not None
+        ),
+        default=None,
+    )
+    average_completeness = (
+        sum(
+            sum(name in snapshot.feature_values for name in feature_names) / len(feature_names)
+            for snapshot in snapshots
+        )
+        / len(snapshots)
+        if snapshots and feature_names
+        else None
+    )
+    average_confidence = (
+        sum(prediction.confidence for prediction in predictions) / len(predictions)
+        if predictions
+        else None
+    )
+    has_feature_drift = any(item["status"] == "DRIFT" for item in feature_drift)
+    has_feature_watch = any(item["status"] == "WATCH" for item in feature_drift)
+    has_effect_drift = rmse_ratio is not None and rmse_ratio >= 1.5
+    has_effect_watch = rmse_ratio is not None and rmse_ratio >= 1.2
+
+    if not snapshots:
+        drift_status = "NO_DATA"
+        recommendation = "当前没有可用于漂移监控的点位特征快照，请先接入最新生产数据。"
+    elif has_feature_drift or has_effect_drift:
+        drift_status = "DRIFT"
+        recommendation = "检测到显著特征或效果漂移，建议暂停自动推荐并使用最新合格数据重新训练。"
+    elif has_feature_watch or has_effect_watch or not errors:
+        drift_status = "WATCH"
+        recommendation = "模型需要持续观察，请补充带质量结果的在线样本并复核高漂移特征。"
+    else:
+        drift_status = "STABLE"
+        recommendation = "模型输入分布与在线效果稳定，可继续按当前治理策略运行。"
+
+    return {
+        "model_version_id": model.id,
+        "model_code": model.model_code,
+        "version": model.version,
+        "target_metric": model.target_metric,
+        "model_status": model.status,
+        "drift_status": drift_status,
+        "recommendation": recommendation,
+        "monitored_snapshot_count": len(snapshots),
+        "prediction_count": len(predictions),
+        "labeled_prediction_count": len(errors),
+        "average_feature_completeness": (
+            round(average_completeness, 6) if average_completeness is not None else None
+        ),
+        "average_confidence": (
+            round(average_confidence, 6) if average_confidence is not None else None
+        ),
+        "training_rmse": round(float(training_rmse), 6) if training_rmse is not None else None,
+        "live_mae": round(live_mae, 6) if live_mae is not None else None,
+        "live_rmse": round(live_rmse, 6) if live_rmse is not None else None,
+        "rmse_ratio": round(rmse_ratio, 6) if rmse_ratio is not None else None,
+        "max_feature_shift": (
+            round(max_feature_shift, 6) if max_feature_shift is not None else None
+        ),
+        "window_started_at": min(
+            (snapshot.generated_at for snapshot in snapshots), default=None
+        ),
+        "window_ended_at": max(
+            (snapshot.generated_at for snapshot in snapshots), default=None
+        ),
+        "feature_drift": feature_drift,
+    }
+
+
+def update_model_status(db: Session, model: ModelVersion, next_status: str) -> ModelVersion:
+    if next_status == "ACTIVE":
+        for active_model in db.scalars(
+            select(ModelVersion).where(
+                ModelVersion.model_code == model.model_code,
+                ModelVersion.target_metric == model.target_metric,
+                ModelVersion.status == "ACTIVE",
+                ModelVersion.id != model.id,
+            )
+        ):
+            active_model.status = "RETIRED"
+    model.status = next_status
     db.commit()
     db.refresh(model)
     return model

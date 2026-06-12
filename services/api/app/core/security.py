@@ -138,6 +138,8 @@ def required_permission(method: str, path: str) -> str | None:
         return "integration.manage"
     if path == "/api/v1/ai/models/train":
         return "ai.train"
+    if "/ai/models/" in path and path.endswith("/status"):
+        return "ai.train"
     if "/ai/models/" in path and path.endswith("/recommendations"):
         return "ai.recommend"
     if "/ai/models/" in path or path.startswith("/api/v1/ai/predictions") or path.startswith(

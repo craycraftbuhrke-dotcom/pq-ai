@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,6 +29,33 @@ class ModelVersionRead(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ModelStatusUpdate(BaseModel):
+    status: Literal["ACTIVE", "RETIRED", "DRAFT"]
+
+
+class ModelDriftReport(BaseModel):
+    model_version_id: str
+    model_code: str
+    version: str
+    target_metric: str
+    model_status: str
+    drift_status: str
+    recommendation: str
+    monitored_snapshot_count: int
+    prediction_count: int
+    labeled_prediction_count: int
+    average_feature_completeness: float | None
+    average_confidence: float | None
+    training_rmse: float | None
+    live_mae: float | None
+    live_rmse: float | None
+    rmse_ratio: float | None
+    max_feature_shift: float | None
+    window_started_at: datetime | None
+    window_ended_at: datetime | None
+    feature_drift: list[dict]
 
 
 class ModelPredictionRequest(BaseModel):

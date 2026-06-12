@@ -124,7 +124,38 @@ type Measurement = {
   metrics: { metric_code: string; raw_value: number; corrected_value?: number | null }[];
 };
 type MetricDefinition = { code: string; name: string; quality_type: string; is_primary: boolean };
-type Tab = "models" | "predictions" | "recommendations";
+type FeatureDrift = {
+  feature: string;
+  training_mean: number;
+  recent_mean?: number | null;
+  standardized_mean_shift?: number | null;
+  missing_rate: number;
+  sample_count: number;
+  status: string;
+};
+type DriftReport = {
+  model_version_id: string;
+  model_code: string;
+  version: string;
+  target_metric: string;
+  model_status: string;
+  drift_status: string;
+  recommendation: string;
+  monitored_snapshot_count: number;
+  prediction_count: number;
+  labeled_prediction_count: number;
+  average_feature_completeness?: number | null;
+  average_confidence?: number | null;
+  training_rmse?: number | null;
+  live_mae?: number | null;
+  live_rmse?: number | null;
+  rmse_ratio?: number | null;
+  max_feature_shift?: number | null;
+  window_started_at?: string | null;
+  window_ended_at?: string | null;
+  feature_drift: FeatureDrift[];
+};
+type Tab = "models" | "governance" | "predictions" | "recommendations";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { cache: "no-store", ...init });
@@ -140,12 +171,25 @@ function formatNumber(value?: number | null, digits = 3): string {
 function statusLabel(status: string): string {
   return {
     ACTIVE: "生效",
+    DRAFT: "草稿",
+    RETIRED: "已退役",
+    STABLE: "稳定",
+    WATCH: "观察",
+    DRIFT: "漂移",
+    NO_DATA: "无数据",
     PENDING: "待审批",
     APPROVED: "已批准",
     REJECTED: "已驳回",
     EXECUTED: "已执行",
     VERIFIED: "已复测",
   }[status] ?? status;
+}
+
+function driftStatusClass(status: string): string {
+  if (status === "STABLE") return "status-healthy";
+  if (status === "WATCH") return "status-warning";
+  if (status === "DRIFT") return "status-risk";
+  return "status-info";
 }
 
 export function AiWorkbench() {
@@ -157,6 +201,7 @@ export function AiWorkbench() {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
+  const [driftReport, setDriftReport] = useState<DriftReport | null>(null);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState("");
   const [selectedPredictionId, setSelectedPredictionId] = useState("");
@@ -168,6 +213,7 @@ export function AiWorkbench() {
   const [verificationMeasurementId, setVerificationMeasurementId] = useState("");
   const [defaultModelCode] = useState(() => `PQ-MODEL-${Date.now().toString().slice(-6)}`);
   const [loading, setLoading] = useState(true);
+  const [driftLoading, setDriftLoading] = useState(false);
   const [submitting, setSubmitting] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -204,10 +250,28 @@ export function AiWorkbench() {
     }
   }, []);
 
+  const loadDrift = useCallback(async (modelId: string) => {
+    setDriftLoading(true);
+    try {
+      setDriftReport(await request<DriftReport>(`/api/ai/models/${modelId}/drift`));
+    } catch (loadError) {
+      setDriftReport(null);
+      setError(loadError instanceof Error ? loadError.message : "模型漂移报告加载失败");
+    } finally {
+      setDriftLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => void reload(), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
+
+  useEffect(() => {
+    if (!selectedModelId) return;
+    const timer = window.setTimeout(() => void loadDrift(selectedModelId), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadDrift, selectedModelId]);
 
   const selectedModel = models.find((item) => item.id === selectedModelId);
   const compatibleSnapshots = useMemo(
@@ -316,6 +380,25 @@ export function AiWorkbench() {
       showSuccess(`预测完成：${result.metric_code} = ${formatNumber(result.predicted_value)}`);
       await reload();
       setTab("predictions");
+    } catch (operationError) {
+      showError(operationError);
+    } finally {
+      setSubmitting("");
+    }
+  }
+
+  async function changeModelStatus(status: "ACTIVE" | "RETIRED" | "DRAFT") {
+    if (!selectedModel) return;
+    setSubmitting(`model-status-${status}`);
+    try {
+      await request<ModelVersion>(`/api/ai/models/${selectedModel.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      showSuccess(`模型已切换为“${statusLabel(status)}”状态`);
+      await reload();
+      await loadDrift(selectedModel.id);
     } catch (operationError) {
       showError(operationError);
     } finally {
@@ -459,7 +542,7 @@ export function AiWorkbench() {
 
       <section className="panel ai-workspace">
         <div className="master-tabs">
-          {([["models", "模型训练"], ["predictions", "预测与诊断"], ["recommendations", "推荐与闭环"]] as [Tab, string][]).map(([key, label]) => (
+          {([["models", "模型训练"], ["governance", "模型治理"], ["predictions", "预测与诊断"], ["recommendations", "推荐与闭环"]] as [Tab, string][]).map(([key, label]) => (
             <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
           ))}
           <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索当前工作区" /></label>
@@ -481,11 +564,56 @@ export function AiWorkbench() {
             <div className="ai-record-list">
               {filteredModels.map((model) => (
                 <article className={`ai-model-card ${model.id === selectedModelId ? "selected" : ""}`} key={model.id} onClick={() => setSelectedModelId(model.id)}>
-                  <div><span className="record-status status-on">{statusLabel(model.status)}</span><strong>{model.model_code}:{model.version}</strong><small>{model.model_type}</small></div>
+                  <div><span className={`record-status ${model.status === "ACTIVE" ? "status-on" : "status-off"}`}>{statusLabel(model.status)}</span><strong>{model.model_code}:{model.version}</strong><small>{model.model_type}</small></div>
                   <div className="ai-model-metrics"><span>目标 <b>{model.target_metric}</b></span><span>样本 <b>{model.training_sample_count}</b></span><span>R² <b>{formatNumber(model.evaluation_metrics.training_r2)}</b></span><span>RMSE <b>{formatNumber(model.evaluation_metrics.training_rmse)}</b></span></div>
                 </article>
               ))}
               {!filteredModels.length ? <div className="master-empty"><BrainCircuit /> 暂无模型版本</div> : null}
+            </div>
+          </div>
+        ) : null}
+
+        {tab === "governance" ? (
+          <div className="ai-split">
+            <div className="ai-control-panel">
+              <div className="program-subheading"><div><span className="eyebrow">Model Registry</span><h3>版本状态治理</h3></div><ShieldCheck /></div>
+              <div className="ai-form-stack">
+                <label className="form-field"><span>模型版本</span><select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {statusLabel(model.status)}</option>)}</select></label>
+                <div className="ai-context-box"><span>目标指标</span><strong>{selectedModel?.target_metric ?? "—"}</strong><span>特征版本</span><strong>{selectedModel?.feature_set_version ?? "—"}</strong><span>当前状态</span><strong>{statusLabel(selectedModel?.status ?? "—")}</strong><span>训练样本</span><strong>{selectedModel?.training_sample_count ?? "—"}</strong></div>
+                <p className="ai-hint">激活一个模型版本时，同模型代码与目标指标的其他生效版本会自动退役。</p>
+                <button className="button button-primary" disabled={!selectedModel || selectedModel.status === "ACTIVE" || submitting === "model-status-ACTIVE"} onClick={() => void changeModelStatus("ACTIVE")}>{submitting === "model-status-ACTIVE" ? <LoaderCircle className="spin" /> : <Check />} 激活版本</button>
+                <div className="ai-two-fields">
+                  <button className="button button-secondary" disabled={!selectedModel || selectedModel.status === "DRAFT" || submitting === "model-status-DRAFT"} onClick={() => void changeModelStatus("DRAFT")}>转为草稿</button>
+                  <button className="button button-secondary danger-button" disabled={!selectedModel || selectedModel.status === "RETIRED" || submitting === "model-status-RETIRED"} onClick={() => void changeModelStatus("RETIRED")}>退役版本</button>
+                </div>
+              </div>
+            </div>
+            <div className="ai-record-list">
+              {driftLoading ? <div className="master-empty"><LoaderCircle className="spin" /> 正在计算实时漂移报告</div> : null}
+              {!driftLoading && driftReport ? <>
+                <div className="ai-governance-summary">
+                  <div>
+                    <span className={`status-badge ${driftStatusClass(driftReport.drift_status)}`}>{statusLabel(driftReport.drift_status)}</span>
+                    <strong>{driftReport.model_code}:{driftReport.version}</strong>
+                    <small>{driftReport.target_metric} · 最近 {driftReport.monitored_snapshot_count} 个点位快照</small>
+                  </div>
+                  <button className="button button-secondary" onClick={() => void loadDrift(driftReport.model_version_id)}><RefreshCw /> 重新计算</button>
+                </div>
+                <div className="ai-drift-stat-grid">
+                  <article><span>最大特征偏移</span><strong>{formatNumber(driftReport.max_feature_shift)}</strong><small>标准差倍数</small></article>
+                  <article><span>在线 RMSE</span><strong>{formatNumber(driftReport.live_rmse)}</strong><small>训练期 {formatNumber(driftReport.training_rmse)}</small></article>
+                  <article><span>RMSE 比率</span><strong>{formatNumber(driftReport.rmse_ratio, 2)}</strong><small>在线 / 训练期</small></article>
+                  <article><span>有标签预测</span><strong>{driftReport.labeled_prediction_count}</strong><small>共 {driftReport.prediction_count} 条预测</small></article>
+                  <article><span>平均完整率</span><strong>{formatNumber((driftReport.average_feature_completeness ?? 0) * 100, 1)}%</strong><small>监控窗口输入</small></article>
+                  <article><span>平均置信度</span><strong>{formatNumber((driftReport.average_confidence ?? 0) * 100, 1)}%</strong><small>在线预测结果</small></article>
+                </div>
+                <p className={`ai-drift-recommendation ${driftStatusClass(driftReport.drift_status)}`}>{driftReport.recommendation}</p>
+                <div className="ai-drift-table">
+                  <div className="ai-drift-row ai-drift-head"><span>特征</span><span>训练均值</span><span>近期均值</span><span>偏移</span><span>缺失率</span><span>状态</span></div>
+                  {driftReport.feature_drift.map((feature) => <div className="ai-drift-row" key={feature.feature}><span><strong>{feature.feature}</strong><small>{feature.sample_count} 个有效样本</small></span><span>{formatNumber(feature.training_mean)}</span><span>{formatNumber(feature.recent_mean)}</span><span>{formatNumber(feature.standardized_mean_shift)}</span><span>{formatNumber(feature.missing_rate * 100, 1)}%</span><span><b className={`status-badge ${driftStatusClass(feature.status)}`}>{statusLabel(feature.status)}</b></span></div>)}
+                </div>
+              </> : null}
+              {!driftLoading && !driftReport ? <div className="master-empty"><Activity /> 请选择模型版本查看治理报告</div> : null}
             </div>
           </div>
         ) : null}
@@ -498,7 +626,7 @@ export function AiWorkbench() {
                 <label className="form-field"><span>生效模型</span><select value={selectedModelId} onChange={(event) => { setSelectedModelId(event.target.value); setSelectedSnapshotId(""); }}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {model.target_metric}</option>)}</select></label>
                 <label className="form-field"><span>生产事件与测量点快照</span><select value={selectedSnapshot?.id ?? ""} onChange={(event) => setSelectedSnapshotId(event.target.value)}>{compatibleSnapshots.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{snapshot.production_run_no} · {snapshot.measurement_point_code} · {formatNumber(snapshot.completeness_score * 100, 0)}%</option>)}</select></label>
                 <div className="ai-context-box"><span>特征版本</span><strong>{selectedSnapshot?.feature_set_version ?? "—"}</strong><span>特征数量</span><strong>{selectedSnapshot?.feature_count ?? "—"}</strong></div>
-                <button className="button button-primary" onClick={() => void runPrediction()} disabled={!selectedModel || !selectedSnapshot || submitting === "predict"}>{submitting === "predict" ? <LoaderCircle className="spin" /> : <Play />} 执行并保存预测</button>
+                <button className="button button-primary" onClick={() => void runPrediction()} disabled={!selectedModel || selectedModel.status !== "ACTIVE" || !selectedSnapshot || submitting === "predict"}>{submitting === "predict" ? <LoaderCircle className="spin" /> : <Play />} 执行并保存预测</button>
               </div>
             </div>
             <div className="ai-record-list">
@@ -528,7 +656,7 @@ export function AiWorkbench() {
                 <label className="form-field"><span>点位特征快照</span><select value={selectedSnapshot?.id ?? ""} onChange={(event) => setSelectedSnapshotId(event.target.value)}>{compatibleSnapshots.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{snapshot.production_run_no} · {snapshot.measurement_point_code}</option>)}</select></label>
                 <div className="ai-two-fields"><label className="form-field"><span>目标下限</span><input type="number" step="any" value={targetMin} onChange={(event) => setTargetMin(event.target.value)} /></label><label className="form-field"><span>目标上限</span><input type="number" step="any" value={targetMax} onChange={(event) => setTargetMax(event.target.value)} /></label></div>
                 <p className="ai-hint">至少填写一个目标边界。推荐只使用已启用参数，并强制校验工艺硬边界。</p>
-                <button className="button button-primary" disabled={!selectedModel || !selectedSnapshot || (!targetMin && !targetMax) || submitting === "recommend"}>{submitting === "recommend" ? <LoaderCircle className="spin" /> : <Sparkles />} 生成约束推荐</button>
+                <button className="button button-primary" disabled={!selectedModel || selectedModel.status !== "ACTIVE" || !selectedSnapshot || (!targetMin && !targetMax) || submitting === "recommend"}>{submitting === "recommend" ? <LoaderCircle className="spin" /> : <Sparkles />} 生成约束推荐</button>
               </div>
             </form>
             <div className="ai-record-list">

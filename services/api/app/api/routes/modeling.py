@@ -6,18 +6,22 @@ from app.db.session import get_db
 from app.models.domain import MeasurementPoint, ModelVersion, PointFeatureSnapshot, PredictionResult, ProductionRun
 from app.schemas.modeling import (
     ModelDiagnosisResponse,
+    ModelDriftReport,
     ModelPredictionRequest,
     ModelPredictionResponse,
     ModelRecommendationRequest,
     ModelRecommendationResponse,
+    ModelStatusUpdate,
     ModelTrainingRequest,
     ModelVersionRead,
 )
 from app.services.modeling import (
     diagnose_prediction,
+    model_drift_report,
     predict_with_model,
     recommend_with_model,
     train_model,
+    update_model_status,
 )
 
 router = APIRouter(prefix="/ai/models", tags=["ai-modeling"])
@@ -61,6 +65,26 @@ def train_baseline_model(
     return train_model(db, payload)
 
 
+@router.get("/{model_version_id}/drift", response_model=ModelDriftReport)
+def get_model_drift(model_version_id: str, db: Session = Depends(get_db)) -> dict:
+    model = db.get(ModelVersion, model_version_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="模型版本不存在")
+    return model_drift_report(db, model)
+
+
+@router.patch("/{model_version_id}/status", response_model=ModelVersionRead)
+def change_model_status(
+    model_version_id: str,
+    payload: ModelStatusUpdate,
+    db: Session = Depends(get_db),
+) -> ModelVersion:
+    model = db.get(ModelVersion, model_version_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="模型版本不存在")
+    return update_model_status(db, model, payload.status)
+
+
 @router.post("/{model_version_id}/predictions", response_model=ModelPredictionResponse)
 def predict_from_snapshot(
     model_version_id: str,
@@ -70,6 +94,8 @@ def predict_from_snapshot(
     model = db.get(ModelVersion, model_version_id)
     if not model:
         raise HTTPException(status_code=404, detail="模型版本不存在")
+    if model.status != "ACTIVE":
+        raise HTTPException(status_code=409, detail="只有生效模型可以执行在线预测")
     return predict_with_model(
         db,
         model,
@@ -114,6 +140,8 @@ def recommend_from_snapshot(
     model = db.get(ModelVersion, model_version_id)
     if not model:
         raise HTTPException(status_code=404, detail="模型版本不存在")
+    if model.status != "ACTIVE":
+        raise HTTPException(status_code=409, detail="只有生效模型可以生成工艺推荐")
     return recommend_with_model(
         db,
         model,

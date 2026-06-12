@@ -2352,6 +2352,109 @@ button.message-banner {
   font-size: 10px;
 }
 
+.ai-governance-summary {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  padding: 15px 17px;
+}
+
+.ai-governance-summary > div {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-governance-summary strong {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.ai-governance-summary small {
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.ai-drift-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ai-drift-stat-grid article {
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 15px;
+}
+
+.ai-drift-stat-grid span,
+.ai-drift-stat-grid small {
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.ai-drift-stat-grid strong {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 14px;
+}
+
+.ai-drift-recommendation {
+  background: var(--surface);
+  border-left: 3px solid currentColor;
+  font-size: 9px;
+  line-height: 1.7;
+  margin: 14px 16px;
+  padding: 10px 12px;
+}
+
+.ai-drift-table {
+  border-top: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.ai-drift-row {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 1.6fr) repeat(4, minmax(90px, 0.7fr)) minmax(70px, 0.6fr);
+  min-width: 780px;
+  padding: 10px 16px;
+}
+
+.ai-drift-row > span {
+  color: var(--text-soft);
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 8px;
+}
+
+.ai-drift-row > span:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ai-drift-row strong {
+  color: var(--text);
+  font-size: 9px;
+}
+
+.ai-drift-row small {
+  color: var(--text-muted);
+  font-family: "Geist Sans", system-ui, sans-serif;
+  font-size: 7px;
+}
+
+.ai-drift-head {
+  background: var(--surface);
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
 .ai-result-card {
   align-items: center;
   background: transparent;
@@ -3291,6 +3394,7 @@ button.message-banner {
   .ai-two-fields,
   .ai-model-card,
   .ai-model-metrics,
+  .ai-drift-stat-grid,
   .ai-recommendation-grid,
   .quality-analytics-stat-grid,
   .quality-analytics-grid,
