@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Activity,
   Download,
   FileJson,
   LoaderCircle,
@@ -11,7 +12,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Resource = { id: string; code: string; name: string };
 type ProductionRun = { id: string; run_no: string; body_no?: string | null; started_at: string };
@@ -75,8 +76,66 @@ type Summary = {
   fail_measurements: number;
   no_standard_measurements: number;
 };
+type AnalyticsSeriesPoint = {
+  measurement_id: string;
+  data_no: string;
+  measurement_point_id: string;
+  measurement_point_code: string;
+  measurement_point_name: string;
+  measured_at: string;
+  value: number;
+  judgement: string;
+  standard_min?: number | null;
+  standard_max?: number | null;
+};
+type Analytics = {
+  quality_type: string;
+  metric_code: string;
+  metric_name: string;
+  unit?: string | null;
+  statistics: {
+    samples: number;
+    mean?: number | null;
+    sigma?: number | null;
+    minimum?: number | null;
+    maximum?: number | null;
+    ucl?: number | null;
+    lcl?: number | null;
+    trend_slope?: number | null;
+    cp?: number | null;
+    cpk?: number | null;
+    pass_rate: number;
+    out_of_control_count: number;
+  };
+  data_quality: {
+    total_measurements: number;
+    valid_measurements: number;
+    invalid_measurements: number;
+    measurements_with_metric: number;
+    missing_metric_count: number;
+    no_standard_count: number;
+    valid_rate: number;
+    metric_completeness: number;
+    standard_coverage: number;
+    latest_measured_at?: string | null;
+  };
+  series: AnalyticsSeriesPoint[];
+  point_risks: Array<{
+    measurement_point_id: string;
+    measurement_point_code: string;
+    measurement_point_name: string;
+    samples: number;
+    failures: number;
+    fail_rate: number;
+    no_standard_count: number;
+    latest_value: number;
+    latest_judgement: string;
+    risk_score: number;
+  }>;
+};
 type MetricRow = { metric_code: string; raw_value: string; corrected_value: string };
 type FormState = Record<string, string | boolean>;
+type Tab = "measurements" | "standards" | "analytics";
 
 const qualityLabels: Record<string, string> = {
   ORANGE_PEEL: "橘皮",
@@ -112,8 +171,10 @@ function relationName(resources: Resource[], id?: string | null): string {
 }
 
 export function QualityWorkspace() {
-  const [tab, setTab] = useState<"measurements" | "standards">("measurements");
+  const [tab, setTab] = useState<Tab>("measurements");
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [analyticsMetric, setAnalyticsMetric] = useState("doi");
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [standards, setStandards] = useState<Standard[]>([]);
   const [definitions, setDefinitions] = useState<MetricDefinition[]>([]);
@@ -129,6 +190,7 @@ export function QualityWorkspace() {
   const [form, setForm] = useState<FormState>({});
   const [metricRows, setMetricRows] = useState<MetricRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -172,6 +234,38 @@ export function QualityWorkspace() {
     const timer = window.setTimeout(() => void reload(), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
+
+  const analyticsDefinitions = useMemo(
+    () => definitions.filter((item) => item.quality_type === (typeFilter || "ORANGE_PEEL")),
+    [definitions, typeFilter],
+  );
+  const resolvedAnalyticsMetric = analyticsDefinitions.some((item) => item.code === analyticsMetric)
+    ? analyticsMetric
+    : analyticsDefinitions.find((item) => item.is_primary)?.code ?? analyticsDefinitions[0]?.code ?? "";
+
+  const loadAnalytics = useCallback(async () => {
+    if (!resolvedAnalyticsMetric) return;
+    setAnalyticsLoading(true);
+    setAnalytics(null);
+    try {
+      const parameters = new URLSearchParams({
+        quality_type: typeFilter || "ORANGE_PEEL",
+        metric_code: resolvedAnalyticsMetric,
+        limit: "2000",
+      });
+      setAnalytics(await request<Analytics>(`/api/quality/analytics?${parameters}`));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "质量分析加载失败");
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [resolvedAnalyticsMetric, typeFilter]);
+
+  useEffect(() => {
+    if (tab !== "analytics") return;
+    const timer = window.setTimeout(() => void loadAnalytics(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadAnalytics, tab]);
 
   const filteredMeasurements = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -324,9 +418,8 @@ export function QualityWorkspace() {
   }
 
   function exportCsv() {
-    const rows =
-      tab === "measurements"
-        ? filteredMeasurements.map((item) => [
+    const rows = tab === "measurements"
+      ? filteredMeasurements.map((item) => [
             item.data_no,
             item.measurement_point_code,
             qualityLabels[item.quality_type] ?? item.quality_type,
@@ -334,25 +427,37 @@ export function QualityWorkspace() {
             judgementLabels[item.judgement] ?? item.judgement,
             item.measured_at,
           ])
-        : filteredStandards.map((item) => [
+      : tab === "standards"
+        ? filteredStandards.map((item) => [
             item.standard_no,
             item.version,
             qualityLabels[item.quality_type] ?? item.quality_type,
             item.metric_code,
             String(item.min_value ?? ""),
             String(item.max_value ?? ""),
+          ])
+        : (analytics?.series ?? []).map((item) => [
+            item.data_no,
+            item.measurement_point_code,
+            analytics?.metric_code ?? "",
+            String(item.value),
+            item.judgement,
+            String(item.standard_min ?? ""),
+            String(item.standard_max ?? ""),
+            item.measured_at,
           ]);
-    const headers =
-      tab === "measurements"
-        ? ["数据编号", "测量点", "质量类型", "指标值", "判定", "测量时间"]
-        : ["标准编号", "版本", "质量类型", "指标代码", "下限", "上限"];
+    const headers = tab === "measurements"
+      ? ["数据编号", "测量点", "质量类型", "指标值", "判定", "测量时间"]
+      : tab === "standards"
+        ? ["标准编号", "版本", "质量类型", "指标代码", "下限", "上限"]
+        : ["数据编号", "测量点", "指标代码", "指标值", "判定", "标准下限", "标准上限", "测量时间"];
     const content = `\uFEFF${[headers, ...rows]
       .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
       .join("\n")}`;
     const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `质量${tab === "measurements" ? "测量" : "标准"}-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.download = `质量${tab === "measurements" ? "测量" : tab === "standards" ? "标准" : "分析"}-${new Date().toISOString().slice(0, 10)}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -389,10 +494,9 @@ export function QualityWorkspace() {
       <header className="page-header">
         <div><span className="page-kicker">MEASUREMENT · STANDARD · JUDGEMENT</span><h1>质量数据中心</h1><p>维护橘皮、色差、光泽度和膜厚数据，依据多维质量标准自动判定。</p></div>
         <div className="page-actions">
-          <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(event) => void importJson(event)} />
-          <button className="button button-secondary" onClick={() => fileInput.current?.click()} disabled={submitting}><FileJson />批量导入 JSON</button>
-          <button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} />刷新</button>
-          <button className="button button-primary" onClick={() => tab === "measurements" ? openMeasurement() : openStandard()}><Plus />新建{tab === "measurements" ? "质量测量" : "质量标准"}</button>
+          {tab === "measurements" ? <><input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(event) => void importJson(event)} /><button className="button button-secondary" onClick={() => fileInput.current?.click()} disabled={submitting}><FileJson />批量导入 JSON</button></> : null}
+          <button className="button button-secondary" onClick={() => { void reload(); if (tab === "analytics") void loadAnalytics(); }} disabled={loading || analyticsLoading}><RefreshCw className={loading || analyticsLoading ? "spin" : ""} />刷新</button>
+          {tab !== "analytics" ? <button className="button button-primary" onClick={() => tab === "measurements" ? openMeasurement() : openStandard()}><Plus />新建{tab === "measurements" ? "质量测量" : "质量标准"}</button> : null}
         </div>
       </header>
       <div className="freshness"><span className="live-dot" /> MySQL 实时质量数据 · 自动匹配最具体标准</div>
@@ -409,10 +513,12 @@ export function QualityWorkspace() {
         <div className="master-tabs">
           <button className={tab === "measurements" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("measurements")}>质量测量 <span>{measurements.length}</span></button>
           <button className={tab === "standards" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("standards")}>质量标准 <span>{standards.length}</span></button>
+          <button className={tab === "analytics" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("analytics")}>SPC 与趋势 <span>{analytics?.statistics.samples ?? 0}</span></button>
         </div>
         <div className="quality-toolbar">
-          <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`搜索质量${tab === "measurements" ? "测量" : "标准"}`} /></label>
-          <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="">全部质量类型</option>{Object.entries(qualityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
+          {tab !== "analytics" ? <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`搜索质量${tab === "measurements" ? "测量" : "标准"}`} /></label> : <div className="quality-analytics-title"><Activity /><span>实时过程能力与点位风险</span></div>}
+          <select value={tab === "analytics" ? typeFilter || "ORANGE_PEEL" : typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>{tab !== "analytics" ? <option value="">全部质量类型</option> : null}{Object.entries(qualityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
+          {tab === "analytics" ? <select value={resolvedAnalyticsMetric} onChange={(event) => setAnalyticsMetric(event.target.value)}>{analyticsDefinitions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code}</option>)}</select> : null}
           <button className="button button-secondary" onClick={exportCsv}><Download />导出 CSV</button>
         </div>
         {tab === "measurements" ? (
@@ -426,7 +532,7 @@ export function QualityWorkspace() {
               </article>
             ))}
           </div>
-        ) : (
+        ) : tab === "standards" ? (
           <div className="master-table-wrap">
             <table className="master-table quality-standard-table"><thead><tr><th>标准编号</th><th>质量类型 / 指标</th><th>范围</th><th>适用上下文</th><th>状态</th><th>操作</th></tr></thead><tbody>
               {filteredStandards.map((standard) => (
@@ -434,7 +540,7 @@ export function QualityWorkspace() {
               ))}
             </tbody></table>
           </div>
-        )}
+        ) : <QualityAnalyticsPanel analytics={analytics} loading={analyticsLoading} />}
       </section>
 
       {modal ? (
@@ -453,6 +559,89 @@ export function QualityWorkspace() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function analyticsNumber(value?: number | null, digits = 3): string {
+  return value === null || value === undefined ? "—" : value.toFixed(digits);
+}
+
+function QualityAnalyticsPanel({ analytics, loading }: { analytics: Analytics | null; loading: boolean }) {
+  if (loading && !analytics) return <div className="large-empty"><LoaderCircle className="spin" /> 正在聚合质量分析数据</div>;
+  if (!analytics || !analytics.series.length) return <div className="large-empty"><Activity /> 当前筛选条件暂无可分析指标数据</div>;
+  const statistics = analytics.statistics;
+  const quality = analytics.data_quality;
+  const dataQualityItems = [
+    ["有效数据率", quality.valid_rate, `${quality.valid_measurements}/${quality.total_measurements}`],
+    ["指标完整率", quality.metric_completeness, `${quality.measurements_with_metric}/${quality.valid_measurements}`],
+    ["标准覆盖率", quality.standard_coverage, `${quality.measurements_with_metric - quality.no_standard_count}/${quality.measurements_with_metric}`],
+    ["过程合格率", statistics.pass_rate, `${Math.round(statistics.pass_rate * 100)}%`],
+  ] as const;
+  return (
+    <div className="quality-analytics">
+      <section className="quality-analytics-stat-grid">
+        <article><span>样本 / 失控点</span><strong>{statistics.samples} / {statistics.out_of_control_count}</strong><small>控制界限采用均值 ± 3σ</small></article>
+        <article><span>均值 / σ</span><strong>{analyticsNumber(statistics.mean)} / {analyticsNumber(statistics.sigma)}</strong><small>{analytics.metric_name} · {analytics.unit ?? "无单位"}</small></article>
+        <article><span>Cp / Cpk</span><strong>{analyticsNumber(statistics.cp)} / {analyticsNumber(statistics.cpk)}</strong><small>仅在统一双边标准下计算</small></article>
+        <article><span>趋势斜率</span><strong className={(statistics.trend_slope ?? 0) >= 0 ? "positive" : "negative"}>{analyticsNumber(statistics.trend_slope, 4)}</strong><small>每个样本的线性变化</small></article>
+      </section>
+      <div className="quality-analytics-grid">
+        <section className="quality-analysis-card quality-trend-card">
+          <div className="program-subheading"><div><span className="eyebrow">SPC CONTROL CHART</span><h3>{analytics.metric_name} 趋势与控制图</h3></div><span className="record-status status-on">{qualityLabels[analytics.quality_type] ?? analytics.quality_type}</span></div>
+          <SpcTrendChart analytics={analytics} />
+          <div className="quality-chart-legend"><span className="legend-value">测量值</span><span className="legend-mean">均值</span><span className="legend-control">控制界限</span><span className="legend-standard">质量标准</span></div>
+        </section>
+        <section className="quality-analysis-card">
+          <div className="program-subheading"><div><span className="eyebrow">DATA QUALITY</span><h3>数据质量监控</h3></div><Activity /></div>
+          <div className="quality-data-monitor">
+            {dataQualityItems.map(([label, ratio, detail]) => <div key={label}><span><strong>{label}</strong><small>{detail}</small></span><b>{(ratio * 100).toFixed(1)}%</b><span className="quality-progress"><i style={{ width: `${Math.min(100, ratio * 100)}%` }} /></span></div>)}
+          </div>
+          <div className="quality-data-foot"><span>无效记录 <b>{quality.invalid_measurements}</b></span><span>缺失指标 <b>{quality.missing_metric_count}</b></span><span>无标准 <b>{quality.no_standard_count}</b></span><span>最近测量 <b>{quality.latest_measured_at ? new Date(quality.latest_measured_at).toLocaleString("zh-CN", { hour12: false }) : "—"}</b></span></div>
+        </section>
+      </div>
+      <section className="quality-analysis-card">
+        <div className="program-subheading"><div><span className="eyebrow">POINT RISK HEATMAP</span><h3>测量点风险热力图</h3></div><small>综合超差、失控与无标准风险</small></div>
+        <div className="quality-risk-heatmap">
+          {analytics.point_risks.map((point) => <article key={point.measurement_point_id} style={{ "--risk": `${point.risk_score}%` } as CSSProperties}><span>{point.measurement_point_code}</span><strong>{point.measurement_point_name}</strong><b>{point.risk_score.toFixed(1)}</b><small>{point.samples} 样本 · {point.failures} 超差 · 最新 {analyticsNumber(point.latest_value)}</small></article>)}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SpcTrendChart({ analytics }: { analytics: Analytics }) {
+  const width = 960;
+  const height = 280;
+  const padding = { top: 22, right: 26, bottom: 42, left: 54 };
+  const statistics = analytics.statistics;
+  const candidates = analytics.series.flatMap((item) => [item.value, item.standard_min, item.standard_max]).filter((value): value is number => value !== null && value !== undefined);
+  for (const value of [statistics.ucl, statistics.lcl, statistics.mean]) if (value !== null && value !== undefined) candidates.push(value);
+  let minimum = Math.min(...candidates);
+  let maximum = Math.max(...candidates);
+  if (minimum === maximum) { minimum -= 1; maximum += 1; }
+  const margin = (maximum - minimum) * 0.08;
+  minimum -= margin;
+  maximum += margin;
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const x = (index: number) => padding.left + (analytics.series.length === 1 ? plotWidth / 2 : index / (analytics.series.length - 1) * plotWidth);
+  const y = (value: number) => padding.top + (maximum - value) / (maximum - minimum) * plotHeight;
+  const path = analytics.series.map((item, index) => `${index ? "L" : "M"} ${x(index)} ${y(item.value)}`).join(" ");
+  const referenceLines = [
+    ["UCL", statistics.ucl, "control"],
+    ["MEAN", statistics.mean, "mean"],
+    ["LCL", statistics.lcl, "control"],
+  ] as const;
+  const standardMinimum = analytics.series.find((item) => item.standard_min !== null && item.standard_min !== undefined)?.standard_min;
+  const standardMaximum = analytics.series.find((item) => item.standard_max !== null && item.standard_max !== undefined)?.standard_max;
+  return (
+    <svg className="quality-spc-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${analytics.metric_name} SPC 控制图`}>
+      {[0, 0.25, 0.5, 0.75, 1].map((ratio) => { const value = maximum - ratio * (maximum - minimum); return <g key={ratio}><line className="spc-grid-line" x1={padding.left} x2={width - padding.right} y1={padding.top + ratio * plotHeight} y2={padding.top + ratio * plotHeight} /><text className="spc-axis-label" x={padding.left - 8} y={padding.top + ratio * plotHeight + 3} textAnchor="end">{value.toFixed(2)}</text></g>; })}
+      {referenceLines.map(([label, value, kind]) => value === null || value === undefined ? null : <g key={label}><line className={`spc-reference spc-${kind}`} x1={padding.left} x2={width - padding.right} y1={y(value)} y2={y(value)} /><text className={`spc-reference-label spc-${kind}`} x={width - padding.right} y={y(value) - 4} textAnchor="end">{label} {value.toFixed(2)}</text></g>)}
+      {[["USL", standardMaximum], ["LSL", standardMinimum]].map(([label, value]) => typeof value !== "number" ? null : <g key={label}><line className="spc-reference spc-standard" x1={padding.left} x2={width - padding.right} y1={y(value)} y2={y(value)} /><text className="spc-reference-label spc-standard" x={padding.left + 4} y={y(value) - 4}>{label} {value.toFixed(2)}</text></g>)}
+      <path className="spc-value-line" d={path} />
+      {analytics.series.map((item, index) => <g key={item.measurement_id}><circle className={`spc-point spc-point-${item.judgement.toLowerCase()}`} cx={x(index)} cy={y(item.value)} r="4"><title>{item.data_no} · {item.measurement_point_code} · {item.value}</title></circle>{analytics.series.length <= 16 ? <text className="spc-x-label" x={x(index)} y={height - 15} textAnchor="middle">{item.measurement_point_code}</text> : null}</g>)}
+    </svg>
   );
 }
 

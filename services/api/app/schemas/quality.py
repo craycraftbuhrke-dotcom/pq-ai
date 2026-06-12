@@ -120,3 +120,68 @@ class QualitySummary(BaseModel):
     fail_measurements: int
     no_standard_measurements: int
     measurements_by_type: dict[str, int]
+
+
+class QualityAnalyticsSeriesPoint(BaseModel):
+    measurement_id: str
+    data_no: str
+    measurement_point_id: str
+    measurement_point_code: str
+    measurement_point_name: str
+    measured_at: datetime
+    value: float
+    judgement: str
+    standard_min: float | None
+    standard_max: float | None
+
+
+class QualityAnalyticsStatistics(BaseModel):
+    samples: int
+    mean: float | None
+    sigma: float | None
+    minimum: float | None
+    maximum: float | None
+    ucl: float | None
+    lcl: float | None
+    trend_slope: float | None
+    cp: float | None
+    cpk: float | None
+    pass_rate: float
+    out_of_control_count: int
+
+
+class QualityPointRisk(BaseModel):
+    measurement_point_id: str
+    measurement_point_code: str
+    measurement_point_name: str
+    samples: int
+    failures: int
+    fail_rate: float
+    no_standard_count: int
+    latest_value: float
+    latest_judgement: str
+    risk_score: float
+
+
+class QualityDataQuality(BaseModel):
+    total_measurements: int
+    valid_measurements: int
+    invalid_measurements: int
+    measurements_with_metric: int
+    missing_metric_count: int
+    no_standard_count: int
+    valid_rate: float
+    metric_completeness: float
+    standard_coverage: float
+    latest_measured_at: datetime | None
+
+
+class QualityAnalytics(BaseModel):
+    quality_type: str
+    metric_code: str
+    metric_name: str
+    unit: str | None
+    statistics: QualityAnalyticsStatistics
+    data_quality: QualityDataQuality
+    series: list[QualityAnalyticsSeriesPoint]
+    point_risks: list[QualityPointRisk]

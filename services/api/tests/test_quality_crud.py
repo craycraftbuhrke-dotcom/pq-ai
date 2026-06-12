@@ -21,6 +21,7 @@ from app.api.routes.quality import (
     delete_quality_standard,
     get_quality_measurement,
     get_quality_standard,
+    quality_analytics,
     update_quality_measurement,
     update_quality_standard,
 )
@@ -135,6 +136,18 @@ def test_quality_measurement_and_standard_crud() -> None:
     assert updated["judgement"] == "PASS"
     assert updated["measured_by"] == "质量工程师"
     assert get_quality_measurement(measurement["id"], db)["metrics"][0].raw_value == 88
+    analytics = quality_analytics(
+        quality_type="ORANGE_PEEL",
+        metric_code="doi",
+        measurement_point_id=point.id,
+        limit=500,
+        db=db,
+    )
+    assert analytics["statistics"]["samples"] == 1
+    assert analytics["statistics"]["mean"] == 88
+    assert analytics["statistics"]["pass_rate"] == 1
+    assert analytics["data_quality"]["standard_coverage"] == 1
+    assert analytics["point_risks"][0]["risk_score"] == 0
 
     delete_quality_measurement(measurement["id"], db)
     delete_quality_standard(standard.id, db)

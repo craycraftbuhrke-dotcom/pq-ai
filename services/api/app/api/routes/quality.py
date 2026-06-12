@@ -1,3 +1,6 @@
+from collections import defaultdict
+from statistics import mean, pstdev
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +22,7 @@ from app.models.domain import (
 )
 from app.schemas.quality import (
     QualityMeasurementCreate,
+    QualityAnalytics,
     QualityMeasurementRead,
     QualityMeasurementUpdate,
     QualityMetricDefinitionRead,
@@ -122,6 +126,209 @@ def quality_summary(db: Session = Depends(get_db)) -> dict:
         "fail_measurements": judgements.count("FAIL"),
         "no_standard_measurements": judgements.count("NO_STANDARD"),
         "measurements_by_type": by_type,
+    }
+
+
+def _ratio(numerator: int, denominator: int) -> float:
+    return round(numerator / denominator, 4) if denominator else 0.0
+
+
+@router.get("/analytics", response_model=QualityAnalytics)
+def quality_analytics(
+    quality_type: str = "ORANGE_PEEL",
+    metric_code: str | None = None,
+    measurement_point_id: str | None = None,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+) -> dict:
+    metric_definition = db.scalar(
+        select(QualityMetricDefinition)
+        .where(
+            QualityMetricDefinition.quality_type == quality_type,
+            *(
+                [QualityMetricDefinition.code == metric_code]
+                if metric_code
+                else [QualityMetricDefinition.is_primary.is_(True)]
+            ),
+        )
+        .order_by(QualityMetricDefinition.display_order)
+    )
+    if not metric_definition and not metric_code:
+        metric_definition = db.scalar(
+            select(QualityMetricDefinition)
+            .where(QualityMetricDefinition.quality_type == quality_type)
+            .order_by(QualityMetricDefinition.display_order)
+        )
+    resolved_metric_code = metric_code or (metric_definition.code if metric_definition else "")
+    if not resolved_metric_code:
+        raise HTTPException(status_code=404, detail="当前质量类型没有可分析指标")
+
+    measurement_query = (
+        select(QualityMeasurement)
+        .where(QualityMeasurement.quality_type == quality_type)
+        .order_by(QualityMeasurement.measured_at.desc())
+        .limit(min(max(limit, 1), 2000))
+    )
+    if measurement_point_id:
+        measurement_query = measurement_query.where(
+            QualityMeasurement.measurement_point_id == measurement_point_id
+        )
+    all_measurements = list(db.scalars(measurement_query))
+    selected_measurements = [item for item in all_measurements if item.is_valid]
+    point_ids = {item.measurement_point_id for item in selected_measurements}
+    points = {
+        point.id: point
+        for point in db.scalars(select(MeasurementPoint).where(MeasurementPoint.id.in_(point_ids)))
+    } if point_ids else {}
+
+    series: list[dict] = []
+    no_standard_count = 0
+    for measurement in selected_measurements:
+        metrics = list(
+            db.scalars(
+                select(QualityMetricValue).where(
+                    QualityMetricValue.measurement_id == measurement.id
+                )
+            )
+        )
+        metric = next((item for item in metrics if item.metric_code == resolved_metric_code), None)
+        if not metric:
+            continue
+        evaluation = evaluate_quality_measurement(db, measurement, metrics)
+        metric_result = next(
+            (
+                item
+                for item in evaluation["metric_results"]
+                if item["metric_code"] == resolved_metric_code
+            ),
+            None,
+        )
+        judgement = metric_result["judgement"] if metric_result else "NO_STANDARD"
+        if judgement == "NO_STANDARD":
+            no_standard_count += 1
+        point = points[measurement.measurement_point_id]
+        series.append(
+            {
+                "measurement_id": measurement.id,
+                "data_no": measurement.data_no,
+                "measurement_point_id": point.id,
+                "measurement_point_code": point.code,
+                "measurement_point_name": point.name,
+                "measured_at": measurement.measured_at,
+                "value": (
+                    metric.corrected_value
+                    if metric.corrected_value is not None
+                    else metric.raw_value
+                ),
+                "judgement": judgement,
+                "standard_min": metric_result.get("min_value") if metric_result else None,
+                "standard_max": metric_result.get("max_value") if metric_result else None,
+            }
+        )
+    series.sort(key=lambda item: item["measured_at"])
+    values = [item["value"] for item in series]
+    average = mean(values) if values else None
+    sigma = pstdev(values) if len(values) > 1 else 0.0 if values else None
+    ucl = average + 3 * sigma if average is not None and sigma is not None else None
+    lcl = average - 3 * sigma if average is not None and sigma is not None else None
+    out_of_control_count = (
+        sum(value < lcl or value > ucl for value in values)
+        if lcl is not None and ucl is not None
+        else 0
+    )
+    if len(values) > 1:
+        x_average = (len(values) - 1) / 2
+        denominator = sum((index - x_average) ** 2 for index in range(len(values)))
+        trend_slope = (
+            sum((index - x_average) * (value - average) for index, value in enumerate(values))
+            / denominator
+            if denominator
+            else 0.0
+        )
+    else:
+        trend_slope = 0.0 if values else None
+
+    lower_bounds = {item["standard_min"] for item in series if item["standard_min"] is not None}
+    upper_bounds = {item["standard_max"] for item in series if item["standard_max"] is not None}
+    common_lower = next(iter(lower_bounds)) if len(lower_bounds) == 1 else None
+    common_upper = next(iter(upper_bounds)) if len(upper_bounds) == 1 else None
+    cp = cpk = None
+    if common_lower is not None and common_upper is not None and sigma and average is not None:
+        cp = (common_upper - common_lower) / (6 * sigma)
+        cpk = min(common_upper - average, average - common_lower) / (3 * sigma)
+
+    point_groups: dict[str, list[dict]] = defaultdict(list)
+    for item in series:
+        point_groups[item["measurement_point_id"]].append(item)
+    point_risks = []
+    for point_series in point_groups.values():
+        failures = sum(item["judgement"] == "FAIL" for item in point_series)
+        point_no_standard = sum(item["judgement"] == "NO_STANDARD" for item in point_series)
+        point_out_of_control = (
+            sum(item["value"] < lcl or item["value"] > ucl for item in point_series)
+            if lcl is not None and ucl is not None
+            else 0
+        )
+        sample_count = len(point_series)
+        latest = point_series[-1]
+        risk_score = min(
+            100.0,
+            _ratio(failures, sample_count) * 70
+            + _ratio(point_out_of_control, sample_count) * 20
+            + _ratio(point_no_standard, sample_count) * 10,
+        )
+        point_risks.append(
+            {
+                "measurement_point_id": latest["measurement_point_id"],
+                "measurement_point_code": latest["measurement_point_code"],
+                "measurement_point_name": latest["measurement_point_name"],
+                "samples": sample_count,
+                "failures": failures,
+                "fail_rate": _ratio(failures, sample_count),
+                "no_standard_count": point_no_standard,
+                "latest_value": latest["value"],
+                "latest_judgement": latest["judgement"],
+                "risk_score": round(risk_score, 1),
+            }
+        )
+    point_risks.sort(key=lambda item: (item["risk_score"], item["failures"]), reverse=True)
+
+    valid_count = len(selected_measurements)
+    series_count = len(series)
+    standard_count = series_count - no_standard_count
+    return {
+        "quality_type": quality_type,
+        "metric_code": resolved_metric_code,
+        "metric_name": metric_definition.name if metric_definition else resolved_metric_code,
+        "unit": metric_definition.unit if metric_definition else None,
+        "statistics": {
+            "samples": series_count,
+            "mean": average,
+            "sigma": sigma,
+            "minimum": min(values) if values else None,
+            "maximum": max(values) if values else None,
+            "ucl": ucl,
+            "lcl": lcl,
+            "trend_slope": trend_slope,
+            "cp": cp,
+            "cpk": cpk,
+            "pass_rate": _ratio(sum(item["judgement"] == "PASS" for item in series), standard_count),
+            "out_of_control_count": out_of_control_count,
+        },
+        "data_quality": {
+            "total_measurements": len(all_measurements),
+            "valid_measurements": valid_count,
+            "invalid_measurements": len(all_measurements) - valid_count,
+            "measurements_with_metric": series_count,
+            "missing_metric_count": valid_count - series_count,
+            "no_standard_count": no_standard_count,
+            "valid_rate": _ratio(valid_count, len(all_measurements)),
+            "metric_completeness": _ratio(series_count, valid_count),
+            "standard_coverage": _ratio(standard_count, series_count),
+            "latest_measured_at": max((item.measured_at for item in all_measurements), default=None),
+        },
+        "series": series,
+        "point_risks": point_risks,
     }
 
 
