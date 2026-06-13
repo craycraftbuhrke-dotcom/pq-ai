@@ -28,7 +28,7 @@ export function Dashboard({ snapshot }: DashboardProps) {
             {snapshot.context.factory} · {snapshot.context.vehicleModel} · {snapshot.context.color}
           </span>
           <h1>工艺质量驾驶舱</h1>
-          <p>基于生产事件与测量点，监控五段喷涂工艺、质量风险和 AI 闭环任务。</p>
+          <p>基于生产事件与测量点，监控三个涂层体系、五个喷涂执行阶段和 AI 闭环任务。</p>
         </div>
         <div className="page-actions">
           <button className="context-button">

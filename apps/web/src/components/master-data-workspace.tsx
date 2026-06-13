@@ -131,7 +131,6 @@ const statOrder: ResourceKey[] = [
 const qualityTypeOptions = [
   { label: "橘皮", value: "ORANGE_PEEL" },
   { label: "色差", value: "COLOR_DIFFERENCE" },
-  { label: "光泽度", value: "GLOSS" },
   { label: "膜厚", value: "THICKNESS" },
 ];
 

@@ -1,18 +1,18 @@
 # PQ-AI System Maturity Assessment
 
-Assessment date: 2026-06-11. This is an engineering assessment against the approved domain boundary, not a production certification.
+Assessment date: 2026-06-12. This is an engineering assessment against the approved domain boundary, not a production certification.
 
 ## Executive Conclusion
 
 PQ-AI is a functional, connected demonstration and a useful foundation for factory-data onboarding. It is not yet ready for production process recommendations because measurement provenance, trajectory/device data, governed material data, leakage-safe model validation, and approved recommendation constraints are incomplete.
 
-Estimated overall maturity: **52% - demonstrable prototype / factory-data onboarding preparation**.
+Estimated overall maturity: **55% - demonstrable prototype / factory-data onboarding preparation**.
 
 ## Scores And Evidence
 
 | Area | Maturity | Current strength | Critical gap |
 | --- | ---: | --- | --- |
-| Scope/domain model | 55% | Five execution stages and core entities exist | Gloss, e-coat thickness, booth temperature/humidity, and instrument temperatures conflict with the approved scope |
+| Scope/domain model | 80% | Approved quality/process scope is enforced from API and integration ingress through v2 feature snapshots and models | Explicit coating-system route, governed feature registry, and full legacy-data administration remain |
 | Program/robot/application | 58% | Program versions, brushes, parameters, point contributions | No robot/atomizer identity, controller/bell-cup, path segment/TCP/orientation/trigger/checksum model |
 | Materials | 40% | Batch, viscosity, solids, generic COA | Missing governed test methods, units, density/rheology/effect fields, limits, and lineage |
 | Quality/instruments | 48% | Generic metric values, standards, SPC, point traceability | Missing instrument master, serial/firmware, probe/method, calibration, repeats, reference and import profile |
@@ -23,12 +23,13 @@ Estimated overall maturity: **52% - demonstrable prototype / factory-data onboar
 
 ## High-Priority Findings
 
-### P0 - Scope And Training Integrity
+### Completed Baseline - Scope And Training Integrity
 
-- `ProductionRun.context_values`, stage JSON, seed data, and tests currently allow/use booth temperature and humidity.
-- Quality catalog includes `thickness_ed`, `tempc`, `tempf`, and gloss.
-- These fields can enter feature snapshots or user workflows despite the approved exclusion boundary.
-- Existing persisted snapshots/models trained with excluded features must be marked legacy/quarantined and retrained after scope filtering.
+- Catalog, API, integrations, seed data, feature aggregation, UI, and tests now enforce the approved boundary.
+- New approved snapshots use `point-features-v2-scope`; production-event context is retained for traceability but does not enter AI features.
+- Existing `point-features-v1` models are retained for lineage and retired; local demo data is safely converted and retrained.
+- Runtime model guards prevent legacy or out-of-scope models from activation, prediction, diagnosis, and recommendation.
+- Residual work: add an administrator-facing legacy-data inventory and replace generic allowed JSON fields with a governed feature registry.
 
 ### P0 - Measurement Reliability
 
@@ -68,7 +69,7 @@ The current frontend supports real CRUD and a demonstrable closed loop, but the 
 
 The API has generic CRUD, aggregation, modeling, audit, and integration foundations. Required domain services are:
 
-- Scope-policy validation and quarantine service.
+- Administrator-facing scope-policy inventory and quarantine management.
 - Instrument/calibration/reference/import-profile validation service.
 - Robot/atomizer/trajectory version and contribution service.
 - Governed material-characteristic and COA mapping service.
@@ -107,7 +108,7 @@ master data + process route + device/path/material/instrument governance
 
 ## Required Remediation Sequence
 
-1. Enforce the approved scope at catalog, validation, seed, import, feature-snapshot, UI, and test levels; quarantine legacy out-of-scope snapshots/models.
+1. Completed baseline: enforce the approved scope at catalog, validation, seed, import, feature-snapshot, UI, and test levels; quarantine legacy out-of-scope snapshots/models.
 2. Add instrument, probe/method, calibration/reference, repeat-reading, and import-profile models and workflows.
 3. Add Dürr robot/atomizer/controller and trajectory/path-version models; version point contribution by target family.
 4. Replace generic material COA training fields with governed material characteristic definitions/results.

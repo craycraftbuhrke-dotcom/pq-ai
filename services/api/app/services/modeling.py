@@ -5,6 +5,11 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.domain.scope_policy import (
+    ScopeViolation,
+    approved_numeric_values,
+    require_scope_safe_model,
+)
 from app.models.domain import (
     DiagnosisResult,
     ModelVersion,
@@ -17,6 +22,17 @@ from app.models.domain import (
     Recommendation,
     RecommendationAction,
 )
+
+
+def _ensure_model_scope(model: ModelVersion) -> None:
+    try:
+        require_scope_safe_model(
+            model.target_metric,
+            model.feature_set_version,
+            model.model_payload.get("feature_names", []),
+        )
+    except ScopeViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _target_value(
@@ -107,6 +123,10 @@ def _fit_ridge(samples: list[tuple[dict[str, float], float]], ridge_lambda: floa
 
 
 def train_model(db: Session, payload) -> ModelVersion:
+    try:
+        require_scope_safe_model(payload.target_metric, payload.feature_set_version, [])
+    except ScopeViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if db.scalar(
         select(ModelVersion).where(
             ModelVersion.model_code == payload.model_code,
@@ -127,11 +147,7 @@ def train_model(db: Session, payload) -> ModelVersion:
         target = _target_value(
             db, snapshot.production_run_id, snapshot.measurement_point_id, payload.target_metric
         )
-        numeric_features = {
-            key: float(value)
-            for key, value in snapshot.feature_values.items()
-            if isinstance(value, int | float) and not isinstance(value, bool)
-        }
+        numeric_features = approved_numeric_values(snapshot.feature_values)
         if target is not None and numeric_features:
             samples.append((numeric_features, target))
     if len(samples) < payload.min_samples:
@@ -141,6 +157,14 @@ def train_model(db: Session, payload) -> ModelVersion:
         )
 
     fitted = _fit_ridge(samples, payload.ridge_lambda)
+    try:
+        require_scope_safe_model(
+            payload.target_metric,
+            payload.feature_set_version,
+            fitted["feature_names"],
+        )
+    except ScopeViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     now = datetime.now(UTC)
     model = ModelVersion(
         model_code=payload.model_code,
@@ -332,6 +356,7 @@ def model_drift_report(db: Session, model: ModelVersion, recent_limit: int = 100
 
 def update_model_status(db: Session, model: ModelVersion, next_status: str) -> ModelVersion:
     if next_status == "ACTIVE":
+        _ensure_model_scope(model)
         for active_model in db.scalars(
             select(ModelVersion).where(
                 ModelVersion.model_code == model.model_code,
@@ -354,6 +379,7 @@ def predict_with_model(
     measurement_point_id: str,
     persist_result: bool = True,
 ) -> dict:
+    _ensure_model_scope(model)
     snapshot = db.scalar(
         select(PointFeatureSnapshot).where(
             PointFeatureSnapshot.production_run_id == production_run_id,
@@ -412,6 +438,7 @@ def predict_with_model(
 
 def diagnose_prediction(db: Session, prediction: PredictionResult) -> DiagnosisResult:
     model = db.get(ModelVersion, prediction.model_version_id)
+    _ensure_model_scope(model)
     snapshot = db.scalar(
         select(PointFeatureSnapshot).where(
             PointFeatureSnapshot.production_run_id == prediction.production_run_id,
@@ -482,6 +509,7 @@ def recommend_with_model(
     max_actions: int,
     max_step_ratio: float,
 ) -> dict:
+    _ensure_model_scope(model)
     if target_min is None and target_max is None:
         raise HTTPException(status_code=422, detail="必须提供目标下限或目标上限")
     prediction = predict_with_model(

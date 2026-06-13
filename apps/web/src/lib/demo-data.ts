@@ -103,15 +103,6 @@ export const riskPoints: RiskPoint[] = [
     standard: "≤ 0.80",
     risk: 39,
   },
-  {
-    code: "P-RD-04",
-    name: "右后门 04",
-    part: "右后门",
-    metric: "Gloss 20°",
-    predicted: "87.6 GU",
-    standard: "≥ 86 GU",
-    risk: 22,
-  },
 ];
 
 export const navItems = [

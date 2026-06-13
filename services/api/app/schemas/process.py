@@ -132,7 +132,7 @@ class MaterialBatchCreate(BaseModel):
     batch_no: str = Field(min_length=1, max_length=64)
     material_code: str = Field(min_length=1, max_length=64)
     material_name: str = Field(min_length=1, max_length=120)
-    material_type: str = Field(min_length=1, max_length=24)
+    material_type: str = Field(pattern="^(MIDCOAT|BASECOAT|CLEARCOAT)$")
     supplier: str | None = Field(default=None, max_length=120)
     viscosity: float | None = None
     solid_ratio: float | None = None
@@ -147,7 +147,7 @@ class MaterialBatchUpdate(BaseModel):
     batch_no: str | None = Field(default=None, min_length=1, max_length=64)
     material_code: str | None = Field(default=None, min_length=1, max_length=64)
     material_name: str | None = Field(default=None, min_length=1, max_length=120)
-    material_type: str | None = Field(default=None, min_length=1, max_length=24)
+    material_type: str | None = Field(default=None, pattern="^(MIDCOAT|BASECOAT|CLEARCOAT)$")
     supplier: str | None = Field(default=None, max_length=120)
     viscosity: float | None = None
     solid_ratio: float | None = None

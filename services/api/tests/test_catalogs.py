@@ -32,11 +32,12 @@ def test_authoritative_catalogs_cover_requested_process_and_quality_metrics() ->
         ("ORANGE_PEEL", "doi"),
         ("COLOR_DIFFERENCE", "de45"),
         ("COLOR_DIFFERENCE", "dsi75"),
-        ("GLOSS", "gloss20"),
-        ("GLOSS", "gloss60"),
         ("THICKNESS", "thickness_total"),
         ("THICKNESS", "thickness_clearcoat_pass2"),
     } <= metric_keys
+    assert ("GLOSS", "gloss20") not in metric_keys
+    assert ("COLOR_DIFFERENCE", "tempc") not in metric_keys
+    assert ("THICKNESS", "thickness_ed") not in metric_keys
 
 
 def test_catalog_seed_is_idempotent() -> None:

@@ -3,12 +3,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.domain.scope_policy import CURRENT_FEATURE_SET_VERSION
+
 
 class ModelTrainingRequest(BaseModel):
     model_code: str = Field(min_length=1, max_length=64)
     version: str = Field(min_length=1, max_length=32)
     target_metric: str = Field(min_length=1, max_length=64)
-    feature_set_version: str = Field(default="point-features-v1", max_length=64)
+    feature_set_version: str = Field(default=CURRENT_FEATURE_SET_VERSION, max_length=64)
     min_samples: int = Field(default=5, ge=3)
     ridge_lambda: float = Field(default=0.1, ge=0)
 

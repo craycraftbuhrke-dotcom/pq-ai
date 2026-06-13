@@ -8,6 +8,14 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
+from app.domain.scope_policy import (
+    APPROVED_METRIC_KEYS,
+    APPROVED_QUALITY_TYPES,
+    ScopeViolation,
+    require_approved_metric,
+    require_approved_metrics,
+    require_approved_quality_type,
+)
 from app.models.domain import (
     Color,
     MeasurementGroup,
@@ -34,6 +42,13 @@ from app.schemas.quality import (
 from app.services.quality_evaluation import evaluate_quality_measurement
 
 router = APIRouter(prefix="/quality", tags=["quality-data"])
+
+
+def _validate_quality_scope(quality_type: str, metric_codes: list[str]) -> None:
+    try:
+        require_approved_metrics(quality_type, metric_codes)
+    except ScopeViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _required(db: Session, model: type, resource_id: str, label: str):
@@ -80,6 +95,11 @@ def _measurement_result(db: Session, measurement: QualityMeasurement) -> dict:
             .order_by(QualityMetricValue.metric_code)
         )
     )
+    metrics = [
+        metric
+        for metric in metrics
+        if (measurement.quality_type, metric.metric_code) in APPROVED_METRIC_KEYS
+    ]
     point = _required(db, MeasurementPoint, measurement.measurement_point_id, "测量点")
     return _measurement_dict(
         measurement,
@@ -91,8 +111,15 @@ def _measurement_result(db: Session, measurement: QualityMeasurement) -> dict:
 
 @router.get("/summary", response_model=QualitySummary)
 def quality_summary(db: Session = Depends(get_db)) -> dict:
-    measurements = list(db.scalars(select(QualityMeasurement)))
+    measurements = list(
+        db.scalars(
+            select(QualityMeasurement).where(
+                QualityMeasurement.quality_type.in_(APPROVED_QUALITY_TYPES)
+            )
+        )
+    )
     judgements = []
+    metric_value_count = 0
     for measurement in measurements:
         metrics = list(
             db.scalars(
@@ -101,27 +128,43 @@ def quality_summary(db: Session = Depends(get_db)) -> dict:
                 )
             )
         )
+        metrics = [
+            metric
+            for metric in metrics
+            if (measurement.quality_type, metric.metric_code) in APPROVED_METRIC_KEYS
+        ]
+        metric_value_count += len(metrics)
         judgements.append(evaluate_quality_measurement(db, measurement, metrics)["judgement"])
     by_type = {
         quality_type: count
         for quality_type, count in db.execute(
-            select(QualityMeasurement.quality_type, func.count()).group_by(
-                QualityMeasurement.quality_type
-            )
+            select(QualityMeasurement.quality_type, func.count())
+            .where(QualityMeasurement.quality_type.in_(APPROVED_QUALITY_TYPES))
+            .group_by(QualityMeasurement.quality_type)
         )
     }
     return {
-        "measurements": int(db.scalar(select(func.count()).select_from(QualityMeasurement)) or 0),
+        "measurements": len(measurements),
         "valid_measurements": int(
             db.scalar(
                 select(func.count())
                 .select_from(QualityMeasurement)
-                .where(QualityMeasurement.is_valid.is_(True))
+                .where(
+                    QualityMeasurement.quality_type.in_(APPROVED_QUALITY_TYPES),
+                    QualityMeasurement.is_valid.is_(True),
+                )
             )
             or 0
         ),
-        "metric_values": int(db.scalar(select(func.count()).select_from(QualityMetricValue)) or 0),
-        "standards": int(db.scalar(select(func.count()).select_from(QualityStandard)) or 0),
+        "metric_values": metric_value_count,
+        "standards": int(
+            db.scalar(
+                select(func.count())
+                .select_from(QualityStandard)
+                .where(QualityStandard.quality_type.in_(APPROVED_QUALITY_TYPES))
+            )
+            or 0
+        ),
         "pass_measurements": judgements.count("PASS"),
         "fail_measurements": judgements.count("FAIL"),
         "no_standard_measurements": judgements.count("NO_STANDARD"),
@@ -141,6 +184,12 @@ def quality_analytics(
     limit: int = 500,
     db: Session = Depends(get_db),
 ) -> dict:
+    try:
+        require_approved_quality_type(quality_type)
+        if metric_code:
+            require_approved_metric(quality_type, metric_code)
+    except ScopeViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     metric_definition = db.scalar(
         select(QualityMetricDefinition)
         .where(
@@ -334,11 +383,16 @@ def quality_analytics(
 
 @router.get("/metric-definitions", response_model=list[QualityMetricDefinitionRead])
 def list_quality_metric_definitions(db: Session = Depends(get_db)) -> list[QualityMetricDefinition]:
-    return list(
+    definitions = list(
         db.scalars(
             select(QualityMetricDefinition).order_by(QualityMetricDefinition.display_order)
         )
     )
+    return [
+        definition
+        for definition in definitions
+        if (definition.quality_type, definition.code) in APPROVED_METRIC_KEYS
+    ]
 
 
 @router.post("/metric-definitions/seed-catalog")
@@ -368,8 +422,16 @@ def list_quality_measurements(
     quality_type: str | None = None,
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    query = select(QualityMeasurement).order_by(QualityMeasurement.measured_at.desc())
+    query = (
+        select(QualityMeasurement)
+        .where(QualityMeasurement.quality_type.in_(APPROVED_QUALITY_TYPES))
+        .order_by(QualityMeasurement.measured_at.desc())
+    )
     if quality_type:
+        try:
+            require_approved_quality_type(quality_type)
+        except ScopeViolation as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         query = query.where(QualityMeasurement.quality_type == quality_type)
     measurements = list(
         db.scalars(query.limit(min(max(limit, 1), 500)))
@@ -395,6 +457,10 @@ def get_quality_measurement(
 def create_quality_measurement(
     payload: QualityMeasurementCreate, db: Session = Depends(get_db)
 ) -> dict:
+    _validate_quality_scope(
+        payload.quality_type,
+        [metric.metric_code for metric in payload.metrics],
+    )
     if db.scalar(select(QualityMeasurement).where(QualityMeasurement.data_no == payload.data_no)):
         raise HTTPException(status_code=409, detail="质量数据编号已存在")
     if not db.get(ProductionRun, payload.production_run_id):
@@ -432,6 +498,19 @@ def update_quality_measurement(
     measurement = _required(db, QualityMeasurement, measurement_id, "质量数据")
     changes = payload.model_dump(exclude_unset=True)
     metrics_payload = changes.pop("metrics", None)
+    resolved_quality_type = changes.get("quality_type", measurement.quality_type)
+    resolved_metric_codes = (
+        [metric["metric_code"] for metric in metrics_payload]
+        if metrics_payload is not None
+        else list(
+            db.scalars(
+                select(QualityMetricValue.metric_code).where(
+                    QualityMetricValue.measurement_id == measurement_id
+                )
+            )
+        )
+    )
+    _validate_quality_scope(resolved_quality_type, resolved_metric_codes)
     if "data_no" in changes:
         duplicate = db.scalar(
             select(QualityMeasurement).where(
@@ -482,7 +561,13 @@ def delete_quality_measurement(
 
 @router.get("/standards", response_model=list[QualityStandardRead])
 def list_quality_standards(db: Session = Depends(get_db)) -> list[QualityStandard]:
-    return list(db.scalars(select(QualityStandard).order_by(QualityStandard.standard_no)))
+    return list(
+        db.scalars(
+            select(QualityStandard)
+            .where(QualityStandard.quality_type.in_(APPROVED_QUALITY_TYPES))
+            .order_by(QualityStandard.standard_no)
+        )
+    )
 
 
 @router.get("/standards/{standard_id}", response_model=QualityStandardRead)
@@ -509,6 +594,7 @@ def create_quality_standard(
 
 
 def _validate_standard_relations(db: Session, values: dict) -> None:
+    _validate_quality_scope(values["quality_type"], [values["metric_code"]])
     for field, model, label in (
         ("vehicle_model_id", VehicleModel, "车型"),
         ("color_id", Color, "颜色"),
@@ -532,6 +618,8 @@ def update_quality_standard(
     standard = _required(db, QualityStandard, standard_id, "质量标准")
     changes = payload.model_dump(exclude_unset=True)
     merged = {
+        "quality_type": standard.quality_type,
+        "metric_code": standard.metric_code,
         "vehicle_model_id": standard.vehicle_model_id,
         "color_id": standard.color_id,
         "part_id": standard.part_id,

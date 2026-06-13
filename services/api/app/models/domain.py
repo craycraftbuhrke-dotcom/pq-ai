@@ -28,7 +28,6 @@ class ProcessStage(StrEnum):
 class QualityType(StrEnum):
     ORANGE_PEEL = "ORANGE_PEEL"
     COLOR_DIFFERENCE = "COLOR_DIFFERENCE"
-    GLOSS = "GLOSS"
     THICKNESS = "THICKNESS"
 
 

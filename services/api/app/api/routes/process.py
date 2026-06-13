@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.domain.parameter_catalog import PARAMETER_CATALOG
+from app.domain.scope_policy import ScopeViolation, is_out_of_scope_name, require_approved_mapping
 from app.models.domain import (
     ActualParameter,
     Brush,
@@ -18,6 +19,7 @@ from app.models.domain import (
     MeasurementPoint,
     ParameterDefinition,
     Part,
+    ProcessStage,
     ProductionRun,
     ProductionStageRun,
     ProgramColor,
@@ -60,6 +62,28 @@ from app.schemas.process import (
 router = APIRouter(tags=["process-data"])
 
 
+def _validate_mapping_scope(values: dict | None, label: str) -> None:
+    try:
+        require_approved_mapping(values, label)
+    except ScopeViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _validate_parameter_scope(code: str, name: str | None = None) -> None:
+    if is_out_of_scope_name(code) or (name and is_out_of_scope_name(name)):
+        raise HTTPException(status_code=422, detail=f"参数 {code} 超出当前项目范围")
+
+
+def _validate_process_stage(process_stage: str) -> None:
+    try:
+        ProcessStage(process_stage)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"工艺阶段 {process_stage} 不属于中涂外喷、色漆一/二遍或清漆一/二遍",
+        ) from exc
+
+
 def _required(db: Session, model: type, resource_id: str, label: str):
     resource = db.get(model, resource_id)
     if not resource:
@@ -100,6 +124,7 @@ def list_parameter_definitions(db: Session = Depends(get_db)) -> list[ParameterD
 def create_parameter_definition(
     payload: ParameterDefinitionCreate, db: Session = Depends(get_db)
 ) -> ParameterDefinition:
+    _validate_parameter_scope(payload.code, payload.name)
     if db.scalar(select(ParameterDefinition).where(ParameterDefinition.code == payload.code)):
         raise HTTPException(status_code=409, detail="参数定义代码已存在")
     return _save(db, ParameterDefinition(**payload.model_dump()))
@@ -134,6 +159,7 @@ def get_spray_program(program_id: str, db: Session = Depends(get_db)) -> SprayPr
 
 @router.post("/spray-programs", response_model=SprayProgramRead, status_code=status.HTTP_201_CREATED)
 def create_spray_program(payload: SprayProgramCreate, db: Session = Depends(get_db)) -> SprayProgram:
+    _validate_process_stage(payload.process_stage)
     _required(db, Factory, payload.factory_id, "工厂")
     if db.scalar(
         select(SprayProgram).where(
@@ -151,6 +177,7 @@ def update_spray_program(
 ) -> SprayProgram:
     program = _required(db, SprayProgram, program_id, "喷涂程序")
     changes = payload.model_dump(exclude_unset=True)
+    _validate_process_stage(changes.get("process_stage", program.process_stage))
     factory_id = changes.get("factory_id", program.factory_id)
     program_code = changes.get("program_code", program.program_code)
     _required(db, Factory, factory_id, "工厂")
@@ -391,6 +418,7 @@ def delete_brush(brush_id: str, db: Session = Depends(get_db)) -> Response:
 def create_brush_parameter(
     brush_id: str, payload: BrushParameterCreate, db: Session = Depends(get_db)
 ) -> BrushParameter:
+    _validate_parameter_scope(payload.parameter_code, payload.parameter_name)
     _required(db, Brush, brush_id, "刷子")
     if payload.parameter_definition_id:
         _required(db, ParameterDefinition, payload.parameter_definition_id, "参数定义")
@@ -431,6 +459,10 @@ def update_brush_parameter(
     parameter = _required(db, BrushParameter, parameter_id, "刷子参数")
     changes = payload.model_dump(exclude_unset=True)
     parameter_code = changes.get("parameter_code", parameter.parameter_code)
+    _validate_parameter_scope(
+        parameter_code,
+        changes.get("parameter_name", parameter.parameter_name),
+    )
     if changes.get("parameter_definition_id"):
         _required(db, ParameterDefinition, changes["parameter_definition_id"], "参数定义")
     duplicate = db.scalar(
@@ -539,6 +571,7 @@ def delete_brush_contribution(
 
 @router.post("/material-batches", response_model=MaterialBatchRead, status_code=status.HTTP_201_CREATED)
 def create_material_batch(payload: MaterialBatchCreate, db: Session = Depends(get_db)) -> MaterialBatch:
+    _validate_mapping_scope(payload.coa_values, "材料 COA")
     if db.scalar(select(MaterialBatch).where(MaterialBatch.batch_no == payload.batch_no)):
         raise HTTPException(status_code=409, detail="材料批次号已存在")
     return _save(db, MaterialBatch(**payload.model_dump()))
@@ -560,6 +593,7 @@ def update_material_batch(
 ) -> MaterialBatch:
     batch = _required(db, MaterialBatch, batch_id, "材料批次")
     changes = payload.model_dump(exclude_unset=True)
+    _validate_mapping_scope(changes.get("coa_values"), "材料 COA")
     if "batch_no" in changes and db.scalar(
         select(MaterialBatch).where(
             MaterialBatch.batch_no == changes["batch_no"],
@@ -579,6 +613,7 @@ def delete_material_batch(batch_id: str, db: Session = Depends(get_db)) -> Respo
 
 @router.post("/production-runs", response_model=ProductionRunRead, status_code=status.HTTP_201_CREATED)
 def create_production_run(payload: ProductionRunCreate, db: Session = Depends(get_db)) -> ProductionRun:
+    _validate_mapping_scope(payload.context_values, "生产事件上下文")
     _required(db, Factory, payload.factory_id, "工厂")
     _required(db, VehicleModel, payload.vehicle_model_id, "车型")
     _required(db, Color, payload.color_id, "颜色")
@@ -611,6 +646,7 @@ def update_production_run(
 ) -> ProductionRun:
     production_run = _required(db, ProductionRun, production_run_id, "生产事件")
     changes = payload.model_dump(exclude_unset=True)
+    _validate_mapping_scope(changes.get("context_values"), "生产事件上下文")
     if "run_no" in changes and db.scalar(
         select(ProductionRun).where(
             ProductionRun.run_no == changes["run_no"],
@@ -647,6 +683,8 @@ def delete_production_run(production_run_id: str, db: Session = Depends(get_db))
 def create_production_stage_run(
     production_run_id: str, payload: ProductionStageRunCreate, db: Session = Depends(get_db)
 ) -> ProductionStageRun:
+    _validate_process_stage(payload.process_stage)
+    _validate_mapping_scope(payload.actual_parameters, "工序汇总参数")
     _required(db, ProductionRun, production_run_id, "生产事件")
     _required(db, SprayProgramVersion, payload.program_version_id, "程序版本")
     if payload.material_batch_id:
@@ -693,6 +731,8 @@ def update_production_stage_run(
     stage_run = _required(db, ProductionStageRun, stage_run_id, "工艺阶段实绩")
     changes = payload.model_dump(exclude_unset=True)
     process_stage = changes.get("process_stage", stage_run.process_stage)
+    _validate_process_stage(process_stage)
+    _validate_mapping_scope(changes.get("actual_parameters"), "工序汇总参数")
     if db.scalar(
         select(ProductionStageRun).where(
             ProductionStageRun.production_run_id == stage_run.production_run_id,
@@ -727,6 +767,7 @@ def delete_production_stage_run(stage_run_id: str, db: Session = Depends(get_db)
 def create_actual_parameter(
     stage_run_id: str, payload: ActualParameterCreate, db: Session = Depends(get_db)
 ) -> ActualParameter:
+    _validate_parameter_scope(payload.parameter_code)
     _required(db, ProductionStageRun, stage_run_id, "工艺阶段实绩")
     if payload.brush_id:
         _required(db, Brush, payload.brush_id, "刷子")
@@ -765,6 +806,7 @@ def update_actual_parameter(
 ) -> ActualParameter:
     parameter = _required(db, ActualParameter, parameter_id, "实际参数")
     changes = payload.model_dump(exclude_unset=True)
+    _validate_parameter_scope(changes.get("parameter_code", parameter.parameter_code))
     if changes.get("brush_id"):
         _required(db, Brush, changes["brush_id"], "刷子")
     if changes.get("parameter_definition_id"):

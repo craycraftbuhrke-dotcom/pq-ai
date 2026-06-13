@@ -4,6 +4,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.domain.scope_policy import (
+    APPROVED_QUALITY_TYPES,
+    ScopeViolation,
+    require_approved_quality_types,
+)
 from app.models.domain import (
     BrushPointContribution,
     Color,
@@ -43,6 +48,13 @@ from app.schemas.master_data import (
 )
 
 router = APIRouter(tags=["master-data"])
+
+
+def _validate_quality_types(quality_types: list[str]) -> None:
+    try:
+        require_approved_quality_types(quality_types)
+    except ScopeViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _ensure_exists(db: Session, model: type, resource_id: str, label: str) -> None:
@@ -116,13 +128,25 @@ def master_data_summary(db: Session = Depends(get_db)) -> dict:
         )
         or 0
     )
+    measurement_groups = int(
+        db.scalar(
+            select(func.count())
+            .select_from(MeasurementGroup)
+            .where(MeasurementGroup.quality_type.in_(APPROVED_QUALITY_TYPES))
+        )
+        or 0
+    )
+    measurement_points = sum(
+        any(quality_type in APPROVED_QUALITY_TYPES for quality_type in point.quality_types)
+        for point in db.scalars(select(MeasurementPoint))
+    )
     return {
         "factories": count(Factory),
         "vehicle_models": count(VehicleModel),
         "colors": count(Color),
         "parts": count(Part),
-        "measurement_groups": count(MeasurementGroup),
-        "measurement_points": count(MeasurementPoint),
+        "measurement_groups": measurement_groups,
+        "measurement_points": measurement_points,
         "approved_point_contributions": approved,
     }
 
@@ -311,7 +335,13 @@ def delete_vehicle_model_color(relation_id: str, db: Session = Depends(get_db)) 
 
 @router.get("/measurement-groups", response_model=list[MeasurementGroupRead])
 def list_measurement_groups(db: Session = Depends(get_db)) -> list[MeasurementGroup]:
-    return list(db.scalars(select(MeasurementGroup).order_by(MeasurementGroup.code)))
+    return list(
+        db.scalars(
+            select(MeasurementGroup)
+            .where(MeasurementGroup.quality_type.in_(APPROVED_QUALITY_TYPES))
+            .order_by(MeasurementGroup.code)
+        )
+    )
 
 
 @router.get("/measurement-groups/{measurement_group_id}", response_model=MeasurementGroupRead)
@@ -329,6 +359,7 @@ def get_measurement_group(
 def create_measurement_group(
     payload: MeasurementGroupCreate, db: Session = Depends(get_db)
 ) -> MeasurementGroup:
+    _validate_quality_types([payload.quality_type])
     _ensure_exists(db, VehicleModel, payload.vehicle_model_id, "车型")
     return _create_unique(
         db,
@@ -350,6 +381,7 @@ def update_measurement_group(
 ) -> MeasurementGroup:
     group = _get_resource(db, MeasurementGroup, measurement_group_id, "测量编组")
     changes = payload.model_dump(exclude_unset=True)
+    _validate_quality_types([changes.get("quality_type", group.quality_type)])
     vehicle_model_id = changes.get("vehicle_model_id", group.vehicle_model_id)
     code = changes.get("code", group.code)
     _ensure_exists(db, VehicleModel, vehicle_model_id, "车型")
@@ -381,7 +413,12 @@ def delete_measurement_group(
 
 @router.get("/measurement-points", response_model=list[MeasurementPointRead])
 def list_measurement_points(db: Session = Depends(get_db)) -> list[MeasurementPoint]:
-    return list(db.scalars(select(MeasurementPoint).order_by(MeasurementPoint.code)))
+    points = list(db.scalars(select(MeasurementPoint).order_by(MeasurementPoint.code)))
+    return [
+        point
+        for point in points
+        if any(quality_type in APPROVED_QUALITY_TYPES for quality_type in point.quality_types)
+    ]
 
 
 @router.get("/measurement-points/{measurement_point_id}", response_model=MeasurementPointRead)
@@ -399,6 +436,7 @@ def get_measurement_point(
 def create_measurement_point(
     payload: MeasurementPointCreate, db: Session = Depends(get_db)
 ) -> MeasurementPoint:
+    _validate_quality_types(payload.quality_types)
     _ensure_exists(db, VehicleModel, payload.vehicle_model_id, "车型")
     _ensure_exists(db, Part, payload.part_id, "零件")
     return _create_unique(
@@ -421,6 +459,7 @@ def update_measurement_point(
 ) -> MeasurementPoint:
     point = _get_resource(db, MeasurementPoint, measurement_point_id, "测量点")
     changes = payload.model_dump(exclude_unset=True)
+    _validate_quality_types(changes.get("quality_types", point.quality_types))
     vehicle_model_id = changes.get("vehicle_model_id", point.vehicle_model_id)
     part_id = changes.get("part_id", point.part_id)
     code = changes.get("code", point.code)

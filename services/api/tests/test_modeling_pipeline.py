@@ -26,6 +26,7 @@ from app.api.routes.ai import (
     verify_recommendation,
 )
 from app.db.base import Base
+from app.domain.scope_policy import CURRENT_FEATURE_SET_VERSION
 from app.models import domain  # noqa: F401
 from app.models.domain import (
     Color,
@@ -120,7 +121,7 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
                 PointFeatureSnapshot(
                     production_run_id=run.id,
                     measurement_point_id=point.id,
-                    feature_set_version="point-features-v1",
+                    feature_set_version=CURRENT_FEATURE_SET_VERSION,
                     feature_values={"clearcoat_2.spray_flow": x1, "clearcoat_2.outer_air": x2},
                     completeness_score=1.0,
                     generated_at=now,

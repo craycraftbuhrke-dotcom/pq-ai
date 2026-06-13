@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.domain.scope_policy import CURRENT_FEATURE_SET_VERSION
 from app.models.domain import MeasurementPoint, ModelVersion, PointFeatureSnapshot, PredictionResult, ProductionRun
 from app.schemas.modeling import (
     ModelDiagnosisResponse,
@@ -38,6 +39,7 @@ def list_feature_snapshots(db: Session = Depends(get_db)) -> list[dict]:
         select(PointFeatureSnapshot, ProductionRun, MeasurementPoint)
         .join(ProductionRun, ProductionRun.id == PointFeatureSnapshot.production_run_id)
         .join(MeasurementPoint, MeasurementPoint.id == PointFeatureSnapshot.measurement_point_id)
+        .where(PointFeatureSnapshot.feature_set_version == CURRENT_FEATURE_SET_VERSION)
         .order_by(PointFeatureSnapshot.generated_at.desc())
         .limit(500)
     ).all()

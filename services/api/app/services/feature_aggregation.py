@@ -5,6 +5,12 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.domain.scope_policy import (
+    CURRENT_FEATURE_SET_VERSION,
+    APPROVED_METRIC_KEYS,
+    approved_numeric_values,
+    is_out_of_scope_name,
+)
 from app.models.domain import (
     ActualParameter,
     Brush,
@@ -21,22 +27,20 @@ from app.models.domain import (
 )
 
 
-def _numeric_values(values: dict | None) -> dict[str, float]:
-    if not values:
-        return {}
-    return {
-        str(key): float(value)
-        for key, value in values.items()
-        if isinstance(value, int | float) and not isinstance(value, bool)
-    }
-
-
 def build_point_feature_snapshot(
     db: Session,
     production_run_id: str,
     measurement_point_id: str,
-    feature_set_version: str = "point-features-v1",
+    feature_set_version: str = CURRENT_FEATURE_SET_VERSION,
 ) -> dict:
+    if feature_set_version != CURRENT_FEATURE_SET_VERSION:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"特征版本 {feature_set_version} 未获当前范围策略批准；"
+                f"请使用 {CURRENT_FEATURE_SET_VERSION}"
+            ),
+        )
     production_run = db.get(ProductionRun, production_run_id)
     if not production_run:
         raise HTTPException(status_code=404, detail="生产事件不存在")
@@ -46,8 +50,6 @@ def build_point_feature_snapshot(
     feature_values: dict[str, float] = {}
     stage_coverage: set[str] = set()
     contribution_count = 0
-    for key, value in _numeric_values(production_run.context_values).items():
-        feature_values[f"context.{key}"] = value
 
     stage_runs = list(
         db.scalars(
@@ -94,6 +96,8 @@ def build_point_feature_snapshot(
             }
 
             for parameter_code in parameter_codes:
+                if is_out_of_scope_name(parameter_code):
+                    continue
                 actual = actual_by_code.get(parameter_code)
                 configured = configured_by_code.get(parameter_code)
                 value = actual.actual_value if actual else configured.configured_value
@@ -115,10 +119,12 @@ def build_point_feature_snapshot(
             )
         )
         for parameter in stage_actuals:
+            if is_out_of_scope_name(parameter.parameter_code):
+                continue
             feature_values[f"{stage_prefix}.{parameter.parameter_code}"] = parameter.actual_value
             stage_has_features = True
 
-        for key, value in _numeric_values(stage_run.actual_parameters).items():
+        for key, value in approved_numeric_values(stage_run.actual_parameters).items():
             feature_values[f"{stage_prefix}.{key}"] = value
             stage_has_features = True
 
@@ -134,7 +140,7 @@ def build_point_feature_snapshot(
             if material.solid_ratio is not None:
                 feature_values[f"{stage_prefix}.material_solid_ratio"] = material.solid_ratio
                 stage_has_features = True
-            for key, value in _numeric_values(material.coa_values).items():
+            for key, value in approved_numeric_values(material.coa_values).items():
                 feature_values[f"{stage_prefix}.coa.{key}"] = value
                 stage_has_features = True
 
@@ -152,7 +158,9 @@ def build_point_feature_snapshot(
         )
         .order_by(QualityMeasurement.measured_at)
     ).all()
-    for metric, _measurement in quality_rows:
+    for metric, measurement in quality_rows:
+        if (measurement.quality_type, metric.metric_code) not in APPROVED_METRIC_KEYS:
+            continue
         quality_labels[metric.metric_code] = (
             metric.corrected_value if metric.corrected_value is not None else metric.raw_value
         )

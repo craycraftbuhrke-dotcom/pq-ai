@@ -3,6 +3,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.domain.scope_policy import (
+    is_out_of_scope_name,
+    require_approved_mapping,
+    require_approved_metrics,
+)
 from app.models.domain import (
     ActualParameter,
     Brush,
@@ -38,6 +43,7 @@ def _datetime(value: str | datetime, label: str) -> datetime:
 
 
 def _process_mes_run(db: Session, payload: dict) -> dict:
+    require_approved_mapping(payload.get("context_values"), "MES 生产事件上下文")
     factory = _required_by_code(db, Factory, payload["factory_code"], "工厂")
     vehicle = _required_by_code(db, VehicleModel, payload["vehicle_model_code"], "车型")
     color = _required_by_code(db, Color, payload["color_code"], "颜色")
@@ -69,6 +75,7 @@ def _process_mes_run(db: Session, payload: dict) -> dict:
 
 
 def _process_material_batch(db: Session, payload: dict) -> dict:
+    require_approved_mapping(payload.get("coa_values"), "材料 COA")
     batch = db.scalar(select(MaterialBatch).where(MaterialBatch.batch_no == payload["batch_no"]))
     values = {
         "material_code": payload["material_code"],
@@ -103,6 +110,13 @@ def _process_qms_measurement(db: Session, payload: dict) -> dict:
     )
     if not point:
         raise ValueError(f"车型下测量点不存在：{payload['measurement_point_code']}")
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, list) or not metrics:
+        raise ValueError("QMS 质量事件至少需要一个 metrics 指标")
+    require_approved_metrics(
+        payload["quality_type"],
+        [str(metric["metric_code"]) for metric in metrics],
+    )
     measurement = db.scalar(
         select(QualityMeasurement).where(QualityMeasurement.data_no == payload["data_no"])
     )
@@ -130,9 +144,6 @@ def _process_qms_measurement(db: Session, payload: dict) -> dict:
         db.add(measurement)
         db.flush()
         operation = "CREATED"
-    metrics = payload.get("metrics")
-    if not isinstance(metrics, list) or not metrics:
-        raise ValueError("QMS 质量事件至少需要一个 metrics 指标")
     db.add_all(
         [
             QualityMetricValue(
@@ -168,6 +179,10 @@ def _process_robot_parameters(db: Session, payload: dict) -> dict:
     sampled_at = _datetime(payload["sampled_at"], "sampled_at")
     resources = []
     for parameter in parameters:
+        if is_out_of_scope_name(parameter["parameter_code"]):
+            raise ValueError(
+                f"机器人实绩参数超出当前项目范围：{parameter['parameter_code']}"
+            )
         definition = db.scalar(
             select(ParameterDefinition).where(ParameterDefinition.code == parameter["parameter_code"])
         )

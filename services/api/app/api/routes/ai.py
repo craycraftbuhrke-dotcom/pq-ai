@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.domain.scope_policy import ScopeViolation, require_approved_target_metric
 from app.models.domain import (
     ClosedLoopEvaluation,
     DiagnosisResult,
@@ -26,6 +27,14 @@ from app.schemas.common import (
 from app.services.demo import demo_recommendation, prediction_result
 
 router = APIRouter(prefix="/ai", tags=["ai-closed-loop"])
+
+
+def _validate_target_metrics(metric_codes: list[str]) -> None:
+    try:
+        for metric_code in metric_codes:
+            require_approved_target_metric(metric_code)
+    except ScopeViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _utc_datetime(value: datetime) -> datetime:
@@ -98,6 +107,7 @@ def _serialize_recommendation(recommendation: Recommendation, db: Session) -> di
 
 @router.post("/predictions")
 def predict(payload: PredictionRequest) -> dict:
+    _validate_target_metrics(payload.target_metrics)
     return prediction_result(payload.model_dump())
 
 
@@ -139,6 +149,7 @@ def list_predictions(db: Session = Depends(get_db)) -> list[dict]:
 
 @router.post("/diagnoses")
 def diagnose(payload: DiagnosisRequest) -> dict:
+    _validate_target_metrics([payload.observed_metric])
     return {
         "production_run_no": payload.production_run_no,
         "measurement_point_code": payload.measurement_point_code,
@@ -178,6 +189,7 @@ def list_diagnoses(db: Session = Depends(get_db)) -> list[dict]:
 
 @router.post("/recommendations")
 def recommend(payload: RecommendationRequest) -> dict:
+    _validate_target_metrics([payload.target_metric])
     result = demo_recommendation()
     result["production_run_no"] = payload.production_run_no
     result["point_code"] = payload.measurement_point_code

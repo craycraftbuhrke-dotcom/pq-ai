@@ -2,11 +2,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.domain.scope_policy import CURRENT_FEATURE_SET_VERSION
+
 
 class PointFeatureBuildRequest(BaseModel):
     production_run_id: str
     measurement_point_id: str
-    feature_set_version: str = Field(default="point-features-v1", max_length=64)
+    feature_set_version: str = Field(default=CURRENT_FEATURE_SET_VERSION, max_length=64)
 
 
 class PointFeatureResult(BaseModel):

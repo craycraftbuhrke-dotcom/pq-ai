@@ -13,7 +13,7 @@ export function ProcessFlow({ stages }: ProcessFlowProps) {
       <div className="panel-heading">
         <div>
           <span className="eyebrow">PROCESS CHAIN</span>
-          <h2>五段喷涂工艺状态</h2>
+          <h2>五个喷涂执行阶段状态</h2>
         </div>
         <div className="panel-meta">
           <span className="live-dot" />

@@ -155,7 +155,6 @@ const fallbackQualityData: ModuleData = {
     ["QM-260609-00942", "P-ROOF-03", "橘皮 / DOI", "78.2", "超差", "2026-06-09 08:31"],
     ["QM-260609-00941", "P-HOOD-06", "膜厚 / 总膜厚", "116.8 μm", "预警", "2026-06-09 08:30"],
     ["QM-260609-00940", "P-LD-02", "色差 / dE45", "0.71", "合格", "2026-06-09 08:29"],
-    ["QM-260609-00939", "P-RD-04", "光泽 / Gloss20", "87.6 GU", "合格", "2026-06-09 08:28"],
   ],
 };
 
@@ -293,7 +292,7 @@ export async function getQualityPageData(): Promise<ModuleData> {
       stats: [
         { label: "质量测量记录", value: String(summary.measurements), note: `有效率 ${validRate}` },
         { label: "合格测量", value: String(summary.pass_measurements), note: `${summary.fail_measurements} 条超差` },
-        { label: "指标值", value: String(summary.metric_values), note: "橘皮、色差、光泽度与膜厚" },
+        { label: "指标值", value: String(summary.metric_values), note: "橘皮、色差/效应与膜厚" },
         { label: "质量标准", value: String(summary.standards), note: "用于自动符合性判定" },
       ],
       rows: measurements.map((measurement) => {

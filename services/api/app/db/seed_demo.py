@@ -8,6 +8,10 @@ from app.core.security import PERMISSION_CATALOG, ROLE_CATALOG, hash_api_key
 from app.db.session import SessionLocal
 from app.domain.parameter_catalog import PARAMETER_CATALOG
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
+from app.domain.scope_policy import (
+    CURRENT_FEATURE_SET_VERSION,
+    approved_numeric_values,
+)
 from app.models.domain import (
     ActualParameter,
     ApiKey,
@@ -23,6 +27,7 @@ from app.models.domain import (
     MeasurementGroup,
     MeasurementGroupPoint,
     MeasurementPoint,
+    ModelVersion,
     ParameterDefinition,
     Part,
     PointFeatureSnapshot,
@@ -158,6 +163,84 @@ def _seed_integration_endpoints(db: Session) -> None:
     db.flush()
 
 
+def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
+    demo_snapshots = list(
+        db.scalars(
+            select(PointFeatureSnapshot)
+            .join(ProductionRun, ProductionRun.id == PointFeatureSnapshot.production_run_id)
+            .where(
+                PointFeatureSnapshot.feature_set_version == "point-features-v1",
+                (
+                    (ProductionRun.run_no == "RUN-20260610-001")
+                    | ProductionRun.run_no.like("DEMO-TRAIN-RUN-%")
+                ),
+            )
+        )
+    )
+    for snapshot in demo_snapshots:
+        exists = db.scalar(
+            select(PointFeatureSnapshot).where(
+                PointFeatureSnapshot.production_run_id == snapshot.production_run_id,
+                PointFeatureSnapshot.measurement_point_id == snapshot.measurement_point_id,
+                PointFeatureSnapshot.feature_set_version == CURRENT_FEATURE_SET_VERSION,
+            )
+        )
+        if exists:
+            continue
+        feature_values = approved_numeric_values(snapshot.feature_values)
+        if not feature_values:
+            continue
+        db.add(
+            PointFeatureSnapshot(
+                production_run_id=snapshot.production_run_id,
+                measurement_point_id=snapshot.measurement_point_id,
+                feature_set_version=CURRENT_FEATURE_SET_VERSION,
+                feature_values=feature_values,
+                completeness_score=snapshot.completeness_score,
+                generated_at=datetime.now(UTC),
+            )
+        )
+    db.commit()
+
+    model = db.scalar(
+        select(ModelVersion).where(
+            ModelVersion.model_code == "DEMO-DOI-BASELINE",
+            ModelVersion.version == "2.0-scope",
+        )
+    )
+    if model:
+        return model
+
+    scoped_snapshot_count = len(
+        list(
+            db.scalars(
+                select(PointFeatureSnapshot)
+                .join(ProductionRun, ProductionRun.id == PointFeatureSnapshot.production_run_id)
+                .where(
+                    PointFeatureSnapshot.feature_set_version == CURRENT_FEATURE_SET_VERSION,
+                    (
+                        (ProductionRun.run_no == "RUN-20260610-001")
+                        | ProductionRun.run_no.like("DEMO-TRAIN-RUN-%")
+                    ),
+                )
+            )
+        )
+    )
+    if scoped_snapshot_count < 5:
+        return None
+    return train_model(
+        db,
+        ModelTrainingRequest(
+            model_code="DEMO-DOI-BASELINE",
+            version="2.0-scope",
+            target_metric="doi",
+            feature_set_version=CURRENT_FEATURE_SET_VERSION,
+            min_samples=5,
+            ridge_lambda=0.1,
+        ),
+    )
+
+
 def seed_demo(db: Session) -> dict:
     _seed_catalogs(db)
     admin = _seed_security(db)
@@ -176,10 +259,12 @@ def seed_demo(db: Session) -> dict:
         definition.is_recommendable = True
     existing_factory = db.scalar(select(Factory).where(Factory.code == "M9"))
     if existing_factory:
+        model = _upgrade_existing_demo_scope_data(db)
         db.commit()
         return {
             "status": "already_seeded",
             "factory_id": existing_factory.id,
+            "model_version_id": model.id if model else None,
             "admin_user_id": admin.id,
         }
 
@@ -222,7 +307,6 @@ def seed_demo(db: Session) -> dict:
         ("P-ROOF-03", "车顶中部 03", "ROOF", ["ORANGE_PEEL"]),
         ("P-HOOD-06", "发动机罩 06", "HOOD", ["THICKNESS"]),
         ("P-LD-02", "左前门 02", "LEFT_DOOR", ["COLOR_DIFFERENCE"]),
-        ("P-RD-04", "右后门 04", "RIGHT_DOOR", ["GLOSS"]),
     )
     points: dict[str, MeasurementPoint] = {}
     groups: dict[str, MeasurementGroup] = {}
@@ -297,7 +381,7 @@ def seed_demo(db: Session) -> dict:
         shift="白班",
         started_at=now - timedelta(minutes=35),
         completed_at=now - timedelta(minutes=5),
-        context_values={"booth_temperature": 24.5, "booth_humidity": 62.0},
+        context_values={"source_batch_sequence": 1},
     )
     db.add(run)
     db.flush()
@@ -398,7 +482,7 @@ def seed_demo(db: Session) -> dict:
             process_stage=stage_code,
             program_version_id=version.id,
             material_batch_id=materials[material_type].id,
-            actual_parameters={"booth_temperature": 24.5 + index * 0.1},
+            actual_parameters={},
         )
         db.add(stage_run)
         db.flush()
@@ -424,7 +508,6 @@ def seed_demo(db: Session) -> dict:
             {"thickness_total": ("总膜厚", 116.8, "μm")},
         ),
         ("QM-260610-0003", "P-LD-02", "COLOR_DIFFERENCE", {"de45": ("dE45", 0.71, None)}),
-        ("QM-260610-0004", "P-RD-04", "GLOSS", {"gloss20": ("Gloss 20°", 87.6, "GU")}),
     )
     for index, (data_no, point_code, quality_type, metrics) in enumerate(
         measurement_specs, start=1
@@ -484,14 +567,6 @@ def seed_demo(db: Session) -> dict:
                 color_id=basecoat_color.id,
                 max_value=0.8,
             ),
-            QualityStandard(
-                standard_no="STD-GLOSS20",
-                version="1.0",
-                quality_type="GLOSS",
-                metric_code="gloss20",
-                min_value=86.0,
-                unit="GU",
-            ),
         ]
     )
     db.commit()
@@ -522,7 +597,7 @@ def seed_demo(db: Session) -> dict:
             PointFeatureSnapshot(
                 production_run_id=historical_run.id,
                 measurement_point_id=points["P-ROOF-03"].id,
-                feature_set_version="point-features-v1",
+                feature_set_version=CURRENT_FEATURE_SET_VERSION,
                 feature_values=historical_features,
                 completeness_score=1.0,
                 generated_at=now,
@@ -556,7 +631,7 @@ def seed_demo(db: Session) -> dict:
             model_code="DEMO-DOI-BASELINE",
             version="1.0",
             target_metric="doi",
-            feature_set_version="point-features-v1",
+            feature_set_version=CURRENT_FEATURE_SET_VERSION,
             min_samples=5,
             ridge_lambda=0.1,
         ),

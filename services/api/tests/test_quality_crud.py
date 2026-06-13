@@ -161,8 +161,8 @@ def test_quality_standard_rejects_invalid_range() -> None:
             QualityStandardCreate(
                 standard_no="STD-BAD",
                 version="1",
-                quality_type="GLOSS",
-                metric_code="gloss20",
+                quality_type="ORANGE_PEEL",
+                metric_code="doi",
                 min_value=90,
                 max_value=80,
             ),

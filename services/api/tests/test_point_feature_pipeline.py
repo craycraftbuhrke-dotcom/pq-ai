@@ -193,7 +193,7 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
             color_id=color.id,
             shift="白班",
             started_at=now,
-            context_values={"booth_humidity": 62.0},
+            context_values={"batch_sequence": 12},
         ),
         db,
     )
@@ -203,7 +203,7 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
             process_stage="CLEARCOAT_2",
             program_version_id=version.id,
             material_batch_id=material.id,
-            actual_parameters={"booth_temperature": 24.5},
+            actual_parameters={"clearcoat_2_outer_air": 410.0},
         ),
         db,
     )
@@ -235,6 +235,13 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
         ),
         db,
     )
+    # Simulate legacy persisted fields that predate the approved scope policy.
+    production_run.context_values = {"booth_humidity": 62.0}
+    stage_run.actual_parameters = {
+        "booth_temperature": 24.5,
+        "clearcoat_2_outer_air": 410.0,
+    }
+    db.commit()
 
     result = build_point_snapshot(
         PointFeatureBuildRequest(
@@ -247,12 +254,14 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
     assert result["feature_values"]["clearcoat_2.material_viscosity"] == 22.5
     assert result["feature_values"]["clearcoat_2.material_solid_ratio"] == 0.48
     assert result["feature_values"]["clearcoat_2.coa.density"] == 1.03
-    assert result["feature_values"]["clearcoat_2.booth_temperature"] == 24.5
-    assert result["feature_values"]["context.booth_humidity"] == 62.0
+    assert result["feature_values"]["clearcoat_2.clearcoat_2_outer_air"] == 410.0
+    assert "clearcoat_2.booth_temperature" not in result["feature_values"]
+    assert "context.booth_humidity" not in result["feature_values"]
     assert result["quality_labels"]["doi"] == 80.5
     assert result["contribution_count"] == 2
     assert result["stage_coverage"] == ["CLEARCOAT_2"]
     assert result["completeness_score"] == 0.2
+    assert result["feature_set_version"] == "point-features-v2-scope"
 
     second_result = build_point_snapshot(
         PointFeatureBuildRequest(

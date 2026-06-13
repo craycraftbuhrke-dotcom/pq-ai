@@ -40,8 +40,6 @@ COLOR_DIFFERENCE_CODES = [
     "dsa45",
     "dsa75",
     "dg",
-    "tempc",
-    "tempf",
 ]
 
 COLOR_DIFFERENCE_METRICS = [
@@ -49,21 +47,15 @@ COLOR_DIFFERENCE_METRICS = [
         "COLOR_DIFFERENCE",
         code,
         code,
-        "°C" if code == "tempc" else "°F" if code == "tempf" else None,
+        None,
         primary=code in {"det", "de45"},
     )
     for code in COLOR_DIFFERENCE_CODES
 ]
 
-GLOSS_METRICS = [
-    _metric("GLOSS", "gloss20", "Gloss 20°", "GU", True),
-    _metric("GLOSS", "gloss60", "Gloss 60°", "GU", True),
-]
-
 THICKNESS_METRICS = [
     _metric("THICKNESS", code, name, "μm", code == "thickness_total")
     for code, name in (
-        ("thickness_ed", "电泳膜厚"),
         ("thickness_midcoat", "中涂膜厚"),
         ("thickness_basecoat_pass1", "色漆一站膜厚"),
         ("thickness_basecoat_pass2", "色漆二站膜厚"),
@@ -76,7 +68,6 @@ THICKNESS_METRICS = [
 QUALITY_METRIC_CATALOG = [
     *ORANGE_PEEL_METRICS,
     *COLOR_DIFFERENCE_METRICS,
-    *GLOSS_METRICS,
     *THICKNESS_METRICS,
 ]
 

@@ -102,16 +102,6 @@ def dashboard_snapshot(db: Session | None = None) -> dict:
                 "prediction": 0.71,
                 "standard": "≤ 0.80",
             },
-            {
-                "point_code": "P-RD-04",
-                "point_name": "右后门 04",
-                "part": "右后门",
-                "risk": 22,
-                "metric": "Gloss 20°",
-                "prediction": 87.6,
-                "prediction_unit": "GU",
-                "standard": "≥ 86 GU",
-            },
         ],
         "diagnosis": {
             "point_code": "P-ROOF-03",

@@ -140,7 +140,6 @@ type Tab = "measurements" | "standards" | "analytics";
 const qualityLabels: Record<string, string> = {
   ORANGE_PEEL: "橘皮",
   COLOR_DIFFERENCE: "色差",
-  GLOSS: "光泽度",
   THICKNESS: "膜厚",
 };
 
@@ -492,7 +491,7 @@ export function QualityWorkspace() {
   return (
     <div className="page-stack">
       <header className="page-header">
-        <div><span className="page-kicker">MEASUREMENT · STANDARD · JUDGEMENT</span><h1>质量数据中心</h1><p>维护橘皮、色差、光泽度和膜厚数据，依据多维质量标准自动判定。</p></div>
+        <div><span className="page-kicker">MEASUREMENT · STANDARD · JUDGEMENT</span><h1>质量数据中心</h1><p>维护橘皮、色差/效应和膜厚数据，依据多维质量标准自动判定。</p></div>
         <div className="page-actions">
           {tab === "measurements" ? <><input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(event) => void importJson(event)} /><button className="button button-secondary" onClick={() => fileInput.current?.click()} disabled={submitting}><FileJson />批量导入 JSON</button></> : null}
           <button className="button button-secondary" onClick={() => { void reload(); if (tab === "analytics") void loadAnalytics(); }} disabled={loading || analyticsLoading}><RefreshCw className={loading || analyticsLoading ? "spin" : ""} />刷新</button>
@@ -502,7 +501,7 @@ export function QualityWorkspace() {
       <div className="freshness"><span className="live-dot" /> MySQL 实时质量数据 · 自动匹配最具体标准</div>
       <section className="module-stat-strip">
         <article><span>质量测量</span><strong>{loading ? "…" : summary?.measurements ?? 0}</strong><small>{summary?.valid_measurements ?? 0} 条有效记录</small></article>
-        <article><span>指标值</span><strong>{loading ? "…" : summary?.metric_values ?? 0}</strong><small>覆盖 67 项指标目录</small></article>
+        <article><span>指标值</span><strong>{loading ? "…" : summary?.metric_values ?? 0}</strong><small>当前受治理目录 {definitions.length} 项</small></article>
         <article><span>合格 / 超差</span><strong>{loading ? "…" : `${summary?.pass_measurements ?? 0} / ${summary?.fail_measurements ?? 0}`}</strong><small>按当前生效标准判定</small></article>
         <article><span>质量标准</span><strong>{loading ? "…" : summary?.standards ?? 0}</strong><small>{summary?.no_standard_measurements ?? 0} 条测量无匹配标准</small></article>
       </section>
