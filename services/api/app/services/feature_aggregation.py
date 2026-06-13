@@ -155,6 +155,7 @@ def build_point_feature_snapshot(
             QualityMeasurement.production_run_id == production_run_id,
             QualityMeasurement.measurement_point_id == measurement_point_id,
             QualityMeasurement.is_valid.is_(True),
+            QualityMeasurement.reliability_status == "VERIFIED",
         )
         .order_by(QualityMeasurement.measured_at)
     ).all()

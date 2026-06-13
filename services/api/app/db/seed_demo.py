@@ -24,9 +24,15 @@ from app.models.domain import (
     FactoryVehicleModel,
     IntegrationEndpoint,
     MaterialBatch,
+    MeasurementCalibrationRecord,
     MeasurementGroup,
     MeasurementGroupPoint,
+    MeasurementImportProfile,
+    MeasurementInstrument,
+    MeasurementMethod,
     MeasurementPoint,
+    MeasurementReferenceStandard,
+    MeasurementRepeatReading,
     ModelVersion,
     ParameterDefinition,
     Part,
@@ -50,6 +56,7 @@ from app.models.domain import (
 )
 from app.schemas.modeling import ModelTrainingRequest
 from app.services.feature_aggregation import build_point_feature_snapshot
+from app.services.measurement_reliability import refresh_measurement_reliability
 from app.services.modeling import train_model
 
 
@@ -163,6 +170,237 @@ def _seed_integration_endpoints(db: Session) -> None:
     db.flush()
 
 
+def _seed_measurement_governance(db: Session, now: datetime) -> dict[str, dict]:
+    instrument_specs = {
+        "ORANGE_PEEL": {
+            "code": "BYK-WAVE-DEMO",
+            "name": "BYK wave-scan 演示仪",
+            "manufacturer": "BYK-Gardner",
+            "model": "wave-scan",
+            "instrument_type": "BYK_ORANGE_PEEL",
+            "serial_no": "DEMO-BYK-WAVE-001",
+            "firmware_version": "DEMO-1.0",
+            "supported_quality_types": ["ORANGE_PEEL"],
+        },
+        "COLOR_DIFFERENCE": {
+            "code": "BYK-MAC-DEMO",
+            "name": "BYK 多角度色差演示仪",
+            "manufacturer": "BYK-Gardner",
+            "model": "BYK-mac i",
+            "instrument_type": "BYK_COLOR",
+            "serial_no": "DEMO-BYK-MAC-001",
+            "firmware_version": "DEMO-1.0",
+            "supported_quality_types": ["COLOR_DIFFERENCE"],
+        },
+        "THICKNESS": {
+            "code": "FISCHER-THK-DEMO",
+            "name": "Fischer 膜厚演示仪",
+            "manufacturer": "Helmut Fischer",
+            "model": "Dualscope",
+            "instrument_type": "FISCHER_THICKNESS",
+            "serial_no": "DEMO-FISCHER-001",
+            "firmware_version": "DEMO-1.0",
+            "supported_quality_types": ["THICKNESS"],
+        },
+    }
+    method_specs = {
+        "ORANGE_PEEL": {
+            "code": "BYK-WAVE-DOI",
+            "name": "BYK 橘皮/DOI 测量",
+            "version": "1.0",
+            "quality_type": "ORANGE_PEEL",
+            "instrument_type": "BYK_ORANGE_PEEL",
+            "method_type": "WAVE_SCAN",
+            "requires_reference": True,
+            "requires_direction": True,
+            "minimum_repeats": 1,
+        },
+        "COLOR_DIFFERENCE": {
+            "code": "BYK-MAC-MULTIANGLE",
+            "name": "BYK 多角度色差/效应测量",
+            "version": "1.0",
+            "quality_type": "COLOR_DIFFERENCE",
+            "instrument_type": "BYK_COLOR",
+            "method_type": "MULTI_ANGLE_COLOR",
+            "requires_reference": True,
+            "requires_direction": True,
+            "minimum_repeats": 1,
+        },
+        "THICKNESS": {
+            "code": "FISCHER-TOTAL-FILM",
+            "name": "Fischer 总膜厚测量",
+            "version": "1.0",
+            "quality_type": "THICKNESS",
+            "instrument_type": "FISCHER_THICKNESS",
+            "method_type": "MAGNETIC_INDUCTION",
+            "probe_code": "DEMO-DUAL-PROBE",
+            "substrate_type": "STEEL",
+            "geometry_class": "BODY_PANEL",
+            "layer_scope": "TOTAL_FILM",
+            "requires_reference": False,
+            "requires_direction": False,
+            "minimum_repeats": 1,
+        },
+    }
+    resources: dict[str, dict] = {}
+    for quality_type, instrument_spec in instrument_specs.items():
+        instrument = db.scalar(
+            select(MeasurementInstrument).where(
+                MeasurementInstrument.code == instrument_spec["code"]
+            )
+        )
+        if not instrument:
+            instrument = MeasurementInstrument(
+                **instrument_spec,
+                calibration_required=True,
+                status="ACTIVE",
+                remark="仅用于本地链路演示，不代表真实仪器配置",
+            )
+            db.add(instrument)
+            db.flush()
+
+        method_spec = method_specs[quality_type]
+        method = db.scalar(
+            select(MeasurementMethod).where(
+                MeasurementMethod.code == method_spec["code"],
+                MeasurementMethod.version == method_spec["version"],
+            )
+        )
+        if not method:
+            method = MeasurementMethod(
+                **method_spec,
+                is_active=True,
+                instructions="演示测量方法；现场使用前必须替换为批准作业指导书。",
+            )
+            db.add(method)
+            db.flush()
+
+        reference = db.scalar(
+            select(MeasurementReferenceStandard).where(
+                MeasurementReferenceStandard.code == f"REF-{quality_type}-DEMO"
+            )
+        )
+        if not reference:
+            reference = MeasurementReferenceStandard(
+                code=f"REF-{quality_type}-DEMO",
+                name=f"{quality_type} 演示参考件",
+                quality_type=quality_type,
+                serial_no=f"DEMO-REF-{quality_type}",
+                certificate_no=f"DEMO-CERT-{quality_type}",
+                valid_from=now - timedelta(days=365),
+                valid_until=now + timedelta(days=365),
+                reference_values={"demo_only": 1},
+                status="ACTIVE",
+            )
+            db.add(reference)
+            db.flush()
+
+        profile = db.scalar(
+            select(MeasurementImportProfile).where(
+                MeasurementImportProfile.code == f"IMPORT-{quality_type}-DEMO",
+                MeasurementImportProfile.version == "1.0",
+            )
+        )
+        if not profile:
+            profile = MeasurementImportProfile(
+                code=f"IMPORT-{quality_type}-DEMO",
+                name=f"{quality_type} 演示导入模板",
+                version="1.0",
+                instrument_type=instrument.instrument_type,
+                quality_type=quality_type,
+                schema_version="demo-1.0",
+                field_mapping={"metric_code": "metric_code", "raw_value": "raw_value"},
+                is_active=True,
+            )
+            db.add(profile)
+            db.flush()
+
+        calibration = db.scalar(
+            select(MeasurementCalibrationRecord).where(
+                MeasurementCalibrationRecord.calibration_no
+                == f"CAL-{instrument.code}-DEMO"
+            )
+        )
+        if not calibration:
+            calibration = MeasurementCalibrationRecord(
+                calibration_no=f"CAL-{instrument.code}-DEMO",
+                instrument_id=instrument.id,
+                method_id=method.id,
+                reference_standard_id=reference.id,
+                calibrated_at=now - timedelta(days=365),
+                valid_until=now + timedelta(days=365),
+                result="PASS",
+                performed_by="演示校准生成器",
+                check_values={"demo_only": 1},
+            )
+            db.add(calibration)
+            db.flush()
+        resources[quality_type] = {
+            "instrument": instrument,
+            "method": method,
+            "reference": reference,
+            "profile": profile,
+            "calibration": calibration,
+        }
+    db.flush()
+    return resources
+
+
+def _govern_demo_measurements(db: Session, resources: dict[str, dict]) -> None:
+    measurements = list(
+        db.scalars(
+            select(QualityMeasurement).where(
+                (QualityMeasurement.data_no.like("QM-260610-%"))
+                | QualityMeasurement.data_no.like("DEMO-TRAIN-QM-%")
+            )
+        )
+    )
+    for measurement in measurements:
+        governance = resources.get(measurement.quality_type)
+        if not governance:
+            continue
+        measurement.instrument_id = governance["instrument"].id
+        measurement.device_code = governance["instrument"].code
+        measurement.measurement_method_id = governance["method"].id
+        measurement.calibration_record_id = governance["calibration"].id
+        measurement.reference_standard_id = governance["reference"].id
+        measurement.import_profile_id = governance["profile"].id
+        measurement.measurement_direction = (
+            "LONGITUDINAL" if governance["method"].requires_direction else None
+        )
+        measurement.raw_file_uri = f"demo://measurement/{measurement.data_no}"
+        metrics = list(
+            db.scalars(
+                select(QualityMetricValue).where(
+                    QualityMetricValue.measurement_id == measurement.id
+                )
+            )
+        )
+        for metric in metrics:
+            repeat = db.scalar(
+                select(MeasurementRepeatReading).where(
+                    MeasurementRepeatReading.measurement_id == measurement.id,
+                    MeasurementRepeatReading.repeat_no == 1,
+                    MeasurementRepeatReading.metric_code == metric.metric_code,
+                )
+            )
+            if not repeat:
+                db.add(
+                    MeasurementRepeatReading(
+                        measurement_id=measurement.id,
+                        repeat_no=1,
+                        metric_code=metric.metric_code,
+                        raw_value=metric.raw_value,
+                        corrected_value=metric.corrected_value,
+                        unit=metric.unit,
+                        is_valid=True,
+                    )
+                )
+        db.flush()
+        refresh_measurement_reliability(db, measurement)
+    db.commit()
+
+
 def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
     demo_snapshots = list(
         db.scalars(
@@ -205,10 +443,20 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
     model = db.scalar(
         select(ModelVersion).where(
             ModelVersion.model_code == "DEMO-DOI-BASELINE",
-            ModelVersion.version == "2.0-scope",
+            ModelVersion.version == "3.0-measurement-gated",
         )
     )
     if model:
+        model.status = "ACTIVE"
+        for legacy_model in db.scalars(
+            select(ModelVersion).where(
+                ModelVersion.model_code == model.model_code,
+                ModelVersion.id != model.id,
+                ModelVersion.status == "ACTIVE",
+            )
+        ):
+            legacy_model.status = "RETIRED"
+        db.commit()
         return model
 
     scoped_snapshot_count = len(
@@ -232,7 +480,7 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
         db,
         ModelTrainingRequest(
             model_code="DEMO-DOI-BASELINE",
-            version="2.0-scope",
+            version="3.0-measurement-gated",
             target_metric="doi",
             feature_set_version=CURRENT_FEATURE_SET_VERSION,
             min_samples=5,
@@ -245,6 +493,8 @@ def seed_demo(db: Session) -> dict:
     _seed_catalogs(db)
     admin = _seed_security(db)
     _seed_integration_endpoints(db)
+    now = datetime.now(UTC)
+    measurement_governance = _seed_measurement_governance(db, now)
     demo_boundaries = {
         "clearcoat_2_spray_flow": (280.0, 360.0),
         "clearcoat_2_outer_air": (360.0, 440.0),
@@ -259,6 +509,7 @@ def seed_demo(db: Session) -> dict:
         definition.is_recommendable = True
     existing_factory = db.scalar(select(Factory).where(Factory.code == "M9"))
     if existing_factory:
+        _govern_demo_measurements(db, measurement_governance)
         model = _upgrade_existing_demo_scope_data(db)
         db.commit()
         return {
@@ -268,7 +519,6 @@ def seed_demo(db: Session) -> dict:
             "admin_user_id": admin.id,
         }
 
-    now = datetime.now(UTC)
     factory = Factory(code="M9", name="M9 总装涂装工厂", site_owner="陈工")
     vehicle_model = VehicleModel(code="MX11", name="MX11 车型")
     basecoat_color = Color(
@@ -570,6 +820,7 @@ def seed_demo(db: Session) -> dict:
         ]
     )
     db.commit()
+    _govern_demo_measurements(db, measurement_governance)
     snapshot = build_point_feature_snapshot(db, run.id, points["P-ROOF-03"].id)
     base_features = snapshot["feature_values"]
     flow_key = "clearcoat_2.clearcoat_2_spray_flow"
@@ -625,11 +876,12 @@ def seed_demo(db: Session) -> dict:
             )
         )
     db.commit()
+    _govern_demo_measurements(db, measurement_governance)
     model = train_model(
         db,
         ModelTrainingRequest(
             model_code="DEMO-DOI-BASELINE",
-            version="1.0",
+            version="3.0-measurement-gated",
             target_metric="doi",
             feature_set_version=CURRENT_FEATURE_SET_VERSION,
             min_samples=5,

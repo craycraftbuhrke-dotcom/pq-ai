@@ -32,7 +32,7 @@ from app.api.routes.process import (
 from app.api.routes.quality import create_quality_measurement, quality_summary
 from app.db.base import Base
 from app.models import domain  # noqa: F401
-from app.models.domain import PointFeatureSnapshot
+from app.models.domain import PointFeatureSnapshot, QualityMeasurement
 from app.schemas.common import FactoryCreate
 from app.schemas.features import PointFeatureBuildRequest
 from app.schemas.master_data import (
@@ -219,7 +219,7 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
         ),
         db,
     )
-    create_quality_measurement(
+    measurement = create_quality_measurement(
         QualityMeasurementCreate(
             data_no="QM-001",
             production_run_id=production_run.id,
@@ -235,6 +235,8 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
         ),
         db,
     )
+    db.get(QualityMeasurement, measurement["id"]).reliability_status = "VERIFIED"
+    db.commit()
     # Simulate legacy persisted fields that predate the approved scope policy.
     production_run.context_values = {"booth_humidity": 62.0}
     stage_run.actual_parameters = {

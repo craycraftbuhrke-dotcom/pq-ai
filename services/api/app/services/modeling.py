@@ -45,6 +45,7 @@ def _target_value(
             QualityMeasurement.production_run_id == production_run_id,
             QualityMeasurement.measurement_point_id == measurement_point_id,
             QualityMeasurement.is_valid.is_(True),
+            QualityMeasurement.reliability_status == "VERIFIED",
             QualityMetricValue.metric_code == target_metric,
         )
         .order_by(QualityMeasurement.measured_at.desc())

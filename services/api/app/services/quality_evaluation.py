@@ -17,6 +17,13 @@ def evaluate_quality_measurement(
 ) -> dict:
     if not measurement.is_valid:
         return {"judgement": "INVALID", "violations": ["质量数据被标记为无效"], "metric_results": []}
+    if measurement.reliability_status != "VERIFIED":
+        issues = measurement.reliability_issues or ["测量可靠性尚未验证"]
+        return {
+            "judgement": "INVALID",
+            "violations": issues,
+            "metric_results": [],
+        }
 
     production_run = db.get(ProductionRun, measurement.production_run_id)
     point = db.get(MeasurementPoint, measurement.measurement_point_id)

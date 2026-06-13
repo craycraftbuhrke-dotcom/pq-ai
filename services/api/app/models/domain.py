@@ -7,6 +7,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    Integer,
     JSON,
     String,
     Text,
@@ -427,6 +428,96 @@ class ActualParameter(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source_system: Mapped[str | None] = mapped_column(String(64))
 
 
+class MeasurementInstrument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "measurement_instrument"
+
+    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    manufacturer: Mapped[str] = mapped_column(String(80), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    instrument_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    serial_no: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    firmware_version: Mapped[str | None] = mapped_column(String(64))
+    supported_quality_types: Mapped[list] = mapped_column(JSON, nullable=False)
+    calibration_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class MeasurementMethod(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "measurement_method"
+    __table_args__ = (UniqueConstraint("code", "version", name="uq_measurement_method_version"),)
+
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    quality_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    instrument_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    method_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    probe_code: Mapped[str | None] = mapped_column(String(64))
+    substrate_type: Mapped[str | None] = mapped_column(String(80))
+    geometry_class: Mapped[str | None] = mapped_column(String(80))
+    layer_scope: Mapped[str | None] = mapped_column(String(80))
+    requires_reference: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    requires_direction: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    minimum_repeats: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    instructions: Mapped[str | None] = mapped_column(Text)
+
+
+class MeasurementReferenceStandard(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "measurement_reference_standard"
+
+    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    quality_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    serial_no: Mapped[str | None] = mapped_column(String(120))
+    certificate_no: Mapped[str | None] = mapped_column(String(120))
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reference_values: Mapped[dict | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class MeasurementImportProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "measurement_import_profile"
+    __table_args__ = (
+        UniqueConstraint("code", "version", name="uq_measurement_import_profile_version"),
+    )
+
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    instrument_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    quality_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    field_mapping: Mapped[dict] = mapped_column(JSON, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class MeasurementCalibrationRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "measurement_calibration_record"
+    __table_args__ = (Index("ix_calibration_instrument_time", "instrument_id", "calibrated_at"),)
+
+    calibration_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    instrument_id: Mapped[str] = mapped_column(
+        ForeignKey("measurement_instrument.id"), nullable=False
+    )
+    method_id: Mapped[str | None] = mapped_column(ForeignKey("measurement_method.id"))
+    reference_standard_id: Mapped[str | None] = mapped_column(
+        ForeignKey("measurement_reference_standard.id")
+    )
+    calibrated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    result: Mapped[str] = mapped_column(String(24), nullable=False)
+    performed_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    certificate_uri: Mapped[str | None] = mapped_column(String(500))
+    check_values: Mapped[dict | None] = mapped_column(JSON)
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
 class QualityMeasurement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "quality_measurement"
     __table_args__ = (
@@ -444,6 +535,23 @@ class QualityMeasurement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     measured_by: Mapped[str | None] = mapped_column(String(80))
     device_code: Mapped[str | None] = mapped_column(String(64))
+    instrument_id: Mapped[str | None] = mapped_column(ForeignKey("measurement_instrument.id"))
+    measurement_method_id: Mapped[str | None] = mapped_column(ForeignKey("measurement_method.id"))
+    calibration_record_id: Mapped[str | None] = mapped_column(
+        ForeignKey("measurement_calibration_record.id")
+    )
+    reference_standard_id: Mapped[str | None] = mapped_column(
+        ForeignKey("measurement_reference_standard.id")
+    )
+    import_profile_id: Mapped[str | None] = mapped_column(
+        ForeignKey("measurement_import_profile.id")
+    )
+    measurement_direction: Mapped[str | None] = mapped_column(String(32))
+    raw_file_uri: Mapped[str | None] = mapped_column(String(500))
+    reliability_status: Mapped[str] = mapped_column(
+        String(24), default="UNVERIFIED", nullable=False
+    )
+    reliability_issues: Mapped[list | None] = mapped_column(JSON)
     status_score: Mapped[float | None] = mapped_column(Float)
     is_valid: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
@@ -476,6 +584,29 @@ class QualityMetricValue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     raw_value: Mapped[float] = mapped_column(Float, nullable=False)
     corrected_value: Mapped[float | None] = mapped_column(Float)
     unit: Mapped[str | None] = mapped_column(String(24))
+
+
+class MeasurementRepeatReading(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "measurement_repeat_reading"
+    __table_args__ = (
+        UniqueConstraint(
+            "measurement_id",
+            "repeat_no",
+            "metric_code",
+            name="uq_measurement_repeat_metric",
+        ),
+    )
+
+    measurement_id: Mapped[str] = mapped_column(
+        ForeignKey("quality_measurement.id"), nullable=False
+    )
+    repeat_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    metric_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_value: Mapped[float] = mapped_column(Float, nullable=False)
+    corrected_value: Mapped[float | None] = mapped_column(Float)
+    unit: Mapped[str | None] = mapped_column(String(24))
+    is_valid: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    invalid_reason: Mapped[str | None] = mapped_column(String(240))
 
 
 class QualityStandard(UUIDPrimaryKeyMixin, TimestampMixin, Base):

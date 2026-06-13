@@ -1842,6 +1842,18 @@ button.message-banner {
   font-size: 8px;
 }
 
+.quality-record-identity .reliability-verified {
+  color: var(--teal);
+}
+
+.quality-record-identity .reliability-unverified {
+  color: var(--amber);
+}
+
+.quality-record-identity .reliability-failed {
+  color: var(--red);
+}
+
 .quality-metrics {
   display: grid;
   gap: 7px;
@@ -2196,6 +2208,45 @@ button.message-banner {
   gap: 8px;
   grid-template-columns: minmax(200px, 1.5fr) minmax(100px, 0.7fr) minmax(120px, 0.8fr) 34px;
   padding: 9px 10px;
+}
+
+.repeat-editor-row {
+  grid-template-columns: 75px minmax(180px, 1.3fr) minmax(100px, 0.7fr) minmax(120px, 0.8fr) 34px;
+}
+
+.measurement-governance {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 15px;
+}
+
+.governance-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.governance-toolbar .master-tabs {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  flex: 1;
+}
+
+.governance-table {
+  min-width: 1050px;
+}
+
+.governance-table td:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.governance-table td:first-child small {
+  color: var(--text-muted);
+  font-size: 8px;
 }
 
 .metric-editor-row select,

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -26,6 +26,12 @@ from app.api.routes.quality import (
     update_quality_standard,
 )
 from app.db.base import Base
+from app.models.domain import (
+    MeasurementCalibrationRecord,
+    MeasurementInstrument,
+    MeasurementMethod,
+    MeasurementReferenceStandard,
+)
 from app.schemas.common import FactoryCreate
 from app.schemas.master_data import (
     ColorCreate,
@@ -36,6 +42,7 @@ from app.schemas.master_data import (
 )
 from app.schemas.process import ProductionRunCreate
 from app.schemas.quality import (
+    MeasurementRepeatInput,
     QualityMeasurementCreate,
     QualityMeasurementUpdate,
     QualityMetricInput,
@@ -93,6 +100,47 @@ def test_quality_measurement_and_standard_crud() -> None:
         ),
         db,
     )
+    instrument = MeasurementInstrument(
+        code="BYK-WAVE-1",
+        name="BYK wave-scan",
+        manufacturer="BYK-Gardner",
+        model="wave-scan",
+        instrument_type="BYK_ORANGE_PEEL",
+        serial_no="BYK-WAVE-SN-1",
+        supported_quality_types=["ORANGE_PEEL"],
+    )
+    method = MeasurementMethod(
+        code="BYK-WAVE-DOI",
+        name="橘皮 DOI 测量",
+        version="1",
+        quality_type="ORANGE_PEEL",
+        instrument_type="BYK_ORANGE_PEEL",
+        method_type="WAVE_SCAN",
+        requires_reference=True,
+        requires_direction=True,
+        minimum_repeats=1,
+    )
+    reference = MeasurementReferenceStandard(
+        code="REF-OP-1",
+        name="橘皮参考件",
+        quality_type="ORANGE_PEEL",
+        valid_from=now - timedelta(days=1),
+        valid_until=now + timedelta(days=1),
+    )
+    db.add_all([instrument, method, reference])
+    db.flush()
+    calibration = MeasurementCalibrationRecord(
+        calibration_no="CAL-OP-1",
+        instrument_id=instrument.id,
+        method_id=method.id,
+        reference_standard_id=reference.id,
+        calibrated_at=now - timedelta(hours=1),
+        valid_until=now + timedelta(hours=1),
+        result="PASS",
+        performed_by="质量工程师",
+    )
+    db.add(calibration)
+    db.commit()
     standard = create_quality_standard(
         QualityStandardCreate(
             standard_no="STD-1",
@@ -120,7 +168,15 @@ def test_quality_measurement_and_standard_crud() -> None:
             measurement_point_id=point.id,
             quality_type="ORANGE_PEEL",
             measured_at=now,
+            instrument_id=instrument.id,
+            measurement_method_id=method.id,
+            calibration_record_id=calibration.id,
+            reference_standard_id=reference.id,
+            measurement_direction="LONGITUDINAL",
             metrics=[QualityMetricInput(metric_code="doi", metric_name="DOI", raw_value=81)],
+            repeat_readings=[
+                MeasurementRepeatInput(repeat_no=1, metric_code="doi", raw_value=81)
+            ],
         ),
         db,
     )

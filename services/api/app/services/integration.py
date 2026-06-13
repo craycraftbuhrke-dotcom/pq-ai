@@ -16,7 +16,13 @@ from app.models.domain import (
     IntegrationEndpoint,
     IntegrationEvent,
     MaterialBatch,
+    MeasurementCalibrationRecord,
+    MeasurementImportProfile,
+    MeasurementInstrument,
+    MeasurementMethod,
     MeasurementPoint,
+    MeasurementReferenceStandard,
+    MeasurementRepeatReading,
     ParameterDefinition,
     ProductionRun,
     ProductionStageRun,
@@ -24,6 +30,7 @@ from app.models.domain import (
     QualityMetricValue,
     VehicleModel,
 )
+from app.services.measurement_reliability import refresh_measurement_reliability
 
 
 def _required_by_code(db: Session, model: type, code: str, label: str):
@@ -117,6 +124,61 @@ def _process_qms_measurement(db: Session, payload: dict) -> dict:
         payload["quality_type"],
         [str(metric["metric_code"]) for metric in metrics],
     )
+    repeat_readings = payload.get("repeat_readings", [])
+    require_approved_metrics(
+        payload["quality_type"],
+        [str(reading["metric_code"]) for reading in repeat_readings],
+    )
+    instrument = (
+        _required_by_code(db, MeasurementInstrument, payload["instrument_code"], "测量仪器")
+        if payload.get("instrument_code")
+        else None
+    )
+    method = (
+        db.scalar(
+            select(MeasurementMethod).where(
+                MeasurementMethod.code == payload["measurement_method_code"],
+                MeasurementMethod.version == payload.get("measurement_method_version", "1.0"),
+            )
+        )
+        if payload.get("measurement_method_code")
+        else None
+    )
+    if payload.get("measurement_method_code") and not method:
+        raise ValueError("测量方法代码与版本不存在")
+    calibration = (
+        db.scalar(
+            select(MeasurementCalibrationRecord).where(
+                MeasurementCalibrationRecord.calibration_no == payload["calibration_no"]
+            )
+        )
+        if payload.get("calibration_no")
+        else None
+    )
+    if payload.get("calibration_no") and not calibration:
+        raise ValueError("校准/检查记录编号不存在")
+    reference = (
+        _required_by_code(
+            db,
+            MeasurementReferenceStandard,
+            payload["reference_standard_code"],
+            "参考件",
+        )
+        if payload.get("reference_standard_code")
+        else None
+    )
+    import_profile = (
+        db.scalar(
+            select(MeasurementImportProfile).where(
+                MeasurementImportProfile.code == payload["import_profile_code"],
+                MeasurementImportProfile.version == payload.get("import_profile_version", "1.0"),
+            )
+        )
+        if payload.get("import_profile_code")
+        else None
+    )
+    if payload.get("import_profile_code") and not import_profile:
+        raise ValueError("导入模板代码与版本不存在")
     measurement = db.scalar(
         select(QualityMeasurement).where(QualityMeasurement.data_no == payload["data_no"])
     )
@@ -128,7 +190,14 @@ def _process_qms_measurement(db: Session, payload: dict) -> dict:
         "data_type": payload.get("data_type", "TEST"),
         "measured_at": _datetime(payload["measured_at"], "measured_at"),
         "measured_by": payload.get("measured_by"),
-        "device_code": payload.get("device_code"),
+        "device_code": instrument.code if instrument else payload.get("device_code"),
+        "instrument_id": instrument.id if instrument else None,
+        "measurement_method_id": method.id if method else None,
+        "calibration_record_id": calibration.id if calibration else None,
+        "reference_standard_id": reference.id if reference else None,
+        "import_profile_id": import_profile.id if import_profile else None,
+        "measurement_direction": payload.get("measurement_direction"),
+        "raw_file_uri": payload.get("raw_file_uri"),
         "status_score": payload.get("status_score"),
         "is_valid": payload.get("is_valid", True),
     }
@@ -137,6 +206,11 @@ def _process_qms_measurement(db: Session, payload: dict) -> dict:
             setattr(measurement, field, value)
         db.execute(
             delete(QualityMetricValue).where(QualityMetricValue.measurement_id == measurement.id)
+        )
+        db.execute(
+            delete(MeasurementRepeatReading).where(
+                MeasurementRepeatReading.measurement_id == measurement.id
+            )
         )
         operation = "UPDATED"
     else:
@@ -157,7 +231,23 @@ def _process_qms_measurement(db: Session, payload: dict) -> dict:
             for metric in metrics
         ]
     )
+    db.add_all(
+        [
+            MeasurementRepeatReading(
+                measurement_id=measurement.id,
+                repeat_no=int(reading["repeat_no"]),
+                metric_code=reading["metric_code"],
+                raw_value=float(reading["raw_value"]),
+                corrected_value=reading.get("corrected_value"),
+                unit=reading.get("unit"),
+                is_valid=reading.get("is_valid", True),
+                invalid_reason=reading.get("invalid_reason"),
+            )
+            for reading in repeat_readings
+        ]
+    )
     db.flush()
+    refresh_measurement_reliability(db, measurement)
     return {"operation": operation, "resource_type": "quality_measurement", "resource_id": measurement.id}
 
 

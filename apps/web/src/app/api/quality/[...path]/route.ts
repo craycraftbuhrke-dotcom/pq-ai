@@ -6,7 +6,7 @@ type Context = { params: Promise<{ path: string[] }> };
 
 async function proxy(request: Request, context: Context) {
   const { path } = await context.params;
-  if (!path.length || !["summary", "analytics", "measurements", "standards", "metric-definitions"].includes(path[0])) {
+  if (!path.length || !["summary", "analytics", "measurements", "standards", "metric-definitions", "governance"].includes(path[0])) {
     return NextResponse.json({ error: "不支持的质量数据接口" }, { status: 404 });
   }
   const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;

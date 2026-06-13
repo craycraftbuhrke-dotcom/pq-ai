@@ -54,9 +54,10 @@ def test_quality_evaluation_prefers_point_standard_and_detects_violation() -> No
         measurement = QualityMeasurement(
             data_no="QM-1",
             production_run_id=run.id,
-            measurement_point_id=point.id,
-            quality_type="ORANGE_PEEL",
-            measured_at=now,
+                measurement_point_id=point.id,
+                quality_type="ORANGE_PEEL",
+                measured_at=now,
+                reliability_status="VERIFIED",
         )
         db.add(measurement)
         db.flush()

@@ -14,8 +14,15 @@ import {
 } from "lucide-react";
 import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
+
 type Resource = { id: string; code: string; name: string };
 type ProductionRun = { id: string; run_no: string; body_no?: string | null; started_at: string };
+type Instrument = Resource & { instrument_type: string; status: string; supported_quality_types: string[] };
+type Method = Resource & { version: string; quality_type: string; instrument_type: string; minimum_repeats: number };
+type Calibration = { id: string; calibration_no: string; instrument_id: string; method_id?: string | null; result: string; valid_until: string };
+type ReferenceStandard = Resource & { quality_type: string; status: string };
+type ImportProfile = Resource & { version: string; quality_type: string; instrument_type: string; is_active: boolean };
 type MetricDefinition = {
   id: string;
   quality_type: string;
@@ -32,6 +39,16 @@ type MetricValue = {
   corrected_value?: number | null;
   unit?: string | null;
 };
+type RepeatValue = {
+  id: string;
+  repeat_no: number;
+  metric_code: string;
+  raw_value: number;
+  corrected_value?: number | null;
+  unit?: string | null;
+  is_valid: boolean;
+  invalid_reason?: string | null;
+};
 type Measurement = {
   id: string;
   data_no: string;
@@ -45,11 +62,27 @@ type Measurement = {
   measured_at: string;
   measured_by?: string | null;
   device_code?: string | null;
+  instrument_id?: string | null;
+  instrument_code?: string | null;
+  instrument_name?: string | null;
+  measurement_method_id?: string | null;
+  measurement_method_code?: string | null;
+  calibration_record_id?: string | null;
+  calibration_no?: string | null;
+  reference_standard_id?: string | null;
+  reference_standard_code?: string | null;
+  import_profile_id?: string | null;
+  import_profile_code?: string | null;
+  measurement_direction?: string | null;
+  raw_file_uri?: string | null;
+  reliability_status: string;
+  reliability_issues: string[];
   status_score?: number | null;
   is_valid: boolean;
   judgement: string;
   violations: string[];
   metrics: MetricValue[];
+  repeat_readings: RepeatValue[];
 };
 type Standard = {
   id: string;
@@ -75,6 +108,9 @@ type Summary = {
   pass_measurements: number;
   fail_measurements: number;
   no_standard_measurements: number;
+  verified_measurements: number;
+  unverified_measurements: number;
+  failed_reliability_measurements: number;
 };
 type AnalyticsSeriesPoint = {
   measurement_id: string;
@@ -134,8 +170,9 @@ type Analytics = {
   }>;
 };
 type MetricRow = { metric_code: string; raw_value: string; corrected_value: string };
+type RepeatRow = { repeat_no: string; metric_code: string; raw_value: string; corrected_value: string };
 type FormState = Record<string, string | boolean>;
-type Tab = "measurements" | "standards" | "analytics";
+type Tab = "measurements" | "standards" | "analytics" | "governance";
 
 const qualityLabels: Record<string, string> = {
   ORANGE_PEEL: "橘皮",
@@ -148,6 +185,11 @@ const judgementLabels: Record<string, string> = {
   FAIL: "超差",
   NO_STANDARD: "无标准",
   INVALID: "无效",
+};
+const reliabilityLabels: Record<string, string> = {
+  VERIFIED: "可靠性已验证",
+  UNVERIFIED: "可靠性未验证",
+  FAILED: "可靠性失败",
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -183,11 +225,17 @@ export function QualityWorkspace() {
   const [vehicleModels, setVehicleModels] = useState<Resource[]>([]);
   const [colors, setColors] = useState<Resource[]>([]);
   const [parts, setParts] = useState<Resource[]>([]);
+  const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const [methods, setMethods] = useState<Method[]>([]);
+  const [calibrations, setCalibrations] = useState<Calibration[]>([]);
+  const [references, setReferences] = useState<ReferenceStandard[]>([]);
+  const [importProfiles, setImportProfiles] = useState<ImportProfile[]>([]);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [modal, setModal] = useState<{ kind: "measurement" | "standard"; record?: Measurement | Standard } | null>(null);
   const [form, setForm] = useState<FormState>({});
   const [metricRows, setMetricRows] = useState<MetricRow[]>([]);
+  const [repeatRows, setRepeatRows] = useState<RepeatRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -199,7 +247,7 @@ export function QualityWorkspace() {
     setLoading(true);
     setError("");
     try {
-      const [nextSummary, nextMeasurements, nextStandards, nextDefinitions, nextRuns, nextGroups, nextPoints, nextModels, nextColors, nextParts] =
+      const [nextSummary, nextMeasurements, nextStandards, nextDefinitions, nextRuns, nextGroups, nextPoints, nextModels, nextColors, nextParts, nextInstruments, nextMethods, nextCalibrations, nextReferences, nextProfiles] =
         await Promise.all([
           request<Summary>("/api/quality/summary"),
           request<Measurement[]>("/api/quality/measurements?limit=500"),
@@ -211,6 +259,11 @@ export function QualityWorkspace() {
           request<Resource[]>("/api/master-data/vehicle-models"),
           request<Resource[]>("/api/master-data/colors"),
           request<Resource[]>("/api/master-data/parts"),
+          request<Instrument[]>("/api/quality/governance/instruments"),
+          request<Method[]>("/api/quality/governance/methods"),
+          request<Calibration[]>("/api/quality/governance/calibrations"),
+          request<ReferenceStandard[]>("/api/quality/governance/references"),
+          request<ImportProfile[]>("/api/quality/governance/import-profiles"),
         ]);
       setSummary(nextSummary);
       setMeasurements(nextMeasurements);
@@ -222,6 +275,11 @@ export function QualityWorkspace() {
       setVehicleModels(nextModels);
       setColors(nextColors);
       setParts(nextParts);
+      setInstruments(nextInstruments);
+      setMethods(nextMethods);
+      setCalibrations(nextCalibrations);
+      setReferences(nextReferences);
+      setImportProfiles(nextProfiles);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "质量数据加载失败");
     } finally {
@@ -305,6 +363,13 @@ export function QualityWorkspace() {
       measured_at: localDateTime(record?.measured_at),
       measured_by: record?.measured_by ?? "",
       device_code: record?.device_code ?? "",
+      instrument_id: record?.instrument_id ?? "",
+      measurement_method_id: record?.measurement_method_id ?? "",
+      calibration_record_id: record?.calibration_record_id ?? "",
+      reference_standard_id: record?.reference_standard_id ?? "",
+      import_profile_id: record?.import_profile_id ?? "",
+      measurement_direction: record?.measurement_direction ?? "",
+      raw_file_uri: record?.raw_file_uri ?? "",
       status_score: record?.status_score === null || record?.status_score === undefined ? "" : String(record.status_score),
       is_valid: record?.is_valid ?? true,
     });
@@ -315,6 +380,14 @@ export function QualityWorkspace() {
         raw_value: String(metric.raw_value),
         corrected_value: metric.corrected_value === null || metric.corrected_value === undefined ? "" : String(metric.corrected_value),
       })) ?? [{ metric_code: firstDefinition?.code ?? "", raw_value: "", corrected_value: "" }],
+    );
+    setRepeatRows(
+      record?.repeat_readings.map((reading) => ({
+        repeat_no: String(reading.repeat_no),
+        metric_code: reading.metric_code,
+        raw_value: String(reading.raw_value),
+        corrected_value: reading.corrected_value === null || reading.corrected_value === undefined ? "" : String(reading.corrected_value),
+      })) ?? [{ repeat_no: "1", metric_code: firstDefinition?.code ?? "", raw_value: "", corrected_value: "" }],
     );
   }
 
@@ -358,12 +431,30 @@ export function QualityWorkspace() {
             unit: definition.unit ?? null,
           };
         });
+        const repeat_readings = repeatRows
+          .filter((row) => row.metric_code && row.raw_value !== "")
+          .map((row) => ({
+            repeat_no: Number(row.repeat_no),
+            metric_code: row.metric_code,
+            raw_value: Number(row.raw_value),
+            corrected_value: row.corrected_value === "" ? null : Number(row.corrected_value),
+            unit: definitions.find((item) => item.quality_type === form.quality_type && item.code === row.metric_code)?.unit ?? null,
+            is_valid: true,
+          }));
         const body = {
           ...form,
           measurement_group_id: form.measurement_group_id || null,
+          instrument_id: form.instrument_id || null,
+          measurement_method_id: form.measurement_method_id || null,
+          calibration_record_id: form.calibration_record_id || null,
+          reference_standard_id: form.reference_standard_id || null,
+          import_profile_id: form.import_profile_id || null,
+          measurement_direction: form.measurement_direction || null,
+          raw_file_uri: form.raw_file_uri || null,
           measured_at: form.measured_at,
           status_score: form.status_score === "" ? null : Number(form.status_score),
           metrics,
+          repeat_readings,
         };
         await request(
           modal.record ? `/api/quality/measurements/${modal.record.id}` : "/api/quality/measurements",
@@ -495,15 +586,15 @@ export function QualityWorkspace() {
         <div className="page-actions">
           {tab === "measurements" ? <><input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(event) => void importJson(event)} /><button className="button button-secondary" onClick={() => fileInput.current?.click()} disabled={submitting}><FileJson />批量导入 JSON</button></> : null}
           <button className="button button-secondary" onClick={() => { void reload(); if (tab === "analytics") void loadAnalytics(); }} disabled={loading || analyticsLoading}><RefreshCw className={loading || analyticsLoading ? "spin" : ""} />刷新</button>
-          {tab !== "analytics" ? <button className="button button-primary" onClick={() => tab === "measurements" ? openMeasurement() : openStandard()}><Plus />新建{tab === "measurements" ? "质量测量" : "质量标准"}</button> : null}
+          {tab === "measurements" || tab === "standards" ? <button className="button button-primary" onClick={() => tab === "measurements" ? openMeasurement() : openStandard()}><Plus />新建{tab === "measurements" ? "质量测量" : "质量标准"}</button> : null}
         </div>
       </header>
       <div className="freshness"><span className="live-dot" /> MySQL 实时质量数据 · 自动匹配最具体标准</div>
       <section className="module-stat-strip">
-        <article><span>质量测量</span><strong>{loading ? "…" : summary?.measurements ?? 0}</strong><small>{summary?.valid_measurements ?? 0} 条有效记录</small></article>
+        <article><span>质量测量</span><strong>{loading ? "…" : summary?.measurements ?? 0}</strong><small>{summary?.verified_measurements ?? 0} 条通过可靠性门禁</small></article>
         <article><span>指标值</span><strong>{loading ? "…" : summary?.metric_values ?? 0}</strong><small>当前受治理目录 {definitions.length} 项</small></article>
         <article><span>合格 / 超差</span><strong>{loading ? "…" : `${summary?.pass_measurements ?? 0} / ${summary?.fail_measurements ?? 0}`}</strong><small>按当前生效标准判定</small></article>
-        <article><span>质量标准</span><strong>{loading ? "…" : summary?.standards ?? 0}</strong><small>{summary?.no_standard_measurements ?? 0} 条测量无匹配标准</small></article>
+        <article><span>可靠性待处理</span><strong>{loading ? "…" : `${summary?.unverified_measurements ?? 0} / ${summary?.failed_reliability_measurements ?? 0}`}</strong><small>未验证 / 失败</small></article>
       </section>
       {error ? <div className="message-banner message-error">{error}</div> : null}
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
@@ -513,20 +604,21 @@ export function QualityWorkspace() {
           <button className={tab === "measurements" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("measurements")}>质量测量 <span>{measurements.length}</span></button>
           <button className={tab === "standards" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("standards")}>质量标准 <span>{standards.length}</span></button>
           <button className={tab === "analytics" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("analytics")}>SPC 与趋势 <span>{analytics?.statistics.samples ?? 0}</span></button>
+          <button className={tab === "governance" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("governance")}>仪器可靠性 <span>{instruments.length}</span></button>
         </div>
-        <div className="quality-toolbar">
+        {tab !== "governance" ? <div className="quality-toolbar">
           {tab !== "analytics" ? <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`搜索质量${tab === "measurements" ? "测量" : "标准"}`} /></label> : <div className="quality-analytics-title"><Activity /><span>实时过程能力与点位风险</span></div>}
           <select value={tab === "analytics" ? typeFilter || "ORANGE_PEEL" : typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>{tab !== "analytics" ? <option value="">全部质量类型</option> : null}{Object.entries(qualityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
           {tab === "analytics" ? <select value={resolvedAnalyticsMetric} onChange={(event) => setAnalyticsMetric(event.target.value)}>{analyticsDefinitions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code}</option>)}</select> : null}
           <button className="button button-secondary" onClick={exportCsv}><Download />导出 CSV</button>
-        </div>
+        </div> : null}
         {tab === "measurements" ? (
           <div className="quality-card-list">
             {filteredMeasurements.map((measurement) => (
               <article className="quality-measurement-card" key={measurement.id}>
-                <div className="quality-record-identity"><span className="mono">{measurement.data_no}</span><strong>{measurement.measurement_point_code} · {measurement.measurement_point_name}</strong><small>{qualityLabels[measurement.quality_type]} · {new Date(measurement.measured_at).toLocaleString("zh-CN", { hour12: false })}</small></div>
+                <div className="quality-record-identity"><span className="mono">{measurement.data_no}</span><strong>{measurement.measurement_point_code} · {measurement.measurement_point_name}</strong><small>{qualityLabels[measurement.quality_type]} · {new Date(measurement.measured_at).toLocaleString("zh-CN", { hour12: false })}</small><small className={`reliability-${measurement.reliability_status.toLowerCase()}`}>{reliabilityLabels[measurement.reliability_status] ?? measurement.reliability_status} · {measurement.instrument_code ?? "未绑定仪器"}</small></div>
                 <div className="quality-metrics">{measurement.metrics.slice(0, 5).map((metric) => <span key={metric.id}><small>{metric.metric_name}</small><strong className="mono">{metric.corrected_value ?? metric.raw_value} {metric.unit}</strong></span>)}</div>
-                <div className={`quality-judgement judgement-${measurement.judgement.toLowerCase()}`}><strong>{judgementLabels[measurement.judgement] ?? measurement.judgement}</strong><small>{measurement.violations[0] ?? `${measurement.measured_by ?? "未记录测量人"} · ${measurement.data_type}`}</small></div>
+                <div className={`quality-judgement judgement-${measurement.judgement.toLowerCase()}`}><strong>{judgementLabels[measurement.judgement] ?? measurement.judgement}</strong><small>{measurement.reliability_issues[0] ?? measurement.violations[0] ?? `${measurement.measured_by ?? "未记录测量人"} · ${measurement.data_type}`}</small></div>
                 <div className="row-actions"><button className="icon-button" onClick={() => openMeasurement(measurement)} aria-label={`编辑测量 ${measurement.data_no}`}><Pencil /></button><button className="icon-button icon-button-danger" onClick={() => void remove(`/api/quality/measurements/${measurement.id}`, "质量测量")} aria-label={`删除测量 ${measurement.data_no}`}><Trash2 /></button></div>
               </article>
             ))}
@@ -539,7 +631,7 @@ export function QualityWorkspace() {
               ))}
             </tbody></table>
           </div>
-        ) : <QualityAnalyticsPanel analytics={analytics} loading={analyticsLoading} />}
+        ) : tab === "analytics" ? <QualityAnalyticsPanel analytics={analytics} loading={analyticsLoading} /> : <MeasurementGovernancePanel />}
       </section>
 
       {modal ? (
@@ -549,7 +641,7 @@ export function QualityWorkspace() {
             <form onSubmit={(event) => void submit(event)}>
               <div className="form-grid">
                 {modal.kind === "measurement"
-                  ? renderMeasurementForm(form, setForm, metricRows, setMetricRows, { runs, groups, points, definitions })
+                  ? renderMeasurementForm(form, setForm, metricRows, setMetricRows, repeatRows, setRepeatRows, { runs, groups, points, definitions, instruments, methods, calibrations, references, importProfiles })
                   : renderStandardForm(form, setForm, { vehicleModels, colors, parts, points, definitions })}
               </div>
               <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => setModal(null)}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" /> : null}保存到 MySQL</button></div>
@@ -665,23 +757,48 @@ function renderMeasurementForm(
   setForm: (value: FormState) => void,
   metricRows: MetricRow[],
   setMetricRows: (value: MetricRow[]) => void,
-  refs: { runs: ProductionRun[]; groups: Resource[]; points: Resource[]; definitions: MetricDefinition[] },
+  repeatRows: RepeatRow[],
+  setRepeatRows: (value: RepeatRow[]) => void,
+  refs: {
+    runs: ProductionRun[];
+    groups: Resource[];
+    points: Resource[];
+    definitions: MetricDefinition[];
+    instruments: Instrument[];
+    methods: Method[];
+    calibrations: Calibration[];
+    references: ReferenceStandard[];
+    importProfiles: ImportProfile[];
+  },
 ) {
   const metricOptions = refs.definitions.filter((item) => item.quality_type === form.quality_type);
+  const selectedInstrument = refs.instruments.find((item) => item.id === form.instrument_id);
+  const instruments = refs.instruments.filter((item) => item.supported_quality_types.includes(String(form.quality_type)));
+  const methods = refs.methods.filter((item) => item.quality_type === form.quality_type && (!selectedInstrument || item.instrument_type === selectedInstrument.instrument_type));
+  const calibrations = refs.calibrations.filter((item) => (!form.instrument_id || item.instrument_id === form.instrument_id) && (!form.measurement_method_id || !item.method_id || item.method_id === form.measurement_method_id));
+  const references = refs.references.filter((item) => item.quality_type === form.quality_type);
+  const profiles = refs.importProfiles.filter((item) => item.quality_type === form.quality_type && (!selectedInstrument || item.instrument_type === selectedInstrument.instrument_type));
   return [
     inputField("数据编号", "data_no", form, setForm, "text", true),
     selectField("生产事件", "production_run_id", form, setForm, refs.runs.map((item) => [item.id, `${item.run_no} / ${item.body_no ?? "无车身号"}`]), true),
     selectField("测量编组", "measurement_group_id", form, setForm, options(refs.groups, true)),
     selectField("测量点", "measurement_point_id", form, setForm, options(refs.points), true),
     selectField("质量类型", "quality_type", form, (next) => {
-      setForm(next);
+      setForm({ ...next, instrument_id: "", measurement_method_id: "", calibration_record_id: "", reference_standard_id: "", import_profile_id: "" });
       const first = refs.definitions.find((item) => item.quality_type === next.quality_type);
       setMetricRows([{ metric_code: first?.code ?? "", raw_value: "", corrected_value: "" }]);
+      setRepeatRows([{ repeat_no: "1", metric_code: first?.code ?? "", raw_value: "", corrected_value: "" }]);
     }, Object.entries(qualityLabels), true),
     selectField("数据类型", "data_type", form, setForm, [["TEST", "测试数据"], ["MASTER_SAMPLE", "封样数据"], ["STANDARD", "标准数据"]], true),
     inputField("测量时间", "measured_at", form, setForm, "datetime-local", true),
     inputField("测量人", "measured_by", form, setForm),
-    inputField("设备代码", "device_code", form, setForm),
+    selectField("受治理仪器", "instrument_id", form, (next) => setForm({ ...next, measurement_method_id: "", calibration_record_id: "", import_profile_id: "" }), options(instruments, true)),
+    selectField("测量方法", "measurement_method_id", form, (next) => setForm({ ...next, calibration_record_id: "" }), options(methods, true)),
+    selectField("校准/检查记录", "calibration_record_id", form, setForm, [["", "未关联"], ...calibrations.map((item) => [item.id, `${item.calibration_no} / ${item.result} / ${new Date(item.valid_until).toLocaleDateString("zh-CN")}`] as [string, string])]),
+    selectField("参考件", "reference_standard_id", form, setForm, options(references, true)),
+    selectField("导入模板", "import_profile_id", form, setForm, [["", "手工录入 / 未关联"], ...profiles.map((item) => [item.id, `${item.code}:${item.version}`] as [string, string])]),
+    selectField("测量方向", "measurement_direction", form, setForm, [["", "未记录"], ["LONGITUDINAL", "纵向"], ["TRANSVERSE", "横向"], ["NORMAL", "法向 / 不适用"]]),
+    inputField("原始文件 URI", "raw_file_uri", form, setForm),
     inputField("状态分数", "status_score", form, setForm, "number"),
     checkboxField("数据有效", "is_valid", form, setForm),
     <div className="metric-editor form-field-wide" key="metrics">
@@ -692,6 +809,18 @@ function renderMeasurementForm(
           <input aria-label={`原始值 ${index + 1}`} type="number" step="any" required placeholder="原始值" value={row.raw_value} onChange={(event) => setMetricRows(metricRows.map((item, rowIndex) => rowIndex === index ? { ...item, raw_value: event.target.value } : item))} />
           <input aria-label={`修正值 ${index + 1}`} type="number" step="any" placeholder="修正值（可选）" value={row.corrected_value} onChange={(event) => setMetricRows(metricRows.map((item, rowIndex) => rowIndex === index ? { ...item, corrected_value: event.target.value } : item))} />
           <button type="button" className="icon-button icon-button-danger" onClick={() => setMetricRows(metricRows.filter((_, rowIndex) => rowIndex !== index))} disabled={metricRows.length === 1} aria-label={`删除指标 ${index + 1}`}><Trash2 /></button>
+        </div>
+      ))}
+    </div>,
+    <div className="metric-editor form-field-wide" key="repeat-readings">
+      <div className="program-subheading"><div><span className="eyebrow">REPEAT READINGS</span><h3>逐次原始读数</h3></div><button type="button" className="button button-secondary" onClick={() => setRepeatRows([...repeatRows, { repeat_no: String(repeatRows.length + 1), metric_code: metricOptions[0]?.code ?? "", raw_value: "", corrected_value: "" }])}><Plus />新增读数</button></div>
+      {repeatRows.map((row, index) => (
+        <div className="metric-editor-row repeat-editor-row" key={`${index}-${row.repeat_no}-${row.metric_code}`}>
+          <input aria-label={`重复序号 ${index + 1}`} type="number" min="1" required value={row.repeat_no} onChange={(event) => setRepeatRows(repeatRows.map((item, rowIndex) => rowIndex === index ? { ...item, repeat_no: event.target.value } : item))} />
+          <select aria-label={`逐次指标 ${index + 1}`} required value={row.metric_code} onChange={(event) => setRepeatRows(repeatRows.map((item, rowIndex) => rowIndex === index ? { ...item, metric_code: event.target.value } : item))}>{metricOptions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code}</option>)}</select>
+          <input aria-label={`逐次原始值 ${index + 1}`} type="number" step="any" required placeholder="原始值" value={row.raw_value} onChange={(event) => setRepeatRows(repeatRows.map((item, rowIndex) => rowIndex === index ? { ...item, raw_value: event.target.value } : item))} />
+          <input aria-label={`逐次修正值 ${index + 1}`} type="number" step="any" placeholder="修正值（可选）" value={row.corrected_value} onChange={(event) => setRepeatRows(repeatRows.map((item, rowIndex) => rowIndex === index ? { ...item, corrected_value: event.target.value } : item))} />
+          <button type="button" className="icon-button icon-button-danger" onClick={() => setRepeatRows(repeatRows.filter((_, rowIndex) => rowIndex !== index))} aria-label={`删除逐次读数 ${index + 1}`}><Trash2 /></button>
         </div>
       ))}
     </div>,

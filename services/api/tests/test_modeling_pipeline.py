@@ -133,6 +133,7 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
                 measurement_point_id=point.id,
                 quality_type="ORANGE_PEEL",
                 measured_at=now + timedelta(minutes=index),
+                reliability_status="VERIFIED",
             )
             db.add(measurement)
             db.flush()
@@ -239,6 +240,7 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             measurement_point_id=point.id,
             quality_type="ORANGE_PEEL",
             measured_at=persisted_recommendation.executed_at - timedelta(seconds=1),
+            reliability_status="VERIFIED",
         )
         db.add(pre_execution_measurement)
         db.flush()
@@ -267,6 +269,7 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             measurement_point_id=point.id,
             quality_type="ORANGE_PEEL",
             measured_at=now + timedelta(hours=1),
+            reliability_status="VERIFIED",
         )
         db.add(verified_measurement)
         db.flush()

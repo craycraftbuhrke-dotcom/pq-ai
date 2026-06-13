@@ -365,6 +365,11 @@ def verify_recommendation(
     ):
         raise HTTPException(status_code=422, detail="复测记录与推荐任务的生产事件或测量点不匹配")
     if (
+        not verified_measurement.is_valid
+        or verified_measurement.reliability_status != "VERIFIED"
+    ):
+        raise HTTPException(status_code=422, detail="复测记录未通过仪器与测量可靠性门禁")
+    if (
         recommendation.executed_at
         and _utc_datetime(verified_measurement.measured_at)
         <= _utc_datetime(recommendation.executed_at)
@@ -385,6 +390,8 @@ def verify_recommendation(
             QualityMeasurement.production_run_id == recommendation.production_run_id,
             QualityMeasurement.measurement_point_id == recommendation.measurement_point_id,
             QualityMeasurement.measured_at < verified_measurement.measured_at,
+            QualityMeasurement.is_valid.is_(True),
+            QualityMeasurement.reliability_status == "VERIFIED",
             QualityMetricValue.metric_code == recommendation.target_metric,
         )
         .order_by(QualityMeasurement.measured_at.desc())
