@@ -20,6 +20,9 @@ from app.models.domain import (
     BrushParameter,
     BrushPointContribution,
     Color,
+    DurrApplicationController,
+    DurrRobot,
+    DurrRotaryAtomizer,
     Factory,
     FactoryVehicleModel,
     IntegrationEndpoint,
@@ -36,10 +39,14 @@ from app.models.domain import (
     ModelVersion,
     ParameterDefinition,
     Part,
+    PointContributionEntry,
+    PointContributionVersion,
     PointFeatureSnapshot,
+    ProductionDeviceExecution,
     ProductionRun,
     ProductionStageRun,
     ProgramColor,
+    ProgramDeviceConfiguration,
     ProgramVehicleModel,
     QualityMeasurement,
     QualityMetricDefinition,
@@ -49,6 +56,8 @@ from app.models.domain import (
     RolePermission,
     SprayProgram,
     SprayProgramVersion,
+    TrajectoryPathSegment,
+    TrajectoryProgram,
     VehicleModel,
     VehicleModelColor,
     UserRole,
@@ -401,13 +410,258 @@ def _govern_demo_measurements(db: Session, resources: dict[str, dict]) -> None:
     db.commit()
 
 
+def _seed_durr_governance(db: Session, factory: Factory, now: datetime) -> None:
+    programs = list(
+        db.scalars(select(SprayProgram).where(SprayProgram.factory_id == factory.id))
+    )
+    for program in programs:
+        device_code = program.station_code
+        controller = db.scalar(
+            select(DurrApplicationController).where(
+                DurrApplicationController.factory_id == factory.id,
+                DurrApplicationController.code == f"CTRL-{device_code}",
+            )
+        )
+        if not controller:
+            controller = DurrApplicationController(
+                factory_id=factory.id,
+                code=f"CTRL-{device_code}",
+                name=f"{program.station_name}应用控制器",
+                model="DEMO-DURR-APPLICATION-CONTROLLER",
+                serial_no=f"DEMO-CTRL-{device_code}",
+                software_version="DEMO-1.0",
+                status="ACTIVE",
+                source_uri="demo://durr/controller",
+                remark="仅用于本地链路演示，现场使用前必须替换为受批准设备资料",
+            )
+            db.add(controller)
+            db.flush()
+        robot = db.scalar(
+            select(DurrRobot).where(
+                DurrRobot.factory_id == factory.id,
+                DurrRobot.code == f"ROBOT-{device_code}",
+            )
+        )
+        if not robot:
+            robot = DurrRobot(
+                factory_id=factory.id,
+                code=f"ROBOT-{device_code}",
+                name=f"{program.station_name}机器人",
+                model=program.robot_model or "DEMO-DURR-PAINT-ROBOT",
+                serial_no=f"DEMO-ROBOT-{device_code}",
+                controller_software_version="DEMO-1.0",
+                status="ACTIVE",
+                source_uri="demo://durr/robot",
+                remark="仅用于本地链路演示，现场使用前必须替换为受批准设备资料",
+            )
+            db.add(robot)
+            db.flush()
+        atomizer = db.scalar(
+            select(DurrRotaryAtomizer).where(
+                DurrRotaryAtomizer.factory_id == factory.id,
+                DurrRotaryAtomizer.code == f"BELL-{device_code}",
+            )
+        )
+        if not atomizer:
+            atomizer = DurrRotaryAtomizer(
+                factory_id=factory.id,
+                controller_id=controller.id,
+                code=f"BELL-{device_code}",
+                name=f"{program.station_name}静电旋杯",
+                model="DEMO-DURR-ROTARY-BELL",
+                serial_no=f"DEMO-BELL-{device_code}",
+                bell_cup_type="DEMO-APPROVED-BELL-CUP",
+                bell_cup_code=f"DEMO-CUP-{device_code}",
+                status="ACTIVE",
+                source_uri="demo://durr/atomizer",
+                remark="仅用于本地链路演示，不代表真实 Dürr 型号或设备边界",
+            )
+            db.add(atomizer)
+            db.flush()
+
+        versions = list(
+            db.scalars(
+                select(SprayProgramVersion).where(
+                    SprayProgramVersion.spray_program_id == program.id
+                )
+            )
+        )
+        for version in versions:
+            configuration = db.scalar(
+                select(ProgramDeviceConfiguration).where(
+                    ProgramDeviceConfiguration.program_version_id == version.id,
+                    ProgramDeviceConfiguration.configuration_version == "1.0",
+                )
+            )
+            if not configuration:
+                configuration = ProgramDeviceConfiguration(
+                    program_version_id=version.id,
+                    robot_id=robot.id,
+                    atomizer_id=atomizer.id,
+                    controller_id=controller.id,
+                    configuration_version="1.0",
+                    status="ACTIVE",
+                    source_uri="demo://durr/device-configuration",
+                    approved_by="演示设备治理生成器",
+                    approved_at=now - timedelta(days=1),
+                    effective_from=now - timedelta(days=1),
+                )
+                db.add(configuration)
+                db.flush()
+            trajectory = db.scalar(
+                select(TrajectoryProgram).where(
+                    TrajectoryProgram.program_version_id == version.id,
+                    TrajectoryProgram.trajectory_code == f"TRJ-{program.program_code}",
+                    TrajectoryProgram.version == "1.0",
+                )
+            )
+            if not trajectory:
+                trajectory = TrajectoryProgram(
+                    program_version_id=version.id,
+                    trajectory_code=f"TRJ-{program.program_code}",
+                    name=f"{program.name}演示轨迹",
+                    version="1.0",
+                    checksum=f"DEMO-CHECKSUM-{program.program_code}-{version.version}",
+                    coordinate_system="DEMO-BODY",
+                    tcp_name="DEMO-BELL-TCP",
+                    status="ACTIVE",
+                    source_uri="demo://durr/trajectory",
+                    approved_by="演示轨迹治理生成器",
+                    approved_at=now - timedelta(days=1),
+                    remark="演示轨迹不包含真实坐标、速度或触发边界",
+                )
+                db.add(trajectory)
+                db.flush()
+            brushes = list(
+                db.scalars(
+                    select(Brush)
+                    .where(Brush.program_version_id == version.id)
+                    .order_by(Brush.brush_no)
+                )
+            )
+            segments: dict[str, TrajectoryPathSegment] = {}
+            for segment_no, brush in enumerate(brushes, start=1):
+                segment = db.scalar(
+                    select(TrajectoryPathSegment).where(
+                        TrajectoryPathSegment.trajectory_program_id == trajectory.id,
+                        TrajectoryPathSegment.segment_no == segment_no,
+                    )
+                )
+                if not segment:
+                    segment = TrajectoryPathSegment(
+                        trajectory_program_id=trajectory.id,
+                        segment_no=segment_no,
+                        name=f"{brush.brush_no} 演示路径段",
+                        brush_id=brush.id,
+                        part_id=brush.part_id,
+                        tcp_name=trajectory.tcp_name,
+                        trigger_state="ON",
+                        remark="未虚构坐标和速度；等待真实轨迹导入",
+                    )
+                    db.add(segment)
+                    db.flush()
+                segments[brush.id] = segment
+            for target_family in ("ORANGE_PEEL", "COLOR_DIFFERENCE", "THICKNESS"):
+                contribution_version = db.scalar(
+                    select(PointContributionVersion).where(
+                        PointContributionVersion.program_version_id == version.id,
+                        PointContributionVersion.target_family == target_family,
+                        PointContributionVersion.version == "1.0",
+                    )
+                )
+                if not contribution_version:
+                    contribution_version = PointContributionVersion(
+                        program_version_id=version.id,
+                        target_family=target_family,
+                        version="1.0",
+                        method="EXPERT",
+                        status="ACTIVE",
+                        evidence_uri="demo://durr/contribution",
+                        approved_by="演示贡献治理生成器",
+                        approved_at=now - timedelta(days=1),
+                        remark="由历史演示刷子贡献迁移，现场使用前必须验证",
+                    )
+                    db.add(contribution_version)
+                    db.flush()
+                legacy_rows = db.execute(
+                    select(BrushPointContribution, MeasurementPoint)
+                    .join(
+                        MeasurementPoint,
+                        MeasurementPoint.id == BrushPointContribution.measurement_point_id,
+                    )
+                    .where(
+                        BrushPointContribution.brush_id.in_([brush.id for brush in brushes]),
+                        BrushPointContribution.is_approved.is_(True),
+                    )
+                ).all()
+                for legacy, point in legacy_rows:
+                    if target_family not in point.quality_types:
+                        continue
+                    segment = segments[legacy.brush_id]
+                    source_key = f"PATH:{segment.id}"
+                    if not db.scalar(
+                        select(PointContributionEntry).where(
+                            PointContributionEntry.contribution_version_id
+                            == contribution_version.id,
+                            PointContributionEntry.measurement_point_id == point.id,
+                            PointContributionEntry.source_key == source_key,
+                        )
+                    ):
+                        db.add(
+                            PointContributionEntry(
+                                contribution_version_id=contribution_version.id,
+                                measurement_point_id=point.id,
+                                path_segment_id=segment.id,
+                                source_key=source_key,
+                                overlap_ratio=legacy.overlap_ratio,
+                                contribution_weight=legacy.contribution_weight,
+                                evidence={"migrated_from": "brush_point_contribution"},
+                            )
+                        )
+            stage_runs = list(
+                db.scalars(
+                    select(ProductionStageRun).where(
+                        ProductionStageRun.program_version_id == version.id
+                    )
+                )
+            )
+            for stage_run in stage_runs:
+                execution = db.scalar(
+                    select(ProductionDeviceExecution).where(
+                        ProductionDeviceExecution.production_stage_run_id == stage_run.id
+                    )
+                )
+                if not execution:
+                    execution = ProductionDeviceExecution(
+                        production_stage_run_id=stage_run.id,
+                        device_configuration_id=configuration.id,
+                        trajectory_program_id=trajectory.id,
+                        executed_checksum=trajectory.checksum,
+                        status="COMPLETED",
+                        source_system="DEMO-ROBOT-PLC",
+                    )
+                    db.add(execution)
+    db.commit()
+
+
 def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
+    upgraded_keys = set(
+        db.execute(
+            select(
+                PointFeatureSnapshot.production_run_id,
+                PointFeatureSnapshot.measurement_point_id,
+                PointFeatureSnapshot.target_family,
+            ).where(
+                PointFeatureSnapshot.feature_set_version == CURRENT_FEATURE_SET_VERSION
+            )
+        ).all()
+    )
     demo_snapshots = list(
         db.scalars(
             select(PointFeatureSnapshot)
             .join(ProductionRun, ProductionRun.id == PointFeatureSnapshot.production_run_id)
             .where(
-                PointFeatureSnapshot.feature_set_version == "point-features-v1",
+                PointFeatureSnapshot.feature_set_version != CURRENT_FEATURE_SET_VERSION,
                 (
                     (ProductionRun.run_no == "RUN-20260610-001")
                     | ProductionRun.run_no.like("DEMO-TRAIN-RUN-%")
@@ -416,14 +670,12 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
         )
     )
     for snapshot in demo_snapshots:
-        exists = db.scalar(
-            select(PointFeatureSnapshot).where(
-                PointFeatureSnapshot.production_run_id == snapshot.production_run_id,
-                PointFeatureSnapshot.measurement_point_id == snapshot.measurement_point_id,
-                PointFeatureSnapshot.feature_set_version == CURRENT_FEATURE_SET_VERSION,
-            )
+        snapshot_key = (
+            snapshot.production_run_id,
+            snapshot.measurement_point_id,
+            "ORANGE_PEEL",
         )
-        if exists:
+        if snapshot_key in upgraded_keys:
             continue
         feature_values = approved_numeric_values(snapshot.feature_values)
         if not feature_values:
@@ -433,17 +685,20 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
                 production_run_id=snapshot.production_run_id,
                 measurement_point_id=snapshot.measurement_point_id,
                 feature_set_version=CURRENT_FEATURE_SET_VERSION,
+                target_family="ORANGE_PEEL",
                 feature_values=feature_values,
+                lineage={"source": "demo-historical-upgrade"},
                 completeness_score=snapshot.completeness_score,
                 generated_at=datetime.now(UTC),
             )
         )
+        upgraded_keys.add(snapshot_key)
     db.commit()
 
     model = db.scalar(
         select(ModelVersion).where(
             ModelVersion.model_code == "DEMO-DOI-BASELINE",
-            ModelVersion.version == "3.0-measurement-gated",
+            ModelVersion.version == "4.0-trajectory-gated",
         )
     )
     if model:
@@ -480,7 +735,7 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
         db,
         ModelTrainingRequest(
             model_code="DEMO-DOI-BASELINE",
-            version="3.0-measurement-gated",
+            version="4.0-trajectory-gated",
             target_metric="doi",
             feature_set_version=CURRENT_FEATURE_SET_VERSION,
             min_samples=5,
@@ -510,6 +765,20 @@ def seed_demo(db: Session) -> dict:
     existing_factory = db.scalar(select(Factory).where(Factory.code == "M9"))
     if existing_factory:
         _govern_demo_measurements(db, measurement_governance)
+        _seed_durr_governance(db, existing_factory, now)
+        demo_run = db.scalar(
+            select(ProductionRun).where(ProductionRun.run_no == "RUN-20260610-001")
+        )
+        demo_point = db.scalar(
+            select(MeasurementPoint).where(MeasurementPoint.code == "P-ROOF-03")
+        )
+        if demo_run and demo_point:
+            build_point_feature_snapshot(
+                db,
+                demo_run.id,
+                demo_point.id,
+                target_family="ORANGE_PEEL",
+            )
         model = _upgrade_existing_demo_scope_data(db)
         db.commit()
         return {
@@ -821,7 +1090,10 @@ def seed_demo(db: Session) -> dict:
     )
     db.commit()
     _govern_demo_measurements(db, measurement_governance)
-    snapshot = build_point_feature_snapshot(db, run.id, points["P-ROOF-03"].id)
+    _seed_durr_governance(db, factory, now)
+    snapshot = build_point_feature_snapshot(
+        db, run.id, points["P-ROOF-03"].id, target_family="ORANGE_PEEL"
+    )
     base_features = snapshot["feature_values"]
     flow_key = "clearcoat_2.clearcoat_2_spray_flow"
     outer_air_key = "clearcoat_2.clearcoat_2_outer_air"
@@ -849,7 +1121,9 @@ def seed_demo(db: Session) -> dict:
                 production_run_id=historical_run.id,
                 measurement_point_id=points["P-ROOF-03"].id,
                 feature_set_version=CURRENT_FEATURE_SET_VERSION,
+                target_family="ORANGE_PEEL",
                 feature_values=historical_features,
+                lineage={"source": "demo-synthetic-training"},
                 completeness_score=1.0,
                 generated_at=now,
             )
@@ -881,7 +1155,7 @@ def seed_demo(db: Session) -> dict:
         db,
         ModelTrainingRequest(
             model_code="DEMO-DOI-BASELINE",
-            version="3.0-measurement-gated",
+            version="4.0-trajectory-gated",
             target_metric="doi",
             feature_set_version=CURRENT_FEATURE_SET_VERSION,
             min_samples=5,

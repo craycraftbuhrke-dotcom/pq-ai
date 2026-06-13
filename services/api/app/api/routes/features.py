@@ -16,5 +16,6 @@ def build_point_snapshot(
         db,
         production_run_id=payload.production_run_id,
         measurement_point_id=payload.measurement_point_id,
+        target_family=payload.target_family,
         feature_set_version=payload.feature_set_version,
     )

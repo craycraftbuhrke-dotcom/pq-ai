@@ -24,6 +24,8 @@ These rules are mandatory for code, schema, APIs, UI, seed data, tests, analytic
 - Measurements require instrument/method/calibration provenance.
 - Individual pass/layer thickness requires a documented measurement or inference method.
 - Point contribution is versioned and approved; it may differ by target family.
+- Approved point features require an approved target-family contribution version. A production trajectory checksum mismatch blocks feature generation and AI use.
+- Device configuration, trajectory program, path segment, and actual execution are separate versioned facts. Never infer actual execution from the configured program alone.
 - Random point-row train/test splits are prohibited.
 - Model explanations are associations unless supported by controlled causal evidence.
 - Recommendations require approved constraints, human approval, execution capture, verification, and rollback.

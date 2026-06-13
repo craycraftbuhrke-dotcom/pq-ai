@@ -52,6 +52,8 @@ def list_feature_snapshots(db: Session = Depends(get_db)) -> list[dict]:
             "measurement_point_code": point.code,
             "measurement_point_name": point.name,
             "feature_set_version": snapshot.feature_set_version,
+            "target_family": snapshot.target_family,
+            "lineage": snapshot.lineage,
             "feature_count": len(snapshot.feature_values),
             "completeness_score": snapshot.completeness_score,
             "generated_at": snapshot.generated_at,

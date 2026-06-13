@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { DurrTrajectoryPanel } from "@/components/durr-trajectory-panel";
+
 type Resource = { id: string; code: string; name: string };
 type Factory = Resource;
 type VehicleModel = Resource;
@@ -120,6 +122,7 @@ function relationName(resources: Resource[], id?: string | null): string {
 }
 
 export function ProgramWorkspace() {
+  const [workspaceTab, setWorkspaceTab] = useState<"programs" | "durr">("programs");
   const [programs, setPrograms] = useState<Program[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
   const [brushes, setBrushes] = useState<Brush[]>([]);
@@ -442,10 +445,10 @@ export function ProgramWorkspace() {
             <RefreshCw className={loading ? "spin" : ""} aria-hidden="true" />
             刷新
           </button>
-          <button className="button button-primary" onClick={() => openModal("program")}>
+          {workspaceTab === "programs" ? <button className="button button-primary" onClick={() => openModal("program")}>
             <Plus aria-hidden="true" />
             新建喷涂程序
-          </button>
+          </button> : null}
         </div>
       </header>
       <div className="freshness"><span className="live-dot" /> MySQL 实时程序配置 · 版本状态受控</div>
@@ -457,7 +460,12 @@ export function ProgramWorkspace() {
       {error ? <div className="message-banner message-error">{error}</div> : null}
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
 
-      <section className="program-config-grid">
+      <div className="master-tabs program-workspace-tabs">
+        <button className={workspaceTab === "programs" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("programs")}>程序、刷子与参数</button>
+        <button className={workspaceTab === "durr" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("durr")}>Dürr 设备、轨迹与贡献治理</button>
+      </div>
+
+      {workspaceTab === "programs" ? <section className="program-config-grid">
         <article className="panel program-column">
           <div className="program-column-heading"><div><span className="eyebrow">01 PROGRAM</span><h2>喷涂程序</h2></div><span>{programs.length}</span></div>
           <div className="program-list">
@@ -571,7 +579,7 @@ export function ProgramWorkspace() {
             </>
           ) : <div className="program-empty large-empty"><Settings2 />请选择或新增刷子以维护参数和点位贡献。</div>}
         </article>
-      </section>
+      </section> : <section className="panel"><DurrTrajectoryPanel /></section>}
 
       {modal ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => !submitting && setModal(null)}>

@@ -70,6 +70,7 @@ const eventTypes = [
   "MATERIAL_BATCH_UPSERT",
   "QMS_QUALITY_MEASUREMENT_UPSERT",
   "ROBOT_ACTUAL_PARAMETERS_UPSERT",
+  "ROBOT_TRAJECTORY_EXECUTION_UPSERT",
 ] as const;
 
 const payloadTemplates: Record<string, Record<string, unknown>> = {
@@ -109,6 +110,25 @@ const payloadTemplates: Record<string, Record<string, unknown>> = {
         parameter_code: "clearcoat_2_spray_flow",
         actual_value: 318,
         unit: "ml/min",
+      },
+    ],
+  },
+  ROBOT_TRAJECTORY_EXECUTION_UPSERT: {
+    production_run_no: "RUN-20260610-001",
+    process_stage: "CLEARCOAT_2",
+    device_configuration_version: "1.0",
+    trajectory_code: "DEMO-CLEARCOAT_2-TRAJECTORY",
+    trajectory_version: "1.0",
+    executed_checksum: "请替换为机器人实际执行文件校验和",
+    started_at: "2026-06-11T08:30:00+08:00",
+    completed_at: "2026-06-11T08:31:00+08:00",
+    source_system: "DURR_ROBOT",
+    segments: [
+      {
+        segment_no: 1,
+        actual_speed: 800,
+        speed_unit: "mm/s",
+        trigger_state: "ON",
       },
     ],
   },

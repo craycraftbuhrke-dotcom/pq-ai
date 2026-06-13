@@ -33,6 +33,8 @@ program/path version + brush/path geometry + actual rotary-bell parameters
 
 Key application variables are paint flow, bell speed, inner/outer shaping air, electrostatic voltage/current, TCP distance, path speed, path spacing/orientation, trigger timing, and overlap. Their effects are nonlinear and equipment/material specific. Numeric limits must come from approved Dürr/factory documentation and trials.
 
+For data governance, distinguish four facts: approved device combination, approved trajectory file/version/checksum, configured path-segment values, and actual production execution. A matching program name is insufficient evidence that the approved file ran. A checksum mismatch is a data-integrity failure and must block approved AI feature generation until reviewed.
+
 ## 3. Material-To-Quality Mechanism
 
 - Viscosity/rheology influences atomization, flow, levelling, film build, and orange peel.

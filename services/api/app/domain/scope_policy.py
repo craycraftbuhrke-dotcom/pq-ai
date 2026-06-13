@@ -3,7 +3,7 @@ from collections.abc import Iterable, Mapping
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
 
 
-CURRENT_FEATURE_SET_VERSION = "point-features-v2-scope"
+CURRENT_FEATURE_SET_VERSION = "point-features-v3-trajectory"
 
 APPROVED_QUALITY_TYPES = frozenset(
     {"ORANGE_PEEL", "COLOR_DIFFERENCE", "THICKNESS"}
@@ -71,6 +71,17 @@ def require_approved_target_metric(metric_code: str) -> None:
     ]
     if len(matches) != 1:
         raise ScopeViolation(f"模型目标指标 {metric_code} 不在当前项目范围内")
+
+
+def target_family_for_metric(metric_code: str) -> str:
+    matches = [
+        quality_type
+        for quality_type, approved_metric_code in APPROVED_METRIC_KEYS
+        if approved_metric_code == metric_code
+    ]
+    if len(matches) != 1:
+        raise ScopeViolation(f"模型目标指标 {metric_code} 不在当前项目范围内")
+    return matches[0]
 
 
 def require_approved_quality_types(quality_types: Iterable[str]) -> None:

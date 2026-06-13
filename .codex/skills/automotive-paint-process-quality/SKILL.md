@@ -22,10 +22,11 @@ Use this skill for every change that touches process stages, parameters, materia
 2. Distinguish configured setpoints, actual executed values, material test results, measurement results, and derived features.
 3. Preserve measurement traceability: instrument model/serial, firmware/export schema, method/probe, calibration/reference status, operator, timestamp, repetitions, and raw/corrected values.
 4. Aggregate point features from approved brush/path contribution versions. Do not treat simple averages as physical truth.
-5. Train separate model families for thickness, color, and orange peel. Split data by time and production event/body/batch to prevent leakage.
-6. Treat diagnosis as association unless supported by controlled DOE or other causal evidence.
-7. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require human approval and post-change measurement.
-8. Reject or quarantine out-of-scope features before snapshot creation and training.
+5. Require the production-stage device configuration and executed trajectory checksum to match an approved trajectory before using the stage in an approved feature snapshot.
+6. Train separate model families for thickness, color, and orange peel. Split data by time and production event/body/batch to prevent leakage.
+7. Treat diagnosis as association unless supported by controlled DOE or other causal evidence.
+8. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require human approval and post-change measurement.
+9. Reject or quarantine out-of-scope features before snapshot creation and training.
 
 ## Reference Loading
 
@@ -40,3 +41,4 @@ Use this skill for every change that touches process stages, parameters, materia
 - Every model result is traceable to feature set, training data, model version, applicability scope, and measurement provenance.
 - Every recommendation shows evidence, constraints, uncertainty, approval, execution values, and verification results.
 - Tests cover scope filtering, traceability, grouped/temporal evaluation, and closed-loop audit behavior.
+- Robot/trajectory changes cover device identity, program/path version, checksum matching, target-family contribution, actual execution, and rollback traceability.

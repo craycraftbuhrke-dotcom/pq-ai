@@ -12,6 +12,7 @@ const allowedRoots = new Set([
   "production-stage-runs",
   "actual-parameters",
   "material-batches",
+  "robot-governance",
 ]);
 
 type Context = { params: Promise<{ path: string[] }> };

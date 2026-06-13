@@ -9,6 +9,7 @@ from app.domain.scope_policy import (
     ScopeViolation,
     approved_numeric_values,
     require_scope_safe_model,
+    target_family_for_metric,
 )
 from app.models.domain import (
     DiagnosisResult,
@@ -31,6 +32,13 @@ def _ensure_model_scope(model: ModelVersion) -> None:
             model.feature_set_version,
             model.model_payload.get("feature_names", []),
         )
+    except ScopeViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _target_family(target_metric: str) -> str:
+    try:
+        return target_family_for_metric(target_metric)
     except ScopeViolation as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -139,7 +147,8 @@ def train_model(db: Session, payload) -> ModelVersion:
     snapshots = list(
         db.scalars(
             select(PointFeatureSnapshot).where(
-                PointFeatureSnapshot.feature_set_version == payload.feature_set_version
+                PointFeatureSnapshot.feature_set_version == payload.feature_set_version,
+                PointFeatureSnapshot.target_family == _target_family(payload.target_metric),
             )
         )
     )
@@ -204,7 +213,10 @@ def model_drift_report(db: Session, model: ModelVersion, recent_limit: int = 100
     snapshots = list(
         db.scalars(
             select(PointFeatureSnapshot)
-            .where(PointFeatureSnapshot.feature_set_version == model.feature_set_version)
+            .where(
+                PointFeatureSnapshot.feature_set_version == model.feature_set_version,
+                PointFeatureSnapshot.target_family == _target_family(model.target_metric),
+            )
             .order_by(PointFeatureSnapshot.generated_at.desc())
             .limit(recent_limit)
         )
@@ -386,6 +398,7 @@ def predict_with_model(
             PointFeatureSnapshot.production_run_id == production_run_id,
             PointFeatureSnapshot.measurement_point_id == measurement_point_id,
             PointFeatureSnapshot.feature_set_version == model.feature_set_version,
+            PointFeatureSnapshot.target_family == _target_family(model.target_metric),
         )
     )
     if not snapshot:
@@ -445,6 +458,7 @@ def diagnose_prediction(db: Session, prediction: PredictionResult) -> DiagnosisR
             PointFeatureSnapshot.production_run_id == prediction.production_run_id,
             PointFeatureSnapshot.measurement_point_id == prediction.measurement_point_id,
             PointFeatureSnapshot.feature_set_version == model.feature_set_version,
+            PointFeatureSnapshot.target_family == _target_family(model.target_metric),
         )
     )
     payload = model.model_payload
@@ -535,6 +549,7 @@ def recommend_with_model(
             PointFeatureSnapshot.production_run_id == production_run_id,
             PointFeatureSnapshot.measurement_point_id == measurement_point_id,
             PointFeatureSnapshot.feature_set_version == model.feature_set_version,
+            PointFeatureSnapshot.target_family == _target_family(model.target_metric),
         )
     )
     payload = model.model_payload

@@ -263,7 +263,9 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
     assert result["contribution_count"] == 2
     assert result["stage_coverage"] == ["CLEARCOAT_2"]
     assert result["completeness_score"] == 0.2
-    assert result["feature_set_version"] == "point-features-v2-scope"
+    assert result["feature_set_version"] == "point-features-v3-trajectory"
+    assert result["target_family"] == "ORANGE_PEEL"
+    assert result["lineage"]["legacy_contribution_fallback"] is True
 
     second_result = build_point_snapshot(
         PointFeatureBuildRequest(

@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -362,6 +363,201 @@ class BrushPointContribution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_approved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
+class DurrRobot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "durr_robot"
+    __table_args__ = (UniqueConstraint("factory_id", "code", name="uq_factory_durr_robot"),)
+
+    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    serial_no: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    controller_software_version: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    source_uri: Mapped[str | None] = mapped_column(String(500))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class DurrApplicationController(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "durr_application_controller"
+    __table_args__ = (
+        UniqueConstraint("factory_id", "code", name="uq_factory_durr_controller"),
+    )
+
+    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    serial_no: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    software_version: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    source_uri: Mapped[str | None] = mapped_column(String(500))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class DurrRotaryAtomizer(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "durr_rotary_atomizer"
+    __table_args__ = (
+        UniqueConstraint("factory_id", "code", name="uq_factory_durr_atomizer"),
+    )
+
+    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
+    controller_id: Mapped[str | None] = mapped_column(
+        ForeignKey("durr_application_controller.id")
+    )
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    serial_no: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    bell_cup_type: Mapped[str | None] = mapped_column(String(120))
+    bell_cup_code: Mapped[str | None] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    source_uri: Mapped[str | None] = mapped_column(String(500))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class ProgramDeviceConfiguration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "program_device_configuration"
+    __table_args__ = (
+        UniqueConstraint(
+            "program_version_id",
+            "configuration_version",
+            name="uq_program_device_configuration_version",
+        ),
+    )
+
+    program_version_id: Mapped[str] = mapped_column(
+        ForeignKey("spray_program_version.id"), nullable=False
+    )
+    robot_id: Mapped[str] = mapped_column(ForeignKey("durr_robot.id"), nullable=False)
+    atomizer_id: Mapped[str] = mapped_column(
+        ForeignKey("durr_rotary_atomizer.id"), nullable=False
+    )
+    controller_id: Mapped[str] = mapped_column(
+        ForeignKey("durr_application_controller.id"), nullable=False
+    )
+    configuration_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    source_uri: Mapped[str | None] = mapped_column(String(500))
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class TrajectoryProgram(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "trajectory_program"
+    __table_args__ = (
+        UniqueConstraint(
+            "program_version_id",
+            "trajectory_code",
+            "version",
+            name="uq_program_trajectory_version",
+        ),
+    )
+
+    program_version_id: Mapped[str] = mapped_column(
+        ForeignKey("spray_program_version.id"), nullable=False
+    )
+    trajectory_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    checksum: Mapped[str] = mapped_column(String(128), nullable=False)
+    coordinate_system: Mapped[str | None] = mapped_column(String(80))
+    tcp_name: Mapped[str | None] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    source_uri: Mapped[str | None] = mapped_column(String(500))
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class TrajectoryPathSegment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "trajectory_path_segment"
+    __table_args__ = (
+        UniqueConstraint(
+            "trajectory_program_id",
+            "segment_no",
+            name="uq_trajectory_path_segment_no",
+        ),
+    )
+
+    trajectory_program_id: Mapped[str] = mapped_column(
+        ForeignKey("trajectory_program.id"), nullable=False
+    )
+    segment_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    brush_id: Mapped[str | None] = mapped_column(ForeignKey("brush.id"))
+    part_id: Mapped[str | None] = mapped_column(ForeignKey("part.id"))
+    tcp_name: Mapped[str | None] = mapped_column(String(120))
+    configured_speed: Mapped[float | None] = mapped_column(Float)
+    speed_unit: Mapped[str | None] = mapped_column(String(24))
+    start_position: Mapped[dict | None] = mapped_column(JSON)
+    end_position: Mapped[dict | None] = mapped_column(JSON)
+    orientation: Mapped[dict | None] = mapped_column(JSON)
+    trigger_state: Mapped[str] = mapped_column(String(24), default="ON", nullable=False)
+    trigger_start_ms: Mapped[float | None] = mapped_column(Float)
+    trigger_end_ms: Mapped[float | None] = mapped_column(Float)
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class PointContributionVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "point_contribution_version"
+    __table_args__ = (
+        UniqueConstraint(
+            "program_version_id",
+            "target_family",
+            "version",
+            name="uq_program_target_contribution_version",
+        ),
+    )
+
+    program_version_id: Mapped[str] = mapped_column(
+        ForeignKey("spray_program_version.id"), nullable=False
+    )
+    target_family: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    method: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    evidence_uri: Mapped[str | None] = mapped_column(String(500))
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class PointContributionEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "point_contribution_entry"
+    __table_args__ = (
+        UniqueConstraint(
+            "contribution_version_id",
+            "measurement_point_id",
+            "source_key",
+            name="uq_version_point_contribution_source",
+        ),
+        CheckConstraint(
+            "(brush_id IS NOT NULL AND path_segment_id IS NULL) OR "
+            "(brush_id IS NULL AND path_segment_id IS NOT NULL)",
+            name="ck_point_contribution_exactly_one_source",
+        ),
+    )
+
+    contribution_version_id: Mapped[str] = mapped_column(
+        ForeignKey("point_contribution_version.id"), nullable=False
+    )
+    measurement_point_id: Mapped[str] = mapped_column(
+        ForeignKey("measurement_point.id"), nullable=False
+    )
+    brush_id: Mapped[str | None] = mapped_column(ForeignKey("brush.id"))
+    path_segment_id: Mapped[str | None] = mapped_column(
+        ForeignKey("trajectory_path_segment.id")
+    )
+    source_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    overlap_ratio: Mapped[float] = mapped_column(Float, nullable=False)
+    contribution_weight: Mapped[float] = mapped_column(Float, nullable=False)
+    validation_score: Mapped[float | None] = mapped_column(Float)
+    evidence: Mapped[dict | None] = mapped_column(JSON)
+
+
 class MaterialBatch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "material_batch"
 
@@ -406,6 +602,51 @@ class ProductionStageRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     material_batch_id: Mapped[str | None] = mapped_column(ForeignKey("material_batch.id"))
     actual_parameters: Mapped[dict | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(24), default="COMPLETED", nullable=False)
+
+
+class ProductionDeviceExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "production_device_execution"
+    __table_args__ = (
+        UniqueConstraint("production_stage_run_id", name="uq_stage_device_execution"),
+    )
+
+    production_stage_run_id: Mapped[str] = mapped_column(
+        ForeignKey("production_stage_run.id"), nullable=False
+    )
+    device_configuration_id: Mapped[str] = mapped_column(
+        ForeignKey("program_device_configuration.id"), nullable=False
+    )
+    trajectory_program_id: Mapped[str] = mapped_column(
+        ForeignKey("trajectory_program.id"), nullable=False
+    )
+    executed_checksum: Mapped[str] = mapped_column(String(128), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(24), default="COMPLETED", nullable=False)
+    source_system: Mapped[str | None] = mapped_column(String(80))
+    deviation_details: Mapped[dict | None] = mapped_column(JSON)
+
+
+class PathSegmentExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "path_segment_execution"
+    __table_args__ = (
+        UniqueConstraint(
+            "device_execution_id",
+            "path_segment_id",
+            name="uq_device_path_segment_execution",
+        ),
+    )
+
+    device_execution_id: Mapped[str] = mapped_column(
+        ForeignKey("production_device_execution.id"), nullable=False
+    )
+    path_segment_id: Mapped[str] = mapped_column(
+        ForeignKey("trajectory_path_segment.id"), nullable=False
+    )
+    actual_speed: Mapped[float | None] = mapped_column(Float)
+    speed_unit: Mapped[str | None] = mapped_column(String(24))
+    trigger_state: Mapped[str | None] = mapped_column(String(24))
+    actual_values: Mapped[dict | None] = mapped_column(JSON)
 
 
 class ActualParameter(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -637,7 +878,8 @@ class PointFeatureSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "production_run_id",
             "measurement_point_id",
             "feature_set_version",
-            name="uq_run_point_feature_version",
+            "target_family",
+            name="uq_run_point_feature_target_version",
         ),
     )
 
@@ -646,7 +888,11 @@ class PointFeatureSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("measurement_point.id"), nullable=False
     )
     feature_set_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_family: Mapped[str] = mapped_column(
+        String(32), default=QualityType.ORANGE_PEEL, nullable=False
+    )
     feature_values: Mapped[dict] = mapped_column(JSON, nullable=False)
+    lineage: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     completeness_score: Mapped[float] = mapped_column(Float, nullable=False)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

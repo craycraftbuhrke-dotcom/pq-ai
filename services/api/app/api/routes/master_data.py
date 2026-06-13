@@ -18,6 +18,8 @@ from app.models.domain import (
     MeasurementGroupPoint,
     MeasurementPoint,
     Part,
+    PointContributionEntry,
+    PointContributionVersion,
     VehicleModel,
     VehicleModelColor,
 )
@@ -120,7 +122,20 @@ def master_data_summary(db: Session = Depends(get_db)) -> dict:
     def count(model: type) -> int:
         return int(db.scalar(select(func.count()).select_from(model)) or 0)
 
-    approved = int(
+    controlled = int(
+        db.scalar(
+            select(func.count())
+            .select_from(PointContributionEntry)
+            .join(
+                PointContributionVersion,
+                PointContributionVersion.id
+                == PointContributionEntry.contribution_version_id,
+            )
+            .where(PointContributionVersion.status == "ACTIVE")
+        )
+        or 0
+    )
+    legacy_approved = int(
         db.scalar(
             select(func.count())
             .select_from(BrushPointContribution)
@@ -128,6 +143,7 @@ def master_data_summary(db: Session = Depends(get_db)) -> dict:
         )
         or 0
     )
+    approved = controlled or legacy_approved
     measurement_groups = int(
         db.scalar(
             select(func.count())

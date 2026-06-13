@@ -29,6 +29,8 @@ Treat parameter effects as interacting, nonlinear, and equipment/material specif
 
 Store atomizer identity, bell-cup type, controller version, robot identity, program checksum, path version, TCP, path segment, speed, orientation, trigger state, and setpoint/actual values. Do not reduce trajectory programming to one text spray position.
 
+The approved trajectory and the production execution are separate records. Store the executed checksum and actual path-segment facts from the robot/controller interface. If the executed checksum differs from the approved trajectory checksum, classify the execution as a mismatch and exclude it from approved point-feature generation.
+
 ## Point Contribution
 
 The point-level feature matrix is based on approved brush/path contribution versions:
@@ -36,6 +38,8 @@ The point-level feature matrix is based on approved brush/path contribution vers
 `point feature = aggregate(actual brush/path parameter × contribution weight)`
 
 Contribution weights may come from expert mapping, geometry/simulation, DOE, or fitted deposition models. Store source, method, version, applicability scope, approval, and validation evidence. The weights for different outcomes may differ; thickness contribution is not automatically the same as color-effect or orange-peel contribution.
+
+The contribution source may be a brush or a trajectory path segment, but each entry must select exactly one. Only one active contribution version per program version and target family should drive approved aggregation.
 
 ## Hard Rules
 

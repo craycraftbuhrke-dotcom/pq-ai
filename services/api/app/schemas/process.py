@@ -128,6 +128,306 @@ class BrushPointContributionRead(BrushPointContributionUpsert, ResourceRead):
     measurement_point_id: str
 
 
+class DurrRobotCreate(BaseModel):
+    factory_id: str
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=120)
+    model: str = Field(min_length=1, max_length=120)
+    serial_no: str = Field(min_length=1, max_length=120)
+    controller_software_version: str | None = Field(default=None, max_length=80)
+    status: str = Field(default="ACTIVE", pattern="^(ACTIVE|MAINTENANCE|RETIRED)$")
+    source_uri: str | None = Field(default=None, max_length=500)
+    remark: str | None = None
+
+
+class DurrRobotUpdate(BaseModel):
+    factory_id: str | None = None
+    code: str | None = Field(default=None, min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    model: str | None = Field(default=None, min_length=1, max_length=120)
+    serial_no: str | None = Field(default=None, min_length=1, max_length=120)
+    controller_software_version: str | None = Field(default=None, max_length=80)
+    status: str | None = Field(
+        default=None, pattern="^(ACTIVE|MAINTENANCE|RETIRED)$"
+    )
+    source_uri: str | None = Field(default=None, max_length=500)
+    remark: str | None = None
+
+
+class DurrRobotRead(DurrRobotCreate, ResourceRead):
+    pass
+
+
+class DurrControllerCreate(BaseModel):
+    factory_id: str
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=120)
+    model: str = Field(min_length=1, max_length=120)
+    serial_no: str = Field(min_length=1, max_length=120)
+    software_version: str | None = Field(default=None, max_length=80)
+    status: str = Field(default="ACTIVE", pattern="^(ACTIVE|MAINTENANCE|RETIRED)$")
+    source_uri: str | None = Field(default=None, max_length=500)
+    remark: str | None = None
+
+
+class DurrControllerUpdate(BaseModel):
+    factory_id: str | None = None
+    code: str | None = Field(default=None, min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    model: str | None = Field(default=None, min_length=1, max_length=120)
+    serial_no: str | None = Field(default=None, min_length=1, max_length=120)
+    software_version: str | None = Field(default=None, max_length=80)
+    status: str | None = Field(
+        default=None, pattern="^(ACTIVE|MAINTENANCE|RETIRED)$"
+    )
+    source_uri: str | None = Field(default=None, max_length=500)
+    remark: str | None = None
+
+
+class DurrControllerRead(DurrControllerCreate, ResourceRead):
+    pass
+
+
+class DurrAtomizerCreate(BaseModel):
+    factory_id: str
+    controller_id: str | None = None
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=120)
+    model: str = Field(min_length=1, max_length=120)
+    serial_no: str = Field(min_length=1, max_length=120)
+    bell_cup_type: str | None = Field(default=None, max_length=120)
+    bell_cup_code: str | None = Field(default=None, max_length=120)
+    status: str = Field(default="ACTIVE", pattern="^(ACTIVE|MAINTENANCE|RETIRED)$")
+    source_uri: str | None = Field(default=None, max_length=500)
+    remark: str | None = None
+
+
+class DurrAtomizerUpdate(BaseModel):
+    factory_id: str | None = None
+    controller_id: str | None = None
+    code: str | None = Field(default=None, min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    model: str | None = Field(default=None, min_length=1, max_length=120)
+    serial_no: str | None = Field(default=None, min_length=1, max_length=120)
+    bell_cup_type: str | None = Field(default=None, max_length=120)
+    bell_cup_code: str | None = Field(default=None, max_length=120)
+    status: str | None = Field(
+        default=None, pattern="^(ACTIVE|MAINTENANCE|RETIRED)$"
+    )
+    source_uri: str | None = Field(default=None, max_length=500)
+    remark: str | None = None
+
+
+class DurrAtomizerRead(DurrAtomizerCreate, ResourceRead):
+    pass
+
+
+class ProgramDeviceConfigurationCreate(BaseModel):
+    program_version_id: str
+    robot_id: str
+    atomizer_id: str
+    controller_id: str
+    configuration_version: str = Field(min_length=1, max_length=32)
+    status: str = Field(default="DRAFT", pattern="^(DRAFT|APPROVED|ACTIVE|RETIRED)$")
+    source_uri: str | None = Field(default=None, max_length=500)
+    approved_by: str | None = Field(default=None, max_length=80)
+    effective_from: datetime | None = None
+    remark: str | None = None
+
+
+class ProgramDeviceConfigurationUpdate(BaseModel):
+    program_version_id: str | None = None
+    robot_id: str | None = None
+    atomizer_id: str | None = None
+    controller_id: str | None = None
+    configuration_version: str | None = Field(default=None, min_length=1, max_length=32)
+    status: str | None = Field(
+        default=None, pattern="^(DRAFT|APPROVED|ACTIVE|RETIRED)$"
+    )
+    source_uri: str | None = Field(default=None, max_length=500)
+    approved_by: str | None = Field(default=None, max_length=80)
+    effective_from: datetime | None = None
+    remark: str | None = None
+
+
+class ProgramDeviceConfigurationRead(ProgramDeviceConfigurationCreate, ResourceRead):
+    approved_at: datetime | None
+
+
+class TrajectoryProgramCreate(BaseModel):
+    program_version_id: str
+    trajectory_code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=160)
+    version: str = Field(min_length=1, max_length=32)
+    checksum: str = Field(min_length=1, max_length=128)
+    coordinate_system: str | None = Field(default=None, max_length=80)
+    tcp_name: str | None = Field(default=None, max_length=120)
+    status: str = Field(default="DRAFT", pattern="^(DRAFT|APPROVED|ACTIVE|RETIRED)$")
+    source_uri: str | None = Field(default=None, max_length=500)
+    approved_by: str | None = Field(default=None, max_length=80)
+    remark: str | None = None
+
+
+class TrajectoryProgramUpdate(BaseModel):
+    program_version_id: str | None = None
+    trajectory_code: str | None = Field(default=None, min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    version: str | None = Field(default=None, min_length=1, max_length=32)
+    checksum: str | None = Field(default=None, min_length=1, max_length=128)
+    coordinate_system: str | None = Field(default=None, max_length=80)
+    tcp_name: str | None = Field(default=None, max_length=120)
+    status: str | None = Field(
+        default=None, pattern="^(DRAFT|APPROVED|ACTIVE|RETIRED)$"
+    )
+    source_uri: str | None = Field(default=None, max_length=500)
+    approved_by: str | None = Field(default=None, max_length=80)
+    remark: str | None = None
+
+
+class TrajectoryProgramRead(TrajectoryProgramCreate, ResourceRead):
+    approved_at: datetime | None
+
+
+class TrajectoryPathSegmentCreate(BaseModel):
+    trajectory_program_id: str
+    segment_no: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=160)
+    brush_id: str | None = None
+    part_id: str | None = None
+    tcp_name: str | None = Field(default=None, max_length=120)
+    configured_speed: float | None = Field(default=None, gt=0)
+    speed_unit: str | None = Field(default=None, max_length=24)
+    start_position: dict | None = None
+    end_position: dict | None = None
+    orientation: dict | None = None
+    trigger_state: str = Field(default="ON", pattern="^(ON|OFF|PULSE)$")
+    trigger_start_ms: float | None = None
+    trigger_end_ms: float | None = None
+    remark: str | None = None
+
+
+class TrajectoryPathSegmentUpdate(BaseModel):
+    trajectory_program_id: str | None = None
+    segment_no: int | None = Field(default=None, ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    brush_id: str | None = None
+    part_id: str | None = None
+    tcp_name: str | None = Field(default=None, max_length=120)
+    configured_speed: float | None = Field(default=None, gt=0)
+    speed_unit: str | None = Field(default=None, max_length=24)
+    start_position: dict | None = None
+    end_position: dict | None = None
+    orientation: dict | None = None
+    trigger_state: str | None = Field(default=None, pattern="^(ON|OFF|PULSE)$")
+    trigger_start_ms: float | None = None
+    trigger_end_ms: float | None = None
+    remark: str | None = None
+
+
+class TrajectoryPathSegmentRead(TrajectoryPathSegmentCreate, ResourceRead):
+    pass
+
+
+class PointContributionVersionCreate(BaseModel):
+    program_version_id: str
+    target_family: str = Field(
+        pattern="^(ORANGE_PEEL|COLOR_DIFFERENCE|THICKNESS)$"
+    )
+    version: str = Field(min_length=1, max_length=32)
+    method: str = Field(
+        pattern="^(EXPERT|GEOMETRY|SIMULATION|DOE|FITTED_DEPOSITION)$"
+    )
+    status: str = Field(default="DRAFT", pattern="^(DRAFT|APPROVED|ACTIVE|RETIRED)$")
+    evidence_uri: str | None = Field(default=None, max_length=500)
+    approved_by: str | None = Field(default=None, max_length=80)
+    remark: str | None = None
+
+
+class PointContributionVersionUpdate(BaseModel):
+    program_version_id: str | None = None
+    target_family: str | None = Field(
+        default=None, pattern="^(ORANGE_PEEL|COLOR_DIFFERENCE|THICKNESS)$"
+    )
+    version: str | None = Field(default=None, min_length=1, max_length=32)
+    method: str | None = Field(
+        default=None, pattern="^(EXPERT|GEOMETRY|SIMULATION|DOE|FITTED_DEPOSITION)$"
+    )
+    status: str | None = Field(
+        default=None, pattern="^(DRAFT|APPROVED|ACTIVE|RETIRED)$"
+    )
+    evidence_uri: str | None = Field(default=None, max_length=500)
+    approved_by: str | None = Field(default=None, max_length=80)
+    remark: str | None = None
+
+
+class PointContributionVersionRead(PointContributionVersionCreate, ResourceRead):
+    approved_at: datetime | None
+
+
+class PointContributionEntryCreate(BaseModel):
+    contribution_version_id: str
+    measurement_point_id: str
+    brush_id: str | None = None
+    path_segment_id: str | None = None
+    overlap_ratio: float = Field(ge=0, le=1)
+    contribution_weight: float = Field(gt=0, le=1)
+    validation_score: float | None = Field(default=None, ge=0, le=1)
+    evidence: dict | None = None
+
+
+class PointContributionEntryUpdate(BaseModel):
+    measurement_point_id: str | None = None
+    brush_id: str | None = None
+    path_segment_id: str | None = None
+    overlap_ratio: float | None = Field(default=None, ge=0, le=1)
+    contribution_weight: float | None = Field(default=None, gt=0, le=1)
+    validation_score: float | None = Field(default=None, ge=0, le=1)
+    evidence: dict | None = None
+
+
+class PointContributionEntryRead(PointContributionEntryCreate, ResourceRead):
+    source_key: str
+
+
+class ProductionDeviceExecutionCreate(BaseModel):
+    production_stage_run_id: str
+    device_configuration_id: str
+    trajectory_program_id: str
+    executed_checksum: str = Field(min_length=1, max_length=128)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    status: str = Field(default="COMPLETED", max_length=24)
+    source_system: str | None = Field(default=None, max_length=80)
+    deviation_details: dict | None = None
+
+
+class ProductionDeviceExecutionUpdate(BaseModel):
+    device_configuration_id: str | None = None
+    trajectory_program_id: str | None = None
+    executed_checksum: str | None = Field(default=None, min_length=1, max_length=128)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    status: str | None = Field(default=None, max_length=24)
+    source_system: str | None = Field(default=None, max_length=80)
+    deviation_details: dict | None = None
+
+
+class ProductionDeviceExecutionRead(ProductionDeviceExecutionCreate, ResourceRead):
+    pass
+
+
+class PathSegmentExecutionCreate(BaseModel):
+    path_segment_id: str
+    actual_speed: float | None = Field(default=None, gt=0)
+    speed_unit: str | None = Field(default=None, max_length=24)
+    trigger_state: str | None = Field(default=None, pattern="^(ON|OFF|PULSE)$")
+    actual_values: dict | None = None
+
+
+class PathSegmentExecutionRead(PathSegmentExecutionCreate, ResourceRead):
+    device_execution_id: str
+
+
 class MaterialBatchCreate(BaseModel):
     batch_no: str = Field(min_length=1, max_length=64)
     material_code: str = Field(min_length=1, max_length=64)

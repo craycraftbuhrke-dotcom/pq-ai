@@ -24,10 +24,15 @@ from app.models.domain import (
     MeasurementReferenceStandard,
     MeasurementRepeatReading,
     ParameterDefinition,
+    PathSegmentExecution,
+    ProductionDeviceExecution,
     ProductionRun,
     ProductionStageRun,
+    ProgramDeviceConfiguration,
     QualityMeasurement,
     QualityMetricValue,
+    TrajectoryPathSegment,
+    TrajectoryProgram,
     VehicleModel,
 )
 from app.services.measurement_reliability import refresh_measurement_reliability
@@ -307,11 +312,121 @@ def _process_robot_parameters(db: Session, payload: dict) -> dict:
     }
 
 
+def _process_robot_trajectory_execution(db: Session, payload: dict) -> dict:
+    run = db.scalar(
+        select(ProductionRun).where(ProductionRun.run_no == payload["production_run_no"])
+    )
+    if not run:
+        raise ValueError(f"生产事件不存在：{payload['production_run_no']}")
+    stage = db.scalar(
+        select(ProductionStageRun).where(
+            ProductionStageRun.production_run_id == run.id,
+            ProductionStageRun.process_stage == payload["process_stage"],
+        )
+    )
+    if not stage:
+        raise ValueError(f"生产事件缺少工序实绩：{payload['process_stage']}")
+    configuration_query = select(ProgramDeviceConfiguration).where(
+        ProgramDeviceConfiguration.program_version_id == stage.program_version_id
+    )
+    if payload.get("device_configuration_version"):
+        configuration_query = configuration_query.where(
+            ProgramDeviceConfiguration.configuration_version
+            == payload["device_configuration_version"]
+        )
+    else:
+        configuration_query = configuration_query.where(
+            ProgramDeviceConfiguration.status == "ACTIVE"
+        )
+    configuration = db.scalar(configuration_query)
+    if not configuration:
+        raise ValueError("生产工序缺少匹配的受治理设备配置")
+    trajectory_query = select(TrajectoryProgram).where(
+        TrajectoryProgram.program_version_id == stage.program_version_id,
+        TrajectoryProgram.trajectory_code == payload["trajectory_code"],
+    )
+    if payload.get("trajectory_version"):
+        trajectory_query = trajectory_query.where(
+            TrajectoryProgram.version == payload["trajectory_version"]
+        )
+    else:
+        trajectory_query = trajectory_query.where(TrajectoryProgram.status == "ACTIVE")
+    trajectory = db.scalar(trajectory_query)
+    if not trajectory:
+        raise ValueError("生产工序缺少匹配的受治理轨迹程序")
+    execution = db.scalar(
+        select(ProductionDeviceExecution).where(
+            ProductionDeviceExecution.production_stage_run_id == stage.id
+        )
+    )
+    values = {
+        "device_configuration_id": configuration.id,
+        "trajectory_program_id": trajectory.id,
+        "executed_checksum": payload["executed_checksum"],
+        "started_at": _datetime(payload["started_at"], "started_at")
+        if payload.get("started_at")
+        else None,
+        "completed_at": _datetime(payload["completed_at"], "completed_at")
+        if payload.get("completed_at")
+        else None,
+        "status": (
+            "CHECKSUM_MISMATCH"
+            if payload["executed_checksum"] != trajectory.checksum
+            else payload.get("status", "COMPLETED")
+        ),
+        "source_system": payload.get("source_system", "ROBOT"),
+        "deviation_details": payload.get("deviation_details"),
+    }
+    operation = "UPDATED" if execution else "CREATED"
+    if execution:
+        for field, value in values.items():
+            setattr(execution, field, value)
+        db.execute(
+            delete(PathSegmentExecution).where(
+                PathSegmentExecution.device_execution_id == execution.id
+            )
+        )
+    else:
+        execution = ProductionDeviceExecution(
+            production_stage_run_id=stage.id,
+            **values,
+        )
+        db.add(execution)
+        db.flush()
+    for item in payload.get("segments", []):
+        segment = db.scalar(
+            select(TrajectoryPathSegment).where(
+                TrajectoryPathSegment.trajectory_program_id == trajectory.id,
+                TrajectoryPathSegment.segment_no == int(item["segment_no"]),
+            )
+        )
+        if not segment:
+            raise ValueError(f"轨迹路径段不存在：{item['segment_no']}")
+        db.add(
+            PathSegmentExecution(
+                device_execution_id=execution.id,
+                path_segment_id=segment.id,
+                actual_speed=item.get("actual_speed"),
+                speed_unit=item.get("speed_unit"),
+                trigger_state=item.get("trigger_state"),
+                actual_values=item.get("actual_values"),
+            )
+        )
+    db.flush()
+    return {
+        "operation": operation,
+        "resource_type": "production_device_execution",
+        "resource_id": execution.id,
+        "status": execution.status,
+    }
+
+
 PROCESSORS = {
     "MES_PRODUCTION_RUN_UPSERT": _process_mes_run,
     "MATERIAL_BATCH_UPSERT": _process_material_batch,
     "QMS_QUALITY_MEASUREMENT_UPSERT": _process_qms_measurement,
     "ROBOT_ACTUAL_PARAMETERS_UPSERT": _process_robot_parameters,
+    "ROBOT_TRAJECTORY_EXECUTION_UPSERT": _process_robot_trajectory_execution,
 }
 
 

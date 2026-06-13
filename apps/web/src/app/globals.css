@@ -1484,6 +1484,56 @@ button.message-banner {
   grid-template-columns: minmax(220px, 0.7fr) minmax(210px, 0.62fr) minmax(620px, 2fr);
 }
 
+.program-workspace-tabs {
+  align-self: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.durr-governance {
+  padding: 0;
+}
+
+.durr-governance .governance-toolbar {
+  align-items: flex-start;
+}
+
+.durr-governance .master-tabs {
+  flex-wrap: wrap;
+}
+
+.durr-table {
+  min-width: 1280px;
+}
+
+.durr-table td:nth-child(2),
+.durr-table td:nth-child(4) {
+  max-width: 360px;
+  overflow-wrap: anywhere;
+}
+
+.readonly-note {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.governance-warning {
+  align-items: center;
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line));
+  border-radius: 8px;
+  color: var(--danger);
+  display: flex;
+  font-size: 10px;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.governance-warning svg {
+  height: 15px;
+  width: 15px;
+}
+
 .program-column,
 .program-detail-column {
   min-height: 570px;

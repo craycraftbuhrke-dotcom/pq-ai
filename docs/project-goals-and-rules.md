@@ -22,6 +22,7 @@ Explicitly excluded: pretreatment, e-coat, sealing, booth temperature/humidity, 
 4. Diagnosis distinguishes association from verified causality.
 5. Recommendations are constrained, explainable, approved, reversible, executed as a trial, and verified with quality data.
 6. No model is production-ready until validated with real independent factory runs and accepted by process and quality engineers.
+7. A configured robot program is not proof of execution. Approved AI input requires the production-stage device configuration, executed trajectory checksum, and target-family point contribution lineage.
 
 ## Development Gate
 
@@ -33,3 +34,4 @@ Every new feature must pass:
 - Data check: validation, missingness, repetition, and lineage are handled.
 - AI check: grouped/temporal evaluation, uncertainty, applicability, and drift are handled.
 - Workflow check: engineer decision, approval, rollback, and verification are represented.
+- Robot execution check: approved configuration/trajectory, actual checksum, path-segment facts, target-family contribution version, and mismatch blocking are represented.
