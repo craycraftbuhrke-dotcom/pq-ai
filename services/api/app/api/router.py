@@ -8,6 +8,7 @@ from app.api.routes import (
     health,
     integration,
     master_data,
+    material_governance,
     measurement_governance,
     modeling,
     process,
@@ -22,6 +23,7 @@ api_router.include_router(dashboard.router)
 api_router.include_router(factories.router)
 api_router.include_router(master_data.router)
 api_router.include_router(process.router)
+api_router.include_router(material_governance.router)
 api_router.include_router(robot_governance.router)
 api_router.include_router(quality.router)
 api_router.include_router(measurement_governance.router)

@@ -1534,6 +1534,20 @@ button.message-banner {
   width: 15px;
 }
 
+.material-governance {
+  padding: 15px;
+}
+
+.material-governance-table {
+  min-width: 1180px;
+}
+
+.material-governance-table td:nth-child(2),
+.material-governance-table td:nth-child(4) {
+  max-width: 360px;
+  overflow-wrap: anywhere;
+}
+
 .program-column,
 .program-detail-column {
   min-height: 570px;

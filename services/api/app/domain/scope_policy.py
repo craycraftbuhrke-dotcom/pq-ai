@@ -3,7 +3,7 @@ from collections.abc import Iterable, Mapping
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
 
 
-CURRENT_FEATURE_SET_VERSION = "point-features-v3-trajectory"
+CURRENT_FEATURE_SET_VERSION = "point-features-v4-material-governed"
 
 APPROVED_QUALITY_TYPES = frozenset(
     {"ORANGE_PEEL", "COLOR_DIFFERENCE", "THICKNESS"}

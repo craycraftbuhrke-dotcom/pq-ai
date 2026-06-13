@@ -4,29 +4,29 @@ Assessment date: 2026-06-13. This is an engineering assessment against the appro
 
 ## Executive Conclusion
 
-PQ-AI is a functional, connected demonstration and a useful foundation for factory-data onboarding. Measurement reliability and Dürr trajectory/device lineage now protect AI/SPC ingress, but the system is not yet ready for production process recommendations because real device-file validation, governed material data, leakage-safe model validation, validated deposition contribution, and approved recommendation constraints remain incomplete.
+PQ-AI is a functional, connected demonstration and a useful foundation for factory-data onboarding. Measurement reliability, Dürr trajectory/device lineage, and governed material-result gates now protect AI/SPC ingress, but the system is not yet ready for production process recommendations because real device/material file validation, leakage-safe model validation, validated deposition contribution, and approved recommendation constraints remain incomplete.
 
-Estimated overall maturity: **65% - connected demonstrable prototype / factory-data onboarding preparation**.
+Estimated overall maturity: **70% - connected demonstrable prototype / factory-data onboarding preparation**.
 
 ## Scores And Evidence
 
 | Area | Maturity | Current strength | Critical gap |
 | --- | ---: | --- | --- |
-| Scope/domain model | 82% | Approved quality/process scope is enforced from API and integration ingress through v3 target-family feature snapshots and models | Explicit coating-system route, governed feature registry, and full legacy-data administration remain |
+| Scope/domain model | 84% | Approved quality/process scope is enforced from API and integration ingress through v4 target-family feature snapshots and models | Explicit coating-system route, broader governed feature registry, and full legacy-data administration remain |
 | Program/robot/application | 76% | Governed robot/controller/atomizer identity, program-device configurations, trajectory checksums, path segments, actual executions, and target-family contribution versions | Real DXQ/PLC file adapters, real coordinates/orientation/trigger facts, deposition validation, and trajectory/contribution visualization remain |
-| Materials | 40% | Batch, viscosity, solids, generic COA | Missing governed test methods, units, density/rheology/effect fields, limits, and lineage |
+| Materials | 70% | Governed characteristic definitions, method versions, units, specifications/effective periods, stage/target applicability, batch results, reliability, integration, UI, and feature lineage | Replace demo methods/units/specifications with approved factory/TDS/COA facts; add real pigment/effect/levelling fields and file adapters |
 | Quality/instruments | 72% | Governed BYK/Fischer instruments, methods, references, calibrations, import profiles, repeats and automatic reliability gate | Real device-file validation, explicit probe master, uncertainty/MSA and measurement-plan execution remain |
-| Data lineage/flow | 80% | Production run/point backbone, verified-measurement gate, target-family contribution and trajectory execution lineage | Generic material JSON bypasses governance; real external-file lineage and validated contribution evidence remain |
+| Data lineage/flow | 85% | Production run/point backbone, verified measurement/material gates, target-family contribution, trajectory execution, material result and specification lineage | Real external-file lineage and validated contribution evidence remain |
 | AI modeling | 45% | Persisted trajectory-gated ridge baseline, measurement-gated prediction/diagnosis/recommendation and drift | Training metrics only, no grouped/temporal holdout, applicability scope, OOD, governed artifacts, or causal evidence |
-| Workflow/UX | 68% | Real CRUD, measurement governance, Dürr trajectory governance and closed-loop operations | Missing instrument import wizard, measurement-plan execution, trajectory/contribution visualization, controlled-trial workspace |
-| Integration/operations | 58% | Integration task framework plus robot actual-parameter and trajectory-execution ingestion, auth, audit, local MySQL | Real device/MES/QMS mappings, SSO, backup/DR, observability, and factory acceptance remain |
+| Workflow/UX | 72% | Real CRUD, measurement governance, material governance, Dürr trajectory governance and closed-loop operations | Missing instrument/material import wizard, measurement-plan execution, trajectory/contribution visualization, controlled-trial workspace |
+| Integration/operations | 60% | Integration task framework plus robot actual/trajectory and governed material-result ingestion, auth, audit, local MySQL | Real device/MES/QMS/material mappings, SSO, backup/DR, observability, and factory acceptance remain |
 
 ## High-Priority Findings
 
 ### Completed Baseline - Scope And Training Integrity
 
 - Catalog, API, integrations, seed data, feature aggregation, UI, and tests now enforce the approved boundary.
-- New approved snapshots use `point-features-v3-trajectory`; production-event context is retained for traceability but does not enter AI features.
+- New approved snapshots use `point-features-v4-material-governed`; production-event context is retained for traceability but does not enter AI features.
 - Existing `point-features-v1` models are retained for lineage and retired; local demo data is safely converted and retrained.
 - Runtime model guards prevent legacy or out-of-scope models from activation, prediction, diagnosis, and recommendation.
 - Residual work: add an administrator-facing legacy-data inventory and replace generic allowed JSON fields with a governed feature registry.
@@ -49,10 +49,11 @@ Estimated overall maturity: **65% - connected demonstrable prototype / factory-d
 - Point contribution is versioned and approved separately for thickness, color/effect, and orange peel. Contributions can reference a brush or path segment, and checksum mismatch blocks approved feature generation.
 - Residual work: validate real DXQ/PLC export files, populate real coordinates/orientation/trigger and actual values, validate contribution with geometry/simulation/DOE/deposition evidence, and add visual comparison/review.
 
-### P1 - Material Governance
+### Completed Baseline - Material Governance
 
-- Viscosity and solid ratio are present, but method/units/test context and structured COA definitions are missing.
-- Add governed material characteristic definitions, batch test results, approved limits, source lineage, and material-to-stage applicability.
+- Characteristic definitions, method versions, canonical units, material specifications/effective periods, material-type/stage/target-family applicability, batch results, source lineage, and derived reliability are represented.
+- Only `VERIFIED` results measured no later than production start can enter approved features; missing required results block snapshot generation. Legacy viscosity/solids/free-form COA fields remain compatible but no longer bypass governance.
+- Residual work: replace demo placeholder methods, units, and specifications with approved factory/TDS/COA facts; add real pigment/effect/levelling characteristic mappings and material-system file adapters.
 
 ## Completeness By System Layer
 
@@ -74,7 +75,7 @@ The API has generic CRUD, aggregation, modeling, audit, and integration foundati
 - Administrator-facing scope-policy inventory and quarantine management.
 - Extend the implemented instrument/calibration/reference/import-profile validation service with file parsing, MSA and plant procedures.
 - Extend the implemented robot/atomizer/trajectory/contribution service with real file parsing, geometry validation, and deviation workflows.
-- Governed material-characteristic and COA mapping service.
+- Extend the implemented material-characteristic service with real TDS/COA parsing, field-profile validation, approved method/unit masters, and supplier/factory mappings.
 - Dataset snapshot service with grouped/temporal splits and leakage checks.
 - Controlled-trial, constraint-source, rollback, and sustained-verification workflow.
 
@@ -85,7 +86,7 @@ Keep the current production-run and measurement-point backbone. Add versioned en
 - `coating_system`, factory process-route/bake definition, and execution-stage mapping.
 - Extend implemented `durr_robot`, `durr_rotary_atomizer`, `durr_application_controller`, `trajectory_program`, `trajectory_path_segment`, `production_device_execution`, and target-family contribution entities with real file/import metadata, geometry, validation evidence, and factory applicability.
 - Extend the implemented `measurement_instrument`, `measurement_method`, `measurement_calibration_record`, `measurement_reference_standard`, `measurement_import_profile`, and repeated raw readings with explicit probes, MSA and device-file ingestion.
-- `material_characteristic_definition`, batch test results, methods, units, limits, and source lineage.
+- Extend implemented material characteristic definitions, batch results, methods, units, specifications, applicability, reliability, and source lineage with real import profiles and approved factory facts.
 - `dataset_snapshot`, split/group membership, model applicability scope, acceptance decision, OOD/drift policy, and model artifact.
 - `controlled_trial`, constraint source/version, change proposal, rollback version, and sustained verification.
 
@@ -112,7 +113,7 @@ master data + process route + device/path/material/instrument governance
 1. Completed baseline: enforce the approved scope at catalog, validation, seed, import, feature-snapshot, UI, and test levels; quarantine legacy out-of-scope snapshots/models.
 2. Completed baseline: add instrument/method, calibration/reference, repeat-reading, import-profile models, reliability gate, API and UI; next extend with explicit probes, MSA and real device-file adapters.
 3. Completed baseline: add Dürr robot/atomizer/controller, device configuration, trajectory/path/execution models, checksum gate, target-family point contribution, API, integration event, and UI; next validate real factory files and contribution evidence.
-4. Replace generic material COA training fields with governed material characteristic definitions/results.
+4. Completed baseline: replace generic material COA training fields with governed material definitions, methods, specifications, applicability, batch results, reliability gate, integration, UI, and v4 feature lineage; next ingest approved factory/TDS/COA facts.
 5. Build leakage-safe dataset snapshots and grouped/temporal model evaluation with acceptance gates.
 6. Add engineer-controlled trials, constraint sources, rollback, and sustained verification.
 7. Complete real integrations, SSO, backup/DR, observability, and factory acceptance.

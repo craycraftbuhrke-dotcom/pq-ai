@@ -45,3 +45,21 @@ Only capture material characteristics plausibly related to thickness, color, or 
 | Surface-tension/levelling-related COA value | Method and source semantics | Orange peel/levelling diagnosis |
 
 Do not accept an unversioned free-form COA JSON as production-grade training data. Promote approved fields into governed definitions with units, methods, ranges, and source lineage.
+
+## Governed Material Contract
+
+An approved material feature is the result of five linked facts:
+
+1. Characteristic definition: stable code, meaning, canonical unit, allowed quality target families, and model-feature flag.
+2. Test method: characteristic, method code/version, method type, result unit, conditions, procedure source, and lifecycle status.
+3. Material specification: material code, characteristic, method, version, optional lower/upper limits, source, effective period, approval, and lifecycle status.
+4. Applicability: characteristic × material type × execution stage × quality target family, including whether the feature is required.
+5. Batch test result: batch, characteristic, method, value/unit, test time/operator, source/raw values, matched specification, and derived reliability.
+
+Reliability is derived, not manually asserted:
+
+- `FAILED`: inactive/mismatched definition or method, inconsistent unit, or value outside an approved numeric specification.
+- `UNVERIFIED`: no time-valid active specification or no result source.
+- `VERIFIED`: no failed or unresolved governance checks.
+
+Only a `VERIFIED` result tested at or before the linked production run start can enter an approved point feature. A missing required result blocks snapshot generation. Legacy batch viscosity, solids, and free-form COA values remain traceability fields and do not bypass this contract.

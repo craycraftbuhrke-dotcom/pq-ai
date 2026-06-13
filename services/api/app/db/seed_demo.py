@@ -27,6 +27,11 @@ from app.models.domain import (
     FactoryVehicleModel,
     IntegrationEndpoint,
     MaterialBatch,
+    MaterialBatchTestResult,
+    MaterialCharacteristicApplicability,
+    MaterialCharacteristicDefinition,
+    MaterialSpecification,
+    MaterialTestMethod,
     MeasurementCalibrationRecord,
     MeasurementGroup,
     MeasurementGroupPoint,
@@ -66,6 +71,7 @@ from app.models.domain import (
 from app.schemas.modeling import ModelTrainingRequest
 from app.services.feature_aggregation import build_point_feature_snapshot
 from app.services.measurement_reliability import refresh_measurement_reliability
+from app.services.material_governance import refresh_material_result_reliability
 from app.services.modeling import train_model
 
 
@@ -644,6 +650,200 @@ def _seed_durr_governance(db: Session, factory: Factory, now: datetime) -> None:
     db.commit()
 
 
+def _seed_material_governance(db: Session, now: datetime) -> None:
+    definition_specs = (
+        (
+            "viscosity",
+            "粘度/流变结果",
+            "VISCOSITY_RHEOLOGY",
+            "DEMO_UNIT",
+            ["ORANGE_PEEL", "THICKNESS"],
+        ),
+        ("solid_ratio", "固含比结果", "SOLIDS", "ratio", ["THICKNESS"]),
+        ("density", "密度结果", "DENSITY", "DEMO_UNIT", ["THICKNESS"]),
+    )
+    definitions: dict[str, MaterialCharacteristicDefinition] = {}
+    methods: dict[str, MaterialTestMethod] = {}
+    for code, name, category, unit, target_families in definition_specs:
+        definition = db.scalar(
+            select(MaterialCharacteristicDefinition).where(
+                MaterialCharacteristicDefinition.code == code
+            )
+        )
+        if not definition:
+            definition = MaterialCharacteristicDefinition(
+                code=code,
+                name=name,
+                category=category,
+                canonical_unit=unit,
+                target_families=target_families,
+                is_model_feature=True,
+                status="ACTIVE",
+                description=(
+                    "演示迁移定义；DEMO_UNIT 不代表真实检测单位，现场使用前必须"
+                    "替换为批准方法、单位和来源"
+                ),
+            )
+            db.add(definition)
+            db.flush()
+        definitions[code] = definition
+        method = db.scalar(
+            select(MaterialTestMethod).where(
+                MaterialTestMethod.code == f"DEMO-{code.upper()}",
+                MaterialTestMethod.version == "1.0",
+            )
+        )
+        if not method:
+            method = MaterialTestMethod(
+                characteristic_definition_id=definition.id,
+                code=f"DEMO-{code.upper()}",
+                name=f"{name}演示迁移方法",
+                version="1.0",
+                method_type="DEMO_MIGRATION_PLACEHOLDER",
+                result_unit=unit,
+                procedure_uri=f"demo://material/method/{code}",
+                conditions={"requires_factory_approved_replacement": True},
+                status="ACTIVE",
+                remark="仅用于验证治理数据链，不代表真实材料检测方法",
+            )
+            db.add(method)
+            db.flush()
+        methods[code] = method
+
+    stage_material_types = (
+        ("MIDCOAT_EXT", "MIDCOAT"),
+        ("BASECOAT_1", "BASECOAT"),
+        ("BASECOAT_2", "BASECOAT"),
+        ("CLEARCOAT_1", "CLEARCOAT"),
+        ("CLEARCOAT_2", "CLEARCOAT"),
+    )
+    for stage, material_type in stage_material_types:
+        if not db.scalar(
+            select(MaterialCharacteristicApplicability).where(
+                MaterialCharacteristicApplicability.characteristic_definition_id
+                == definitions["viscosity"].id,
+                MaterialCharacteristicApplicability.material_type == material_type,
+                MaterialCharacteristicApplicability.process_stage == stage,
+                MaterialCharacteristicApplicability.target_family == "ORANGE_PEEL",
+            )
+        ):
+            db.add(
+                MaterialCharacteristicApplicability(
+                    characteristic_definition_id=definitions["viscosity"].id,
+                    material_type=material_type,
+                    process_stage=stage,
+                    target_family="ORANGE_PEEL",
+                    is_required=True,
+                    status="ACTIVE",
+                    approved_by="演示材料治理生成器",
+                    approved_at=now - timedelta(days=1),
+                    remark="演示适用关系，现场使用前必须由材料/工艺工程师批准",
+                )
+            )
+        for code in ("viscosity", "solid_ratio", "density"):
+            if "THICKNESS" not in definitions[code].target_families:
+                continue
+            if not db.scalar(
+                select(MaterialCharacteristicApplicability).where(
+                    MaterialCharacteristicApplicability.characteristic_definition_id
+                    == definitions[code].id,
+                    MaterialCharacteristicApplicability.material_type == material_type,
+                    MaterialCharacteristicApplicability.process_stage == stage,
+                    MaterialCharacteristicApplicability.target_family == "THICKNESS",
+                )
+            ):
+                db.add(
+                    MaterialCharacteristicApplicability(
+                        characteristic_definition_id=definitions[code].id,
+                        material_type=material_type,
+                        process_stage=stage,
+                        target_family="THICKNESS",
+                        is_required=False,
+                        status="ACTIVE",
+                        approved_by="演示材料治理生成器",
+                        approved_at=now - timedelta(days=1),
+                        remark="演示适用关系，现场使用前必须由材料/工艺工程师批准",
+                    )
+                )
+    db.flush()
+
+    for batch in db.scalars(select(MaterialBatch)):
+        first_use_started_at = db.scalar(
+            select(ProductionRun.started_at)
+            .join(
+                ProductionStageRun,
+                ProductionStageRun.production_run_id == ProductionRun.id,
+            )
+            .where(ProductionStageRun.material_batch_id == batch.id)
+            .order_by(ProductionRun.started_at)
+            .limit(1)
+        )
+        demo_tested_at = (
+            first_use_started_at - timedelta(hours=1)
+            if first_use_started_at
+            else now - timedelta(days=2)
+        )
+        legacy_values = {
+            "viscosity": batch.viscosity,
+            "solid_ratio": batch.solid_ratio,
+            "density": (batch.coa_values or {}).get("density"),
+        }
+        for code, value in legacy_values.items():
+            if value is None:
+                continue
+            definition = definitions[code]
+            method = methods[code]
+            specification = db.scalar(
+                select(MaterialSpecification).where(
+                    MaterialSpecification.material_code == batch.material_code,
+                    MaterialSpecification.characteristic_definition_id == definition.id,
+                    MaterialSpecification.method_id == method.id,
+                    MaterialSpecification.version == "DEMO-1.0",
+                )
+            )
+            if not specification:
+                specification = MaterialSpecification(
+                    material_code=batch.material_code,
+                    characteristic_definition_id=definition.id,
+                    method_id=method.id,
+                    version="DEMO-1.0",
+                    status="ACTIVE",
+                    source_uri=f"demo://material/spec/{batch.material_code}/{code}",
+                    effective_from=now - timedelta(days=30),
+                    approved_by="演示材料治理生成器",
+                    approved_at=now - timedelta(days=1),
+                    remark="未设置数值上下限，不代表真实 TDS/COA 规格",
+                )
+                db.add(specification)
+                db.flush()
+            result_no = f"DEMO-{batch.batch_no}-{code}".upper()
+            result = db.scalar(
+                select(MaterialBatchTestResult).where(
+                    MaterialBatchTestResult.result_no == result_no
+                )
+            )
+            if not result:
+                result = MaterialBatchTestResult(
+                    result_no=result_no,
+                    material_batch_id=batch.id,
+                    characteristic_definition_id=definition.id,
+                    method_id=method.id,
+                    result_value=float(value),
+                    unit=definition.canonical_unit,
+                    tested_at=demo_tested_at,
+                    tested_by="演示材料治理生成器",
+                    source_uri=f"demo://material/result/{batch.batch_no}/{code}",
+                    raw_values={"migrated_from": f"material_batch.{code}"},
+                    remark="由历史演示字段迁移，现场使用前必须以真实检测结果替换",
+                )
+                db.add(result)
+                db.flush()
+            elif (result.raw_values or {}).get("migrated_from"):
+                result.tested_at = demo_tested_at
+            refresh_material_result_reliability(db, result)
+    db.commit()
+
+
 def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
     upgraded_keys = set(
         db.execute(
@@ -667,6 +867,7 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
                     | ProductionRun.run_no.like("DEMO-TRAIN-RUN-%")
                 ),
             )
+            .order_by(PointFeatureSnapshot.generated_at.desc())
         )
     )
     for snapshot in demo_snapshots:
@@ -678,6 +879,12 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
         if snapshot_key in upgraded_keys:
             continue
         feature_values = approved_numeric_values(snapshot.feature_values)
+        feature_values = {
+            key.replace(".material_viscosity", ".material.viscosity")
+            .replace(".material_solid_ratio", ".material.solid_ratio")
+            .replace(".coa.density", ".material.density"): value
+            for key, value in feature_values.items()
+        }
         if not feature_values:
             continue
         db.add(
@@ -698,7 +905,7 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
     model = db.scalar(
         select(ModelVersion).where(
             ModelVersion.model_code == "DEMO-DOI-BASELINE",
-            ModelVersion.version == "4.0-trajectory-gated",
+            ModelVersion.version == "5.0-material-governed",
         )
     )
     if model:
@@ -735,7 +942,7 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
         db,
         ModelTrainingRequest(
             model_code="DEMO-DOI-BASELINE",
-            version="4.0-trajectory-gated",
+            version="5.0-material-governed",
             target_metric="doi",
             feature_set_version=CURRENT_FEATURE_SET_VERSION,
             min_samples=5,
@@ -766,6 +973,7 @@ def seed_demo(db: Session) -> dict:
     if existing_factory:
         _govern_demo_measurements(db, measurement_governance)
         _seed_durr_governance(db, existing_factory, now)
+        _seed_material_governance(db, now)
         demo_run = db.scalar(
             select(ProductionRun).where(ProductionRun.run_no == "RUN-20260610-001")
         )
@@ -1091,6 +1299,7 @@ def seed_demo(db: Session) -> dict:
     db.commit()
     _govern_demo_measurements(db, measurement_governance)
     _seed_durr_governance(db, factory, now)
+    _seed_material_governance(db, now)
     snapshot = build_point_feature_snapshot(
         db, run.id, points["P-ROOF-03"].id, target_family="ORANGE_PEEL"
     )
@@ -1155,7 +1364,7 @@ def seed_demo(db: Session) -> dict:
         db,
         ModelTrainingRequest(
             model_code="DEMO-DOI-BASELINE",
-            version="4.0-trajectory-gated",
+            version="5.0-material-governed",
             target_metric="doi",
             feature_set_version=CURRENT_FEATURE_SET_VERSION,
             min_samples=5,

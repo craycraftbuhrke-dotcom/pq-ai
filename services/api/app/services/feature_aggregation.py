@@ -18,6 +18,10 @@ from app.models.domain import (
     BrushParameter,
     BrushPointContribution,
     MaterialBatch,
+    MaterialBatchTestResult,
+    MaterialCharacteristicApplicability,
+    MaterialCharacteristicDefinition,
+    MaterialSpecification,
     MeasurementPoint,
     PathSegmentExecution,
     PointContributionEntry,
@@ -67,6 +71,9 @@ def build_point_feature_snapshot(
         "contribution_version_ids": [],
         "trajectory_program_ids": [],
         "device_execution_ids": [],
+        "material_batch_ids": [],
+        "material_result_ids": [],
+        "material_specification_ids": [],
         "legacy_contribution_fallback": False,
     }
 
@@ -227,14 +234,67 @@ def build_point_feature_snapshot(
             else None
         )
         if material:
-            if material.viscosity is not None:
-                feature_values[f"{stage_prefix}.material_viscosity"] = material.viscosity
-                stage_has_features = True
-            if material.solid_ratio is not None:
-                feature_values[f"{stage_prefix}.material_solid_ratio"] = material.solid_ratio
-                stage_has_features = True
-            for key, value in approved_numeric_values(material.coa_values).items():
-                feature_values[f"{stage_prefix}.coa.{key}"] = value
+            if material.id not in lineage["material_batch_ids"]:
+                lineage["material_batch_ids"].append(material.id)
+            applicabilities = list(
+                db.scalars(
+                    select(MaterialCharacteristicApplicability).where(
+                        MaterialCharacteristicApplicability.material_type
+                        == material.material_type,
+                        MaterialCharacteristicApplicability.process_stage
+                        == stage_run.process_stage,
+                        MaterialCharacteristicApplicability.target_family == target_family,
+                        MaterialCharacteristicApplicability.status == "ACTIVE",
+                        MaterialCharacteristicApplicability.approved_by.is_not(None),
+                        MaterialCharacteristicApplicability.approved_at.is_not(None),
+                    )
+                )
+            )
+            for applicability in applicabilities:
+                definition = db.get(
+                    MaterialCharacteristicDefinition,
+                    applicability.characteristic_definition_id,
+                )
+                result = db.scalar(
+                    select(MaterialBatchTestResult)
+                    .where(
+                        MaterialBatchTestResult.material_batch_id == material.id,
+                        MaterialBatchTestResult.characteristic_definition_id
+                        == applicability.characteristic_definition_id,
+                        MaterialBatchTestResult.reliability_status == "VERIFIED",
+                        MaterialBatchTestResult.tested_at <= production_run.started_at,
+                    )
+                    .order_by(MaterialBatchTestResult.tested_at.desc())
+                )
+                specification = (
+                    db.get(MaterialSpecification, result.specification_id)
+                    if result and result.specification_id
+                    else None
+                )
+                if (
+                    not definition
+                    or definition.status != "ACTIVE"
+                    or not definition.is_model_feature
+                    or not result
+                    or not specification
+                    or specification.status != "ACTIVE"
+                ):
+                    if applicability.is_required:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=(
+                                f"工序 {stage_run.process_stage} 缺少生产前已验证的必需材料特性"
+                                f" {definition.code if definition else applicability.characteristic_definition_id}"
+                            ),
+                        )
+                    continue
+                feature_values[f"{stage_prefix}.material.{definition.code}"] = (
+                    result.result_value
+                )
+                if result.id not in lineage["material_result_ids"]:
+                    lineage["material_result_ids"].append(result.id)
+                if specification.id not in lineage["material_specification_ids"]:
+                    lineage["material_specification_ids"].append(specification.id)
                 stage_has_features = True
 
         if stage_has_features:

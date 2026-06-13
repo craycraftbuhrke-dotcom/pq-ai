@@ -12,6 +12,7 @@ const allowedRoots = new Set([
   "production-stage-runs",
   "actual-parameters",
   "material-batches",
+  "material-governance",
   "robot-governance",
 ]);
 

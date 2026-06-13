@@ -89,8 +89,20 @@ const payloadTemplates: Record<string, Record<string, unknown>> = {
     material_name: "清漆",
     material_type: "CLEARCOAT",
     supplier: "供应商 A",
-    viscosity: 24.2,
-    solid_ratio: 0.52,
+    characteristic_results: [
+      {
+        result_no: "MAT-LOT-EXT-001-VISCOSITY",
+        characteristic_code: "viscosity",
+        method_code: "DEMO-VISCOSITY",
+        method_version: "1.0",
+        result_value: 24.2,
+        unit: "DEMO_UNIT",
+        tested_at: "2026-06-11T07:00:00+08:00",
+        tested_by: "材料实验室",
+        source_uri: "qms://material/LOT-EXT-001/viscosity",
+        raw_values: { instrument_result: 24.2 },
+      },
+    ],
   },
   QMS_QUALITY_MEASUREMENT_UPSERT: {
     data_no: "QM-EXT-001",

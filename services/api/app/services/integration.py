@@ -16,6 +16,9 @@ from app.models.domain import (
     IntegrationEndpoint,
     IntegrationEvent,
     MaterialBatch,
+    MaterialBatchTestResult,
+    MaterialCharacteristicDefinition,
+    MaterialTestMethod,
     MeasurementCalibrationRecord,
     MeasurementImportProfile,
     MeasurementInstrument,
@@ -36,6 +39,7 @@ from app.models.domain import (
     VehicleModel,
 )
 from app.services.measurement_reliability import refresh_measurement_reliability
+from app.services.material_governance import refresh_material_result_reliability
 
 
 def _required_by_code(db: Session, model: type, code: str, label: str):
@@ -107,7 +111,55 @@ def _process_material_batch(db: Session, payload: dict) -> dict:
         db.add(batch)
         operation = "CREATED"
     db.flush()
-    return {"operation": operation, "resource_type": "material_batch", "resource_id": batch.id}
+    result_ids = []
+    for item in payload.get("characteristic_results", []):
+        definition = db.scalar(
+            select(MaterialCharacteristicDefinition).where(
+                MaterialCharacteristicDefinition.code == item["characteristic_code"]
+            )
+        )
+        if not definition:
+            raise ValueError(f"材料特性代码不存在：{item['characteristic_code']}")
+        method = db.scalar(
+            select(MaterialTestMethod).where(
+                MaterialTestMethod.code == item["method_code"],
+                MaterialTestMethod.version == item.get("method_version", "1.0"),
+            )
+        )
+        if not method:
+            raise ValueError("材料检测方法代码与版本不存在")
+        result = db.scalar(
+            select(MaterialBatchTestResult).where(
+                MaterialBatchTestResult.result_no == item["result_no"]
+            )
+        )
+        result_values = {
+            "material_batch_id": batch.id,
+            "characteristic_definition_id": definition.id,
+            "method_id": method.id,
+            "result_value": float(item["result_value"]),
+            "unit": item["unit"],
+            "tested_at": _datetime(item["tested_at"], "tested_at"),
+            "tested_by": item.get("tested_by"),
+            "source_uri": item.get("source_uri"),
+            "raw_values": item.get("raw_values"),
+            "remark": item.get("remark"),
+        }
+        if result:
+            for field, value in result_values.items():
+                setattr(result, field, value)
+        else:
+            result = MaterialBatchTestResult(result_no=item["result_no"], **result_values)
+            db.add(result)
+            db.flush()
+        refresh_material_result_reliability(db, result)
+        result_ids.append(result.id)
+    return {
+        "operation": operation,
+        "resource_type": "material_batch",
+        "resource_id": batch.id,
+        "material_result_ids": result_ids,
+    }
 
 
 def _process_qms_measurement(db: Session, payload: dict) -> dict:

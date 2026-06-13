@@ -571,6 +571,125 @@ class MaterialBatch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     coa_values: Mapped[dict | None] = mapped_column(JSON)
 
 
+class MaterialCharacteristicDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "material_characteristic_definition"
+
+    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    canonical_unit: Mapped[str] = mapped_column(String(24), nullable=False)
+    target_families: Mapped[list] = mapped_column(JSON, nullable=False)
+    is_model_feature: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+
+
+class MaterialTestMethod(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "material_test_method"
+    __table_args__ = (
+        UniqueConstraint("code", "version", name="uq_material_test_method_version"),
+    )
+
+    characteristic_definition_id: Mapped[str] = mapped_column(
+        ForeignKey("material_characteristic_definition.id"), nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    method_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_unit: Mapped[str] = mapped_column(String(24), nullable=False)
+    procedure_uri: Mapped[str | None] = mapped_column(String(500))
+    conditions: Mapped[dict | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class MaterialSpecification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "material_specification"
+    __table_args__ = (
+        UniqueConstraint(
+            "material_code",
+            "characteristic_definition_id",
+            "method_id",
+            "version",
+            name="uq_material_specification_version",
+        ),
+    )
+
+    material_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    characteristic_definition_id: Mapped[str] = mapped_column(
+        ForeignKey("material_characteristic_definition.id"), nullable=False
+    )
+    method_id: Mapped[str] = mapped_column(ForeignKey("material_test_method.id"), nullable=False)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    lower_limit: Mapped[float | None] = mapped_column(Float)
+    upper_limit: Mapped[float | None] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    source_uri: Mapped[str | None] = mapped_column(String(500))
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class MaterialCharacteristicApplicability(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "material_characteristic_applicability"
+    __table_args__ = (
+        UniqueConstraint(
+            "characteristic_definition_id",
+            "material_type",
+            "process_stage",
+            "target_family",
+            name="uq_material_characteristic_applicability",
+        ),
+    )
+
+    characteristic_definition_id: Mapped[str] = mapped_column(
+        ForeignKey("material_characteristic_definition.id"), nullable=False
+    )
+    material_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    process_stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_family: Mapped[str] = mapped_column(String(32), nullable=False)
+    is_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class MaterialBatchTestResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "material_batch_test_result"
+    __table_args__ = (
+        Index(
+            "ix_material_result_batch_characteristic_time",
+            "material_batch_id",
+            "characteristic_definition_id",
+            "tested_at",
+        ),
+    )
+
+    result_no: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    material_batch_id: Mapped[str] = mapped_column(ForeignKey("material_batch.id"), nullable=False)
+    characteristic_definition_id: Mapped[str] = mapped_column(
+        ForeignKey("material_characteristic_definition.id"), nullable=False
+    )
+    method_id: Mapped[str] = mapped_column(ForeignKey("material_test_method.id"), nullable=False)
+    specification_id: Mapped[str | None] = mapped_column(ForeignKey("material_specification.id"))
+    result_value: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str] = mapped_column(String(24), nullable=False)
+    tested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    tested_by: Mapped[str | None] = mapped_column(String(80))
+    source_uri: Mapped[str | None] = mapped_column(String(500))
+    raw_values: Mapped[dict | None] = mapped_column(JSON)
+    reliability_status: Mapped[str] = mapped_column(
+        String(24), default="UNVERIFIED", nullable=False
+    )
+    reliability_issues: Mapped[list | None] = mapped_column(JSON)
+    is_within_spec: Mapped[bool | None] = mapped_column(Boolean)
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
 class ProductionRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "production_run"
     __table_args__ = (

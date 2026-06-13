@@ -253,9 +253,9 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
     )
 
     assert result["feature_values"]["clearcoat_2.spray_flow"] == pytest.approx(352.0)
-    assert result["feature_values"]["clearcoat_2.material_viscosity"] == 22.5
-    assert result["feature_values"]["clearcoat_2.material_solid_ratio"] == 0.48
-    assert result["feature_values"]["clearcoat_2.coa.density"] == 1.03
+    assert "clearcoat_2.material_viscosity" not in result["feature_values"]
+    assert "clearcoat_2.material_solid_ratio" not in result["feature_values"]
+    assert "clearcoat_2.coa.density" not in result["feature_values"]
     assert result["feature_values"]["clearcoat_2.clearcoat_2_outer_air"] == 410.0
     assert "clearcoat_2.booth_temperature" not in result["feature_values"]
     assert "context.booth_humidity" not in result["feature_values"]
@@ -263,7 +263,7 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
     assert result["contribution_count"] == 2
     assert result["stage_coverage"] == ["CLEARCOAT_2"]
     assert result["completeness_score"] == 0.2
-    assert result["feature_set_version"] == "point-features-v3-trajectory"
+    assert result["feature_set_version"] == "point-features-v4-material-governed"
     assert result["target_family"] == "ORANGE_PEEL"
     assert result["lineage"]["legacy_contribution_fallback"] is True
 

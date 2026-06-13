@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -21,6 +21,10 @@ from app.models.domain import (
     Factory,
     IntegrationEvent,
     MaterialBatch,
+    MaterialBatchTestResult,
+    MaterialCharacteristicDefinition,
+    MaterialSpecification,
+    MaterialTestMethod,
     MeasurementPoint,
     Part,
     ProductionRun,
@@ -95,6 +99,43 @@ def test_integration_inbox_processes_business_events_and_enforces_idempotency() 
         IntegrationEndpointCreate(code="MAT-01", name="材料系统", system_type="MATERIAL"),
         db,
     )
+    definition = MaterialCharacteristicDefinition(
+        code="viscosity",
+        name="粘度",
+        category="VISCOSITY_RHEOLOGY",
+        canonical_unit="s",
+        target_families=["ORANGE_PEEL"],
+    )
+    db.add(definition)
+    db.flush()
+    method = MaterialTestMethod(
+        characteristic_definition_id=definition.id,
+        code="VISC-CUP",
+        name="粘度杯方法",
+        version="1.0",
+        method_type="FLOW_CUP",
+        result_unit="s",
+        procedure_uri="approved://material/method/viscosity",
+    )
+    db.add(method)
+    db.flush()
+    tested_at = datetime.now(UTC)
+    db.add(
+        MaterialSpecification(
+            material_code="CC-001",
+            characteristic_definition_id=definition.id,
+            method_id=method.id,
+            version="1.0",
+            lower_limit=20,
+            upper_limit=25,
+            status="ACTIVE",
+            source_uri="approved://material/spec/CC-001/viscosity",
+            effective_from=tested_at - timedelta(days=1),
+            approved_by="材料工程师",
+            approved_at=tested_at - timedelta(days=1),
+        )
+    )
+    db.commit()
     material = create_event(
         integration_event(
             material_endpoint.id,
@@ -107,12 +148,31 @@ def test_integration_inbox_processes_business_events_and_enforces_idempotency() 
                 "material_type": "CLEARCOAT",
                 "viscosity": 24.2,
                 "solid_ratio": 0.52,
+                "characteristic_results": [
+                    {
+                        "result_no": "MAT-INT-001",
+                        "characteristic_code": definition.code,
+                        "method_code": method.code,
+                        "method_version": method.version,
+                        "result_value": 24.2,
+                        "unit": "s",
+                        "tested_at": tested_at.isoformat(),
+                        "source_uri": "qms://material/MAT-INT-001",
+                    }
+                ],
             },
         ),
         db,
     )
     assert material.status == "SUCCEEDED"
     assert db.scalar(select(MaterialBatch).where(MaterialBatch.batch_no == "LOT-001")).viscosity == 24.2
+    governed_result = db.scalar(
+        select(MaterialBatchTestResult).where(
+            MaterialBatchTestResult.result_no == "MAT-INT-001"
+        )
+    )
+    assert governed_result.reliability_status == "VERIFIED"
+    assert material.mapped_payload["material_result_ids"] == [governed_result.id]
 
     with pytest.raises(HTTPException) as conflict:
         delete_endpoint(endpoint.id, db)

@@ -23,10 +23,12 @@ Use this skill for every change that touches process stages, parameters, materia
 3. Preserve measurement traceability: instrument model/serial, firmware/export schema, method/probe, calibration/reference status, operator, timestamp, repetitions, and raw/corrected values.
 4. Aggregate point features from approved brush/path contribution versions. Do not treat simple averages as physical truth.
 5. Require the production-stage device configuration and executed trajectory checksum to match an approved trajectory before using the stage in an approved feature snapshot.
-6. Train separate model families for thickness, color, and orange peel. Split data by time and production event/body/batch to prevent leakage.
-7. Treat diagnosis as association unless supported by controlled DOE or other causal evidence.
-8. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require human approval and post-change measurement.
-9. Reject or quarantine out-of-scope features before snapshot creation and training.
+6. Admit a material value to AI only through an active characteristic definition, matching active test method, time-valid approved specification, active material-type/stage/target-family applicability, and a `VERIFIED` batch result tested no later than production start.
+7. Keep legacy viscosity, solids, and free-form COA fields only for compatibility and traceability; never promote them directly into approved feature snapshots.
+8. Train separate model families for thickness, color, and orange peel. Split data by time and production event/body/batch to prevent leakage.
+9. Treat diagnosis as association unless supported by controlled DOE or other causal evidence.
+10. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require human approval and post-change measurement.
+11. Reject or quarantine out-of-scope features before snapshot creation and training.
 
 ## Reference Loading
 
@@ -42,3 +44,4 @@ Use this skill for every change that touches process stages, parameters, materia
 - Every recommendation shows evidence, constraints, uncertainty, approval, execution values, and verification results.
 - Tests cover scope filtering, traceability, grouped/temporal evaluation, and closed-loop audit behavior.
 - Robot/trajectory changes cover device identity, program/path version, checksum matching, target-family contribution, actual execution, and rollback traceability.
+- Material changes cover characteristic semantics, canonical unit, method version, specification source/effective period, stage/target-family applicability, batch result reliability, production-time gate, and feature lineage.
