@@ -16,13 +16,7 @@ export async function POST(
   const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
 
   if (!apiUrl) {
-    return NextResponse.json({
-      id: recommendationId,
-      status: "APPROVED",
-      approved_by: payload.approvedBy ?? "工艺审批人",
-      approval_comment: payload.comment,
-      is_demo_mode: true,
-    });
+    return NextResponse.json({ error: "后端 API 地址未配置" }, { status: 503 });
   }
 
   try {

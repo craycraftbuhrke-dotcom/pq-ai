@@ -1,30 +1,37 @@
 services:
   api:
-    image: pq-ai-api:experience
+    image: ${API_IMAGE:?API_IMAGE is required}
     build:
       context: ./services/api
       dockerfile: Dockerfile.experience
     environment:
-      DATABASE_URL: mysql+pymysql://pq_ai:pq_ai_dev_password@host.docker.internal:3307/pq_ai?charset=utf8mb4
-      API_CORS_ORIGINS: http://localhost:3000
-      SEED_DEMO_DATA: "true"
-      API_AUTH_ENABLED: "true"
-      BOOTSTRAP_API_KEY: pq-ai-demo-key
+      APP_NAME: ${APP_NAME:?APP_NAME is required}
+      API_PREFIX: ${API_PREFIX:?API_PREFIX is required}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:?API_CORS_ORIGINS is required}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:?SEED_DEMO_DATA is required}
+      API_AUTH_ENABLED: ${API_AUTH_ENABLED:?API_AUTH_ENABLED is required}
+      BOOTSTRAP_API_KEY: ${BOOTSTRAP_API_KEY:?BOOTSTRAP_API_KEY is required}
+      API_HOST: ${API_HOST:?API_HOST is required}
+      API_PORT: ${API_PORT:?API_PORT is required}
     ports:
-      - "8000:8000"
+      - "${API_PUBLISH_PORT:?API_PUBLISH_PORT is required}:${API_PORT:?API_PORT is required}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
   web:
-    image: pq-ai-web:experience
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
     build:
       context: ./apps/web
       dockerfile: Dockerfile.experience
     environment:
-      API_URL: http://api:8000/api/v1
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
-      API_KEY: pq-ai-demo-key
+      NODE_ENV: ${NODE_ENV:?NODE_ENV is required}
+      HOSTNAME: ${FRONTEND_HOSTNAME:?FRONTEND_HOSTNAME is required}
+      PORT: ${FRONTEND_PORT:?FRONTEND_PORT is required}
+      API_URL: ${API_URL:?API_URL is required}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+      API_KEY: ${API_KEY:?API_KEY is required}
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PUBLISH_PORT:?FRONTEND_PUBLISH_PORT is required}:${FRONTEND_PORT:?FRONTEND_PORT is required}"
     depends_on:
       - api

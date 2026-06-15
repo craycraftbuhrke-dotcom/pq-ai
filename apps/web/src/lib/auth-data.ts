@@ -18,10 +18,10 @@ type ApiActor = {
 
 export const fallbackActor: CurrentActor = {
   userId: null,
-  username: "system",
-  displayName: "陈工",
-  roles: ["工艺审批人"],
-  permissions: ["*"],
+  username: "unconfigured",
+  displayName: "未连接",
+  roles: ["未认证"],
+  permissions: [],
   authEnabled: false,
 };
 

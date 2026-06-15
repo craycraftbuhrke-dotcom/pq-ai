@@ -1,22 +1,85 @@
-# You can override the included template(s) by including variable overrides
-# SAST customization: https://docs.gitlab.com/ee/user/application_security/sast/#customizing-the-sast-settings
-# Secret Detection customization: https://docs.gitlab.com/user/application_security/secret_detection/pipeline/configure
-# Dependency Scanning customization: https://docs.gitlab.com/ee/user/application_security/dependency_scanning/#customizing-the-dependency-scanning-settings
-# Container Scanning customization: https://docs.gitlab.com/ee/user/application_security/container_scanning/#customizing-the-container-scanning-settings
-# Note that environment variables can be set in several places
-# See https://docs.gitlab.com/ee/ci/variables/#cicd-variable-precedence
-:stages:
-- test
-:sast:
-  :stage: test
-:include:
-- :template: Security/SAST.gitlab-ci.yml
 stages:
-- test
-- secret-detection
+  - scan
+  - build
+
 variables:
-  SECRET_DETECTION_ENABLED: 'true'
-secret_detection:
-  stage: secret-detection
+  PROJECT_GIT_REPOSITORY: "git@git.n.xiaomi.com:adili/pq-ai.git"
+  GIT_STRATEGY: clone
+  GIT_DEPTH: "0"
+  SECRET_DETECTION_ENABLED: "true"
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_IMAGE_TAG: "${CI_COMMIT_SHORT_SHA}"
+  FRONTEND_IMAGE: "${CI_REGISTRY_IMAGE}/frontend:${DOCKER_IMAGE_TAG}"
+  BACKEND_IMAGE: "${CI_REGISTRY_IMAGE}/backend:${DOCKER_IMAGE_TAG}"
+  FRONTEND_LATEST_IMAGE: "${CI_REGISTRY_IMAGE}/frontend:latest"
+  BACKEND_LATEST_IMAGE: "${CI_REGISTRY_IMAGE}/backend:latest"
+
 include:
-- template: Security/Secret-Detection.gitlab-ci.yml
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+
+sast:
+  stage: scan
+
+secret_detection:
+  stage: scan
+
+frontend:scan:
+  stage: scan
+  image: ${NODE_IMAGE}
+  script:
+    - echo "Scanning frontend from ${PROJECT_GIT_REPOSITORY}"
+    - npm ci
+    - npm run lint:web
+
+backend:scan:
+  stage: scan
+  image: ${PYTHON_IMAGE}
+  before_script:
+    - cd services/api
+    - python -m pip install --upgrade pip
+    - pip install -e ".[dev]"
+  script:
+    - echo "Scanning backend from ${PROJECT_GIT_REPOSITORY}"
+    - python -m compileall app tests
+    - PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest
+
+frontend:image:
+  stage: build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  needs:
+    - frontend:scan
+  before_script:
+    - test -n "${CI_REGISTRY}"
+    - test -n "${CI_REGISTRY_USER}"
+    - test -n "${CI_REGISTRY_PASSWORD}"
+    - test -n "${NODE_IMAGE}"
+    - test -n "${NEXT_PUBLIC_API_URL}"
+    - echo "${CI_REGISTRY_PASSWORD}" | docker login -u "${CI_REGISTRY_USER}" --password-stdin "${CI_REGISTRY}"
+  script:
+    - echo "Building frontend image from ${PROJECT_GIT_REPOSITORY} with dockerfile.frontend"
+    - docker build --pull --build-arg NODE_IMAGE="${NODE_IMAGE}" --build-arg NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL}" -f dockerfile.frontend -t "${FRONTEND_IMAGE}" -t "${FRONTEND_LATEST_IMAGE}" .
+    - docker push "${FRONTEND_IMAGE}"
+    - docker push "${FRONTEND_LATEST_IMAGE}"
+
+backend:image:
+  stage: build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  needs:
+    - backend:scan
+  before_script:
+    - test -n "${CI_REGISTRY}"
+    - test -n "${CI_REGISTRY_USER}"
+    - test -n "${CI_REGISTRY_PASSWORD}"
+    - test -n "${PYTHON_IMAGE}"
+    - echo "${CI_REGISTRY_PASSWORD}" | docker login -u "${CI_REGISTRY_USER}" --password-stdin "${CI_REGISTRY}"
+  script:
+    - echo "Building backend image from ${PROJECT_GIT_REPOSITORY} with dockerfile.backed"
+    - docker build --pull --build-arg PYTHON_IMAGE="${PYTHON_IMAGE}" -f dockerfile.backed -t "${BACKEND_IMAGE}" -t "${BACKEND_LATEST_IMAGE}" .
+    - docker push "${BACKEND_IMAGE}"
+    - docker push "${BACKEND_LATEST_IMAGE}"

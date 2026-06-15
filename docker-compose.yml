@@ -1,49 +1,61 @@
 services:
   mysql:
-    image: ${MYSQL_IMAGE:-mysql:8.4}
+    image: ${MYSQL_IMAGE:?MYSQL_IMAGE is required}
     environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-pq_ai}
-      MYSQL_USER: ${MYSQL_USER:-pq_ai}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-pq_ai_dev_password}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_dev_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?MYSQL_DATABASE is required}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER is required}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:?MYSQL_PORT is required}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root_dev_password}"]
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -uroot -p"$${MYSQL_ROOT_PASSWORD}"
       interval: 5s
       timeout: 5s
       retries: 20
 
   api:
     build:
-      context: ./services/api
+      context: .
+      dockerfile: dockerfile.backed
       args:
-        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
+        PYTHON_IMAGE: ${PYTHON_IMAGE:?PYTHON_IMAGE is required}
     environment:
-      DATABASE_URL: ${DATABASE_URL:-mysql+pymysql://pq_ai:pq_ai_dev_password@mysql:3306/pq_ai?charset=utf8mb4}
-      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:3000}
-      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
-      API_AUTH_ENABLED: ${API_AUTH_ENABLED:-true}
-      BOOTSTRAP_API_KEY: ${BOOTSTRAP_API_KEY:-pq-ai-demo-key}
+      APP_NAME: ${APP_NAME:?APP_NAME is required}
+      API_PREFIX: ${API_PREFIX:?API_PREFIX is required}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:?API_CORS_ORIGINS is required}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:?SEED_DEMO_DATA is required}
+      API_AUTH_ENABLED: ${API_AUTH_ENABLED:?API_AUTH_ENABLED is required}
+      BOOTSTRAP_API_KEY: ${BOOTSTRAP_API_KEY:?BOOTSTRAP_API_KEY is required}
+      API_HOST: ${API_HOST:?API_HOST is required}
+      API_PORT: ${API_PORT:?API_PORT is required}
     ports:
-      - "8000:8000"
+      - "${API_PUBLISH_PORT:?API_PUBLISH_PORT is required}:${API_PORT:?API_PORT is required}"
     depends_on:
       mysql:
         condition: service_healthy
 
   web:
     build:
-      context: ./apps/web
+      context: .
+      dockerfile: dockerfile.frontend
       args:
-        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+        NODE_IMAGE: ${NODE_IMAGE:?NODE_IMAGE is required}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
     environment:
-      API_URL: ${API_URL:-http://api:8000/api/v1}
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
-      API_KEY: ${API_KEY:-pq-ai-demo-key}
+      NODE_ENV: ${NODE_ENV:?NODE_ENV is required}
+      HOSTNAME: ${FRONTEND_HOSTNAME:?FRONTEND_HOSTNAME is required}
+      PORT: ${FRONTEND_PORT:?FRONTEND_PORT is required}
+      API_URL: ${API_URL:?API_URL is required}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+      API_KEY: ${API_KEY:?API_KEY is required}
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PUBLISH_PORT:?FRONTEND_PUBLISH_PORT is required}:${FRONTEND_PORT:?FRONTEND_PORT is required}"
     depends_on:
       - api
 

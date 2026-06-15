@@ -6,7 +6,6 @@ COPY .next/standalone ./
 COPY .next/static ./apps/web/.next/static
 COPY public ./apps/web/public
 
-ENV NODE_ENV=production
 ENTRYPOINT []
 EXPOSE 3000
 CMD ["node", "apps/web/server.js"]
