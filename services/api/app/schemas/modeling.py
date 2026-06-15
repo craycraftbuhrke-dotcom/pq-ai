@@ -67,6 +67,9 @@ class ModelTrainingRequest(BaseModel):
     dataset_snapshot_id: str
     min_samples: int = Field(default=5, ge=3)
     ridge_lambda: float = Field(default=0.1, ge=0)
+    max_abs_standardized_shift: float = Field(default=4.0, gt=0)
+    max_outlier_feature_ratio: float = Field(default=0.2, ge=0, le=1)
+    min_feature_completeness: float = Field(default=1.0, gt=0, le=1)
 
 
 class ModelVersionRead(BaseModel):
@@ -116,6 +119,75 @@ class ModelAcceptanceDecisionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ModelApplicabilityScopeCreate(BaseModel):
+    factory_id: str
+    vehicle_model_id: str
+    color_id: str
+    remark: str | None = Field(default=None, max_length=1000)
+
+
+class ModelApplicabilityScopeStatusUpdate(BaseModel):
+    status: Literal["PENDING", "INACTIVE"]
+    remark: str | None = Field(default=None, max_length=1000)
+
+
+class ModelApplicabilityScopeRead(BaseModel):
+    id: str
+    model_version_id: str
+    factory_id: str
+    vehicle_model_id: str
+    color_id: str
+    status: str
+    source: str
+    approved_by: str | None
+    approved_at: datetime | None
+    remark: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ModelOodPolicyUpdate(BaseModel):
+    max_abs_standardized_shift: float = Field(gt=0)
+    max_outlier_feature_ratio: float = Field(ge=0, le=1)
+    min_feature_completeness: float = Field(gt=0, le=1)
+    action: Literal["BLOCK"] = "BLOCK"
+    remark: str | None = Field(default=None, max_length=1000)
+
+
+class ModelOodPolicyRead(BaseModel):
+    id: str
+    model_version_id: str
+    max_abs_standardized_shift: float
+    max_outlier_feature_ratio: float
+    min_feature_completeness: float
+    action: str
+    status: str
+    approved_by: str | None
+    approved_at: datetime | None
+    remark: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ModelGovernanceCheckRequest(BaseModel):
+    production_run_id: str
+    measurement_point_id: str
+
+
+class ModelGovernanceCheckResponse(BaseModel):
+    model_version_id: str
+    production_run_id: str
+    measurement_point_id: str
+    allowed: bool
+    applicability_status: str
+    ood_status: str
+    evidence: dict
+
+
 class ModelDriftReport(BaseModel):
     model_version_id: str
     model_code: str
@@ -159,6 +231,9 @@ class ModelPredictionResponse(BaseModel):
     upper_bound: float
     confidence: float
     feature_completeness: float
+    applicability_status: str
+    ood_status: str
+    governance_evidence: dict
 
 
 class ModelDiagnosisResponse(BaseModel):

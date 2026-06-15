@@ -7,12 +7,17 @@ from app.domain.scope_policy import CURRENT_FEATURE_SET_VERSION
 from app.models.domain import (
     DatasetSnapshot,
     DatasetSplitMember,
+    Color,
+    Factory,
     MeasurementPoint,
+    ModelApplicabilityScope,
     ModelAcceptanceDecision,
+    ModelOodPolicy,
     ModelVersion,
     PointFeatureSnapshot,
     PredictionResult,
     ProductionRun,
+    VehicleModel,
 )
 from app.schemas.modeling import (
     DatasetBuildRequest,
@@ -20,8 +25,15 @@ from app.schemas.modeling import (
     DatasetSplitMemberRead,
     ModelAcceptanceDecisionRead,
     ModelAcceptanceRequest,
+    ModelApplicabilityScopeCreate,
+    ModelApplicabilityScopeRead,
+    ModelApplicabilityScopeStatusUpdate,
     ModelDiagnosisResponse,
     ModelDriftReport,
+    ModelGovernanceCheckRequest,
+    ModelGovernanceCheckResponse,
+    ModelOodPolicyRead,
+    ModelOodPolicyUpdate,
     ModelPredictionRequest,
     ModelPredictionResponse,
     ModelRecommendationRequest,
@@ -32,12 +44,16 @@ from app.schemas.modeling import (
 )
 from app.services.modeling import (
     build_dataset_snapshot,
+    create_model_applicability_scope,
     diagnose_prediction,
+    model_governance_check,
     model_drift_report,
     predict_with_model,
     recommend_with_model,
     record_model_acceptance,
     train_model,
+    update_model_applicability_scope,
+    update_model_ood_policy,
     update_model_status,
 )
 
@@ -88,9 +104,19 @@ def list_acceptance_decisions(db: Session = Depends(get_db)) -> list[ModelAccept
 @router.get("/feature-snapshots")
 def list_feature_snapshots(db: Session = Depends(get_db)) -> list[dict]:
     rows = db.execute(
-        select(PointFeatureSnapshot, ProductionRun, MeasurementPoint)
+        select(
+            PointFeatureSnapshot,
+            ProductionRun,
+            MeasurementPoint,
+            Factory,
+            VehicleModel,
+            Color,
+        )
         .join(ProductionRun, ProductionRun.id == PointFeatureSnapshot.production_run_id)
         .join(MeasurementPoint, MeasurementPoint.id == PointFeatureSnapshot.measurement_point_id)
+        .join(Factory, Factory.id == ProductionRun.factory_id)
+        .join(VehicleModel, VehicleModel.id == ProductionRun.vehicle_model_id)
+        .join(Color, Color.id == ProductionRun.color_id)
         .where(PointFeatureSnapshot.feature_set_version == CURRENT_FEATURE_SET_VERSION)
         .order_by(PointFeatureSnapshot.generated_at.desc())
         .limit(500)
@@ -100,6 +126,15 @@ def list_feature_snapshots(db: Session = Depends(get_db)) -> list[dict]:
             "id": snapshot.id,
             "production_run_id": snapshot.production_run_id,
             "production_run_no": run.run_no,
+            "factory_id": run.factory_id,
+            "factory_code": factory.code,
+            "factory_name": factory.name,
+            "vehicle_model_id": run.vehicle_model_id,
+            "vehicle_model_code": vehicle_model.code,
+            "vehicle_model_name": vehicle_model.name,
+            "color_id": run.color_id,
+            "color_code": color.code,
+            "color_name": color.name,
             "measurement_point_id": snapshot.measurement_point_id,
             "measurement_point_code": point.code,
             "measurement_point_name": point.name,
@@ -110,7 +145,7 @@ def list_feature_snapshots(db: Session = Depends(get_db)) -> list[dict]:
             "completeness_score": snapshot.completeness_score,
             "generated_at": snapshot.generated_at,
         }
-        for snapshot, run, point in rows
+        for snapshot, run, point, factory, vehicle_model, color in rows
     ]
 
 
@@ -119,6 +154,109 @@ def train_baseline_model(
     payload: ModelTrainingRequest, db: Session = Depends(get_db)
 ) -> ModelVersion:
     return train_model(db, payload)
+
+
+@router.get("/applicability-scopes")
+def list_applicability_scopes(db: Session = Depends(get_db)) -> list[dict]:
+    rows = db.execute(
+        select(ModelApplicabilityScope, Factory, VehicleModel, Color)
+        .join(Factory, Factory.id == ModelApplicabilityScope.factory_id)
+        .join(VehicleModel, VehicleModel.id == ModelApplicabilityScope.vehicle_model_id)
+        .join(Color, Color.id == ModelApplicabilityScope.color_id)
+        .order_by(ModelApplicabilityScope.created_at.desc())
+    ).all()
+    return [
+        {
+            "id": scope.id,
+            "model_version_id": scope.model_version_id,
+            "factory_id": scope.factory_id,
+            "factory_code": factory.code,
+            "factory_name": factory.name,
+            "vehicle_model_id": scope.vehicle_model_id,
+            "vehicle_model_code": vehicle_model.code,
+            "vehicle_model_name": vehicle_model.name,
+            "color_id": scope.color_id,
+            "color_code": color.code,
+            "color_name": color.name,
+            "status": scope.status,
+            "source": scope.source,
+            "approved_by": scope.approved_by,
+            "approved_at": scope.approved_at,
+            "remark": scope.remark,
+            "created_at": scope.created_at,
+            "updated_at": scope.updated_at,
+        }
+        for scope, factory, vehicle_model, color in rows
+    ]
+
+
+@router.post(
+    "/{model_version_id}/applicability-scopes",
+    response_model=ModelApplicabilityScopeRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_applicability_scope(
+    model_version_id: str,
+    payload: ModelApplicabilityScopeCreate,
+    db: Session = Depends(get_db),
+) -> ModelApplicabilityScope:
+    model = db.get(ModelVersion, model_version_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="模型版本不存在")
+    return create_model_applicability_scope(db, model, payload)
+
+
+@router.patch(
+    "/{model_version_id}/applicability-scopes/{scope_id}",
+    response_model=ModelApplicabilityScopeRead,
+)
+def change_applicability_scope(
+    model_version_id: str,
+    scope_id: str,
+    payload: ModelApplicabilityScopeStatusUpdate,
+    db: Session = Depends(get_db),
+) -> ModelApplicabilityScope:
+    model = db.get(ModelVersion, model_version_id)
+    scope = db.get(ModelApplicabilityScope, scope_id)
+    if not model or not scope or scope.model_version_id != model.id:
+        raise HTTPException(status_code=404, detail="模型适用范围不存在")
+    return update_model_applicability_scope(db, model, scope, payload)
+
+
+@router.get("/ood-policies", response_model=list[ModelOodPolicyRead])
+def list_ood_policies(db: Session = Depends(get_db)) -> list[ModelOodPolicy]:
+    return list(db.scalars(select(ModelOodPolicy).order_by(ModelOodPolicy.created_at.desc())))
+
+
+@router.put("/{model_version_id}/ood-policy", response_model=ModelOodPolicyRead)
+def change_ood_policy(
+    model_version_id: str,
+    payload: ModelOodPolicyUpdate,
+    db: Session = Depends(get_db),
+) -> ModelOodPolicy:
+    model = db.get(ModelVersion, model_version_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="模型版本不存在")
+    return update_model_ood_policy(db, model, payload)
+
+
+@router.post(
+    "/{model_version_id}/governance-check",
+    response_model=ModelGovernanceCheckResponse,
+)
+def check_model_governance(
+    model_version_id: str,
+    payload: ModelGovernanceCheckRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    model = db.get(ModelVersion, model_version_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="模型版本不存在")
+    result = model_governance_check(
+        db, model, payload.production_run_id, payload.measurement_point_id
+    )
+    result.pop("_snapshot", None)
+    return result
 
 
 @router.post(

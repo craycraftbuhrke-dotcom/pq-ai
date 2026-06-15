@@ -141,6 +141,9 @@ def list_predictions(db: Session = Depends(get_db)) -> list[dict]:
             "lower_bound": prediction.lower_bound,
             "upper_bound": prediction.upper_bound,
             "confidence": prediction.confidence,
+            "applicability_status": prediction.applicability_status,
+            "ood_status": prediction.ood_status,
+            "governance_evidence": prediction.governance_evidence,
             "predicted_at": prediction.predicted_at,
         }
         for prediction in predictions

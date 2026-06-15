@@ -31,6 +31,8 @@ These rules are mandatory for code, schema, APIs, UI, seed data, tests, analytic
 - Random point-row train/test splits are prohibited.
 - An approved dataset snapshot must freeze feature values, target values, source quality-measurement IDs, group membership, temporal split, and leakage-check result.
 - Models are trained only on the training split. Training metrics are never acceptance evidence; activation requires independent validation plus a recorded human acceptance decision.
+- Every model must have explicitly approved factory/model/color applicability scopes and an approved statistical OOD blocking policy. Training-data-derived scopes start pending and do not authorize inference until human acceptance.
+- Prediction, diagnosis, and recommendation must block out-of-scope, incomplete, or out-of-distribution inputs and persist the governance evidence. OOD thresholds are statistical policies, never substitutes for device, material, or process safety limits.
 - Model explanations are associations unless supported by controlled causal evidence.
 - Recommendations require approved constraints, human approval, execution capture, verification, and rollback.
 - Never invent factory limits, TDS values, device semantics, instrument fields, or standards.

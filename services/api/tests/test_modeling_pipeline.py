@@ -11,8 +11,11 @@ from app.api.routes.modeling import (
     change_model_status,
     decide_model_acceptance,
     diagnose_from_prediction,
+    check_model_governance,
     get_model_drift,
+    list_applicability_scopes,
     list_feature_snapshots,
+    list_ood_policies,
     predict_from_snapshot,
     recommend_from_snapshot,
     train_baseline_model,
@@ -52,6 +55,7 @@ from app.schemas.common import (
 from app.schemas.modeling import (
     DatasetBuildRequest,
     ModelAcceptanceRequest,
+    ModelGovernanceCheckRequest,
     ModelPredictionRequest,
     ModelRecommendationRequest,
     ModelStatusUpdate,
@@ -181,6 +185,13 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert trained.training_sample_count == 6
         assert trained.evaluation_metrics["training_r2"] > 0.99
         assert "validation_rmse" in trained.evaluation_metrics
+        assert trained.model_payload["minimums"]
+        assert trained.model_payload["maximums"]
+        scopes = list_applicability_scopes(db)
+        policies = list_ood_policies(db)
+        assert len(scopes) == 1
+        assert scopes[0]["status"] == "PENDING"
+        assert policies[0].status == "PENDING"
         with pytest.raises(HTTPException, match="必须先通过独立验证和人工验收"):
             change_model_status(trained.id, ModelStatusUpdate(status="ACTIVE"), db)
         acceptance = decide_model_acceptance(
@@ -193,6 +204,10 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             db,
         )
         assert acceptance.decision == "ACCEPTED"
+        assert acceptance.checks["has_configured_applicability_scope"] is True
+        assert acceptance.checks["has_configured_ood_policy"] is True
+        assert list_applicability_scopes(db)[0]["status"] == "ACTIVE"
+        assert list_ood_policies(db)[0].status == "ACTIVE"
         trained = change_model_status(trained.id, ModelStatusUpdate(status="ACTIVE"), db)
         snapshots = list_feature_snapshots(db)
         assert len(snapshots) == 8
@@ -209,8 +224,140 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         )
         assert prediction["predicted_value"] == pytest.approx(runs[-1][1], abs=0.2)
         assert prediction["prediction_result_id"]
+        assert prediction["applicability_status"] == "IN_SCOPE"
+        assert prediction["ood_status"] == "IN_DISTRIBUTION"
+        assert prediction["governance_evidence"]["scope_id"] == scopes[0]["id"]
+        governance = check_model_governance(
+            trained.id,
+            ModelGovernanceCheckRequest(
+                production_run_id=runs[-1][0].id,
+                measurement_point_id=point.id,
+            ),
+            db,
+        )
+        assert governance["allowed"] is True
+
+        out_of_scope_factory = Factory(code="F2", name="范围外工厂")
+        db.add(out_of_scope_factory)
+        db.flush()
+        out_of_scope_run = ProductionRun(
+            run_no="RUN-OUT-OF-SCOPE",
+            factory_id=out_of_scope_factory.id,
+            vehicle_model_id=model.id,
+            color_id=color.id,
+            started_at=now + timedelta(hours=2),
+        )
+        extreme_run = ProductionRun(
+            run_no="RUN-OOD",
+            factory_id=factory.id,
+            vehicle_model_id=model.id,
+            color_id=color.id,
+            started_at=now + timedelta(hours=3),
+        )
+        incomplete_run = ProductionRun(
+            run_no="RUN-INCOMPLETE",
+            factory_id=factory.id,
+            vehicle_model_id=model.id,
+            color_id=color.id,
+            started_at=now + timedelta(hours=4),
+        )
+        db.add_all([out_of_scope_run, extreme_run, incomplete_run])
+        db.flush()
+        db.add_all(
+            [
+                PointFeatureSnapshot(
+                    production_run_id=out_of_scope_run.id,
+                    measurement_point_id=point.id,
+                    feature_set_version=CURRENT_FEATURE_SET_VERSION,
+                    feature_values={
+                        "clearcoat_2.spray_flow": 7.0,
+                        "clearcoat_2.outer_air": 4.0,
+                    },
+                    completeness_score=1.0,
+                    generated_at=now,
+                ),
+                PointFeatureSnapshot(
+                    production_run_id=extreme_run.id,
+                    measurement_point_id=point.id,
+                    feature_set_version=CURRENT_FEATURE_SET_VERSION,
+                    feature_values={
+                        "clearcoat_2.spray_flow": 100.0,
+                        "clearcoat_2.outer_air": 100.0,
+                    },
+                    completeness_score=1.0,
+                    generated_at=now,
+                ),
+                PointFeatureSnapshot(
+                    production_run_id=incomplete_run.id,
+                    measurement_point_id=point.id,
+                    feature_set_version=CURRENT_FEATURE_SET_VERSION,
+                    feature_values={"clearcoat_2.spray_flow": 5.0},
+                    completeness_score=0.5,
+                    generated_at=now,
+                ),
+            ]
+        )
+        db.commit()
+        out_of_scope_check = check_model_governance(
+            trained.id,
+            ModelGovernanceCheckRequest(
+                production_run_id=out_of_scope_run.id,
+                measurement_point_id=point.id,
+            ),
+            db,
+        )
+        assert out_of_scope_check["applicability_status"] == "OUT_OF_SCOPE"
+        assert out_of_scope_check["allowed"] is False
+        with pytest.raises(HTTPException, match="不在模型已批准适用范围"):
+            predict_from_snapshot(
+                trained.id,
+                ModelPredictionRequest(
+                    production_run_id=out_of_scope_run.id,
+                    measurement_point_id=point.id,
+                ),
+                db,
+            )
+        ood_check = check_model_governance(
+            trained.id,
+            ModelGovernanceCheckRequest(
+                production_run_id=extreme_run.id,
+                measurement_point_id=point.id,
+            ),
+            db,
+        )
+        assert ood_check["ood_status"] == "OUT_OF_DISTRIBUTION"
+        assert ood_check["evidence"]["outlier_features"]
+        with pytest.raises(HTTPException, match="输入分布外"):
+            recommend_from_snapshot(
+                trained.id,
+                ModelRecommendationRequest(
+                    production_run_id=extreme_run.id,
+                    measurement_point_id=point.id,
+                    target_min=100.0,
+                ),
+                db,
+            )
+        incomplete_check = check_model_governance(
+            trained.id,
+            ModelGovernanceCheckRequest(
+                production_run_id=incomplete_run.id,
+                measurement_point_id=point.id,
+            ),
+            db,
+        )
+        assert incomplete_check["ood_status"] == "OUT_OF_DISTRIBUTION"
+        assert incomplete_check["evidence"]["missing_features"] == ["clearcoat_2.outer_air"]
+        with pytest.raises(HTTPException, match="完整率 50.0%"):
+            predict_from_snapshot(
+                trained.id,
+                ModelPredictionRequest(
+                    production_run_id=incomplete_run.id,
+                    measurement_point_id=point.id,
+                ),
+                db,
+            )
         drift = get_model_drift(trained.id, db)
-        assert drift["monitored_snapshot_count"] == 8
+        assert drift["monitored_snapshot_count"] == 11
         assert drift["prediction_count"] == 1
         assert drift["labeled_prediction_count"] == 1
         assert drift["baseline_source"] == "VALIDATION"

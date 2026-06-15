@@ -1112,6 +1112,47 @@ class ModelAcceptanceDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     comment: Mapped[str | None] = mapped_column(Text)
 
 
+class ModelApplicabilityScope(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "model_applicability_scope"
+    __table_args__ = (
+        UniqueConstraint(
+            "model_version_id",
+            "factory_id",
+            "vehicle_model_id",
+            "color_id",
+            name="uq_model_applicability_context",
+        ),
+        Index("ix_model_applicability_status", "model_version_id", "status"),
+    )
+
+    model_version_id: Mapped[str] = mapped_column(ForeignKey("model_version.id"), nullable=False)
+    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
+    vehicle_model_id: Mapped[str] = mapped_column(ForeignKey("vehicle_model.id"), nullable=False)
+    color_id: Mapped[str] = mapped_column(ForeignKey("color.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="PENDING", nullable=False)
+    source: Mapped[str] = mapped_column(String(32), default="DATASET_DERIVED", nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class ModelOodPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "model_ood_policy"
+    __table_args__ = (
+        UniqueConstraint("model_version_id", name="uq_model_ood_policy_version"),
+    )
+
+    model_version_id: Mapped[str] = mapped_column(ForeignKey("model_version.id"), nullable=False)
+    max_abs_standardized_shift: Mapped[float] = mapped_column(Float, nullable=False)
+    max_outlier_feature_ratio: Mapped[float] = mapped_column(Float, nullable=False)
+    min_feature_completeness: Mapped[float] = mapped_column(Float, nullable=False)
+    action: Mapped[str] = mapped_column(String(24), default="BLOCK", nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="PENDING", nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
 class PredictionResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "prediction_result"
     __table_args__ = (
@@ -1128,6 +1169,13 @@ class PredictionResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     lower_bound: Mapped[float | None] = mapped_column(Float)
     upper_bound: Mapped[float | None] = mapped_column(Float)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    applicability_status: Mapped[str] = mapped_column(
+        String(24), default="LEGACY_UNGOVERNED", nullable=False
+    )
+    ood_status: Mapped[str] = mapped_column(
+        String(24), default="LEGACY_UNGOVERNED", nullable=False
+    )
+    governance_evidence: Mapped[dict | None] = mapped_column(JSON)
     predicted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

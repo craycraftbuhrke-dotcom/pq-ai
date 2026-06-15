@@ -2403,6 +2403,53 @@ button.message-banner {
   margin: -2px 0 0;
 }
 
+.ai-governance-block {
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+}
+
+.ai-governance-block > strong {
+  font-size: 10px;
+}
+
+.ai-scope-row {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 9px;
+}
+
+.ai-scope-row span {
+  display: flex;
+  flex-direction: column;
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 9px;
+  gap: 3px;
+}
+
+.ai-scope-row small {
+  color: var(--text-muted);
+  font-family: "Geist Sans", system-ui, sans-serif;
+  font-size: 8px;
+}
+
+.ai-governance-warning {
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-elevated));
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+  font-size: 9px;
+  line-height: 1.6;
+  margin: 0;
+  padding: 9px 11px;
+}
+
 .ai-record-list {
   min-width: 0;
 }

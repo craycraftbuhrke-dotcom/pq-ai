@@ -15,7 +15,12 @@ from app.models.domain import (
     DatasetSnapshot,
     DatasetSplitMember,
     DiagnosisResult,
+    Color,
+    Factory,
+    FactoryVehicleModel,
+    ModelApplicabilityScope,
     ModelAcceptanceDecision,
+    ModelOodPolicy,
     ModelVersion,
     ParameterDefinition,
     PointFeatureSnapshot,
@@ -26,6 +31,8 @@ from app.models.domain import (
     ProductionRun,
     Recommendation,
     RecommendationAction,
+    VehicleModel,
+    VehicleModelColor,
 )
 
 
@@ -173,6 +180,8 @@ def _fit_ridge(samples: list[tuple[dict[str, float], float]], ridge_lambda: floa
         "feature_names": feature_names,
         "means": means,
         "scales": scales,
+        "minimums": [min(column) for column in columns],
+        "maximums": [max(column) for column in columns],
         "coefficients": coefficients,
         "intercept": intercept,
     }
@@ -181,6 +190,148 @@ def _fit_ridge(samples: list[tuple[dict[str, float], float]], ridge_lambda: floa
     fitted["residual_std"] = metrics["training_rmse"]
     fitted["evaluation_metrics"] = metrics
     return fitted
+
+
+def ensure_model_governance(
+    db: Session,
+    model: ModelVersion,
+    *,
+    max_abs_standardized_shift: float = 4.0,
+    max_outlier_feature_ratio: float = 0.2,
+    min_feature_completeness: float = 1.0,
+) -> None:
+    if not model.dataset_snapshot_id:
+        raise HTTPException(status_code=409, detail="模型没有受治理的数据集，无法派生适用范围")
+    existing_contexts = set(
+        db.execute(
+            select(
+                ModelApplicabilityScope.factory_id,
+                ModelApplicabilityScope.vehicle_model_id,
+                ModelApplicabilityScope.color_id,
+            ).where(ModelApplicabilityScope.model_version_id == model.id)
+        ).all()
+    )
+    contexts = set(
+        db.execute(
+            select(
+                ProductionRun.factory_id,
+                ProductionRun.vehicle_model_id,
+                ProductionRun.color_id,
+            )
+            .join(DatasetSplitMember, DatasetSplitMember.production_run_id == ProductionRun.id)
+            .where(DatasetSplitMember.dataset_snapshot_id == model.dataset_snapshot_id)
+        ).all()
+    )
+    for factory_id, vehicle_model_id, color_id in contexts - existing_contexts:
+        db.add(
+            ModelApplicabilityScope(
+                model_version_id=model.id,
+                factory_id=factory_id,
+                vehicle_model_id=vehicle_model_id,
+                color_id=color_id,
+                status="PENDING",
+                source="DATASET_DERIVED",
+                remark="由受治理训练数据集中的生产上下文自动派生，需随模型人工验收。",
+            )
+        )
+    if not db.scalar(select(ModelOodPolicy).where(ModelOodPolicy.model_version_id == model.id)):
+        db.add(
+            ModelOodPolicy(
+                model_version_id=model.id,
+                max_abs_standardized_shift=max_abs_standardized_shift,
+                max_outlier_feature_ratio=max_outlier_feature_ratio,
+                min_feature_completeness=min_feature_completeness,
+                action="BLOCK",
+                status="PENDING",
+                remark="统计分布外阻断策略，不代表设备、材料或工艺安全边界。",
+            )
+        )
+    db.flush()
+
+
+def create_model_applicability_scope(db: Session, model: ModelVersion, payload):
+    if (
+        not db.get(Factory, payload.factory_id)
+        or not db.get(VehicleModel, payload.vehicle_model_id)
+        or not db.get(Color, payload.color_id)
+    ):
+        raise HTTPException(status_code=422, detail="适用范围引用的工厂、车型或颜色不存在")
+    if not db.scalar(
+        select(FactoryVehicleModel).where(
+            FactoryVehicleModel.factory_id == payload.factory_id,
+            FactoryVehicleModel.vehicle_model_id == payload.vehicle_model_id,
+            FactoryVehicleModel.is_active.is_(True),
+        )
+    ) or not db.scalar(
+        select(VehicleModelColor).where(
+            VehicleModelColor.vehicle_model_id == payload.vehicle_model_id,
+            VehicleModelColor.color_id == payload.color_id,
+            VehicleModelColor.is_active.is_(True),
+        )
+    ):
+        raise HTTPException(status_code=422, detail="工厂-车型或车型-颜色关系未启用")
+    existing = db.scalar(
+        select(ModelApplicabilityScope).where(
+            ModelApplicabilityScope.model_version_id == model.id,
+            ModelApplicabilityScope.factory_id == payload.factory_id,
+            ModelApplicabilityScope.vehicle_model_id == payload.vehicle_model_id,
+            ModelApplicabilityScope.color_id == payload.color_id,
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="该模型适用上下文已存在")
+    scope = ModelApplicabilityScope(
+        model_version_id=model.id,
+        factory_id=payload.factory_id,
+        vehicle_model_id=payload.vehicle_model_id,
+        color_id=payload.color_id,
+        status="PENDING",
+        source="MANUAL",
+        remark=payload.remark,
+    )
+    db.add(scope)
+    db.commit()
+    db.refresh(scope)
+    return scope
+
+
+def update_model_applicability_scope(db: Session, model: ModelVersion, scope, payload):
+    scope.status = payload.status
+    scope.remark = payload.remark
+    if payload.status != "ACTIVE":
+        scope.approved_by = None
+        scope.approved_at = None
+    if model.status == "ACTIVE" and not db.scalar(
+        select(ModelApplicabilityScope).where(
+            ModelApplicabilityScope.model_version_id == model.id,
+            ModelApplicabilityScope.status == "ACTIVE",
+            ModelApplicabilityScope.id != scope.id,
+        )
+    ):
+        model.status = "RETIRED"
+    db.commit()
+    db.refresh(scope)
+    return scope
+
+
+def update_model_ood_policy(db: Session, model: ModelVersion, payload) -> ModelOodPolicy:
+    policy = db.scalar(select(ModelOodPolicy).where(ModelOodPolicy.model_version_id == model.id))
+    if not policy:
+        policy = ModelOodPolicy(model_version_id=model.id)
+        db.add(policy)
+    policy.max_abs_standardized_shift = payload.max_abs_standardized_shift
+    policy.max_outlier_feature_ratio = payload.max_outlier_feature_ratio
+    policy.min_feature_completeness = payload.min_feature_completeness
+    policy.action = payload.action
+    policy.status = "PENDING"
+    policy.approved_by = None
+    policy.approved_at = None
+    policy.remark = payload.remark
+    if model.status == "ACTIVE":
+        model.status = "RETIRED"
+    db.commit()
+    db.refresh(policy)
+    return policy
 
 
 def build_dataset_snapshot(db: Session, payload) -> DatasetSnapshot:
@@ -427,6 +578,14 @@ def train_model(db: Session, payload) -> ModelVersion:
         status="DRAFT",
     )
     db.add(model)
+    db.flush()
+    ensure_model_governance(
+        db,
+        model,
+        max_abs_standardized_shift=payload.max_abs_standardized_shift,
+        max_outlier_feature_ratio=payload.max_outlier_feature_ratio,
+        min_feature_completeness=payload.min_feature_completeness,
+    )
     db.commit()
     db.refresh(model)
     return model
@@ -436,6 +595,15 @@ def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelA
     if not model.dataset_snapshot_id:
         raise HTTPException(status_code=409, detail="旧模型没有受治理的数据集快照，不能验收")
     dataset = db.get(DatasetSnapshot, model.dataset_snapshot_id)
+    scopes = list(
+        db.scalars(
+            select(ModelApplicabilityScope).where(
+                ModelApplicabilityScope.model_version_id == model.id,
+                ModelApplicabilityScope.status != "INACTIVE",
+            )
+        )
+    )
+    policy = db.scalar(select(ModelOodPolicy).where(ModelOodPolicy.model_version_id == model.id))
     leakage_passed = bool(dataset and dataset.leakage_check.get("passed"))
     metrics = model.evaluation_metrics
     threshold_checks = {
@@ -452,6 +620,8 @@ def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelA
         "dataset_exists": dataset is not None,
         "leakage_check_passed": leakage_passed,
         "has_independent_validation": bool(dataset and dataset.validation_group_count > 0),
+        "has_configured_applicability_scope": bool(scopes),
+        "has_configured_ood_policy": policy is not None and policy.action == "BLOCK",
         **threshold_checks,
     }
     checks["all_required_checks_passed"] = all(checks.values())
@@ -472,6 +642,15 @@ def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelA
     )
     if payload.decision == "REJECTED" and model.status == "ACTIVE":
         model.status = "RETIRED"
+    if payload.decision == "ACCEPTED":
+        approved_at = datetime.now(UTC)
+        for scope in scopes:
+            scope.status = "ACTIVE"
+            scope.approved_by = payload.decided_by
+            scope.approved_at = approved_at
+        policy.status = "ACTIVE"
+        policy.approved_by = payload.decided_by
+        policy.approved_at = approved_at
     db.add(decision)
     db.commit()
     db.refresh(decision)
@@ -662,6 +841,21 @@ def update_model_status(db: Session, model: ModelVersion, next_status: str) -> M
             or not acceptance.checks.get("all_required_checks_passed")
         ):
             raise HTTPException(status_code=409, detail="模型必须先通过独立验证和人工验收才能激活")
+        if not db.scalar(
+            select(ModelApplicabilityScope).where(
+                ModelApplicabilityScope.model_version_id == model.id,
+                ModelApplicabilityScope.status == "ACTIVE",
+            )
+        ):
+            raise HTTPException(status_code=409, detail="模型没有已批准的适用范围，不能激活")
+        policy = db.scalar(
+            select(ModelOodPolicy).where(
+                ModelOodPolicy.model_version_id == model.id,
+                ModelOodPolicy.status == "ACTIVE",
+            )
+        )
+        if not policy or policy.action != "BLOCK":
+            raise HTTPException(status_code=409, detail="模型没有已批准的 OOD 阻断策略，不能激活")
         for active_model in db.scalars(
             select(ModelVersion).where(
                 ModelVersion.model_code == model.model_code,
@@ -677,14 +871,16 @@ def update_model_status(db: Session, model: ModelVersion, next_status: str) -> M
     return model
 
 
-def predict_with_model(
+def model_governance_check(
     db: Session,
     model: ModelVersion,
     production_run_id: str,
     measurement_point_id: str,
-    persist_result: bool = True,
 ) -> dict:
     _ensure_model_scope(model)
+    run = db.get(ProductionRun, production_run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="生产事件不存在")
     snapshot = db.scalar(
         select(PointFeatureSnapshot).where(
             PointFeatureSnapshot.production_run_id == production_run_id,
@@ -695,6 +891,141 @@ def predict_with_model(
     )
     if not snapshot:
         raise HTTPException(status_code=404, detail="未找到与模型特征版本匹配的点位特征快照")
+    scope = db.scalar(
+        select(ModelApplicabilityScope).where(
+            ModelApplicabilityScope.model_version_id == model.id,
+            ModelApplicabilityScope.factory_id == run.factory_id,
+            ModelApplicabilityScope.vehicle_model_id == run.vehicle_model_id,
+            ModelApplicabilityScope.color_id == run.color_id,
+            ModelApplicabilityScope.status == "ACTIVE",
+        )
+    )
+    policy = db.scalar(
+        select(ModelOodPolicy).where(
+            ModelOodPolicy.model_version_id == model.id,
+            ModelOodPolicy.status == "ACTIVE",
+        )
+    )
+    payload = model.model_payload
+    feature_names = payload.get("feature_names", [])
+    missing_features = [
+        name
+        for name in feature_names
+        if not isinstance(snapshot.feature_values.get(name), int | float)
+        or isinstance(snapshot.feature_values.get(name), bool)
+    ]
+    feature_completeness = (
+        (len(feature_names) - len(missing_features)) / len(feature_names)
+        if feature_names
+        else 0.0
+    )
+    feature_shifts = []
+    for name, mean, scale in zip(
+        feature_names,
+        payload.get("means", []),
+        payload.get("scales", []),
+        strict=True,
+    ):
+        value = snapshot.feature_values.get(name)
+        if name in missing_features:
+            continue
+        shift = abs(float(value) - float(mean)) / (abs(float(scale)) or 1.0)
+        feature_shifts.append(
+            {
+                "feature": name,
+                "value": float(value),
+                "standardized_shift": round(shift, 6),
+            }
+        )
+    max_shift = max((item["standardized_shift"] for item in feature_shifts), default=None)
+    outlier_features = (
+        [
+            item
+            for item in feature_shifts
+            if item["standardized_shift"] > policy.max_abs_standardized_shift
+        ]
+        if policy
+        else []
+    )
+    outlier_ratio = len(outlier_features) / len(feature_names) if feature_names else 1.0
+    applicability_status = "IN_SCOPE" if scope else "OUT_OF_SCOPE"
+    if not policy:
+        ood_status = "POLICY_NOT_APPROVED"
+    elif (
+        feature_completeness < policy.min_feature_completeness
+        or outlier_ratio > policy.max_outlier_feature_ratio
+    ):
+        ood_status = "OUT_OF_DISTRIBUTION"
+    else:
+        ood_status = "IN_DISTRIBUTION"
+    allowed = applicability_status == "IN_SCOPE" and ood_status == "IN_DISTRIBUTION"
+    evidence = {
+        "scope_id": scope.id if scope else None,
+        "policy_id": policy.id if policy else None,
+        "context": {
+            "factory_id": run.factory_id,
+            "vehicle_model_id": run.vehicle_model_id,
+            "color_id": run.color_id,
+        },
+        "feature_completeness": round(feature_completeness, 6),
+        "missing_features": missing_features,
+        "max_abs_standardized_shift": max_shift,
+        "outlier_feature_ratio": round(outlier_ratio, 6),
+        "outlier_features": outlier_features,
+        "policy": (
+            {
+                "max_abs_standardized_shift": policy.max_abs_standardized_shift,
+                "max_outlier_feature_ratio": policy.max_outlier_feature_ratio,
+                "min_feature_completeness": policy.min_feature_completeness,
+                "action": policy.action,
+            }
+            if policy
+            else None
+        ),
+    }
+    return {
+        "model_version_id": model.id,
+        "production_run_id": production_run_id,
+        "measurement_point_id": measurement_point_id,
+        "allowed": allowed,
+        "applicability_status": applicability_status,
+        "ood_status": ood_status,
+        "evidence": evidence,
+        "_snapshot": snapshot,
+    }
+
+
+def _require_governed_inference(check: dict) -> None:
+    if check["allowed"]:
+        return
+    reasons = []
+    if check["applicability_status"] != "IN_SCOPE":
+        reasons.append("生产事件的工厂/车型/颜色不在模型已批准适用范围")
+    if check["ood_status"] == "POLICY_NOT_APPROVED":
+        reasons.append("模型没有已批准的 OOD 阻断策略")
+    elif check["ood_status"] != "IN_DISTRIBUTION":
+        evidence = check["evidence"]
+        reasons.append(
+            "输入分布外："
+            f"完整率 {evidence['feature_completeness']:.1%}，"
+            f"异常特征比例 {evidence['outlier_feature_ratio']:.1%}"
+        )
+    raise HTTPException(status_code=409, detail="；".join(reasons))
+
+
+def predict_with_model(
+    db: Session,
+    model: ModelVersion,
+    production_run_id: str,
+    measurement_point_id: str,
+    persist_result: bool = True,
+) -> dict:
+    _ensure_model_scope(model)
+    governance = model_governance_check(
+        db, model, production_run_id, measurement_point_id
+    )
+    _require_governed_inference(governance)
+    snapshot = governance.pop("_snapshot")
 
     payload = model.model_payload
     feature_names = payload["feature_names"]
@@ -723,6 +1054,9 @@ def predict_with_model(
             lower_bound=predicted_value - 1.96 * residual_std,
             upper_bound=predicted_value + 1.96 * residual_std,
             confidence=confidence,
+            applicability_status=governance["applicability_status"],
+            ood_status=governance["ood_status"],
+            governance_evidence=governance["evidence"],
             predicted_at=datetime.now(UTC),
         )
         db.add(prediction)
@@ -739,12 +1073,20 @@ def predict_with_model(
         "upper_bound": predicted_value + 1.96 * residual_std,
         "confidence": confidence,
         "feature_completeness": feature_completeness,
+        "applicability_status": governance["applicability_status"],
+        "ood_status": governance["ood_status"],
+        "governance_evidence": governance["evidence"],
     }
 
 
 def diagnose_prediction(db: Session, prediction: PredictionResult) -> DiagnosisResult:
     model = db.get(ModelVersion, prediction.model_version_id)
     _ensure_model_scope(model)
+    if (
+        prediction.applicability_status != "IN_SCOPE"
+        or prediction.ood_status != "IN_DISTRIBUTION"
+    ):
+        raise HTTPException(status_code=409, detail="未通过适用范围与 OOD 门禁的预测不能生成诊断")
     snapshot = db.scalar(
         select(PointFeatureSnapshot).where(
             PointFeatureSnapshot.production_run_id == prediction.production_run_id,

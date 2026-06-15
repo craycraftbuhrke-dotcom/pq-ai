@@ -81,6 +81,7 @@ from app.services.material_governance import refresh_material_result_reliability
 from app.services.modeling import (
     build_dataset_snapshot,
     record_model_acceptance,
+    ensure_model_governance,
     train_model,
     update_model_status,
 )
@@ -122,12 +123,19 @@ def _ensure_demo_governed_model(db: Session) -> ModelVersion:
                 ridge_lambda=0.1,
             ),
         )
+    ensure_model_governance(db, model)
+    db.commit()
     acceptance = db.scalar(
         select(ModelAcceptanceDecision)
         .where(ModelAcceptanceDecision.model_version_id == model.id)
         .order_by(ModelAcceptanceDecision.decided_at.desc())
     )
-    if not acceptance or acceptance.decision != "ACCEPTED":
+    if (
+        not acceptance
+        or acceptance.decision != "ACCEPTED"
+        or not acceptance.checks.get("has_configured_applicability_scope")
+        or not acceptance.checks.get("has_configured_ood_policy")
+    ):
         record_model_acceptance(
             db,
             model,

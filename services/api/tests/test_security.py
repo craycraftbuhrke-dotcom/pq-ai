@@ -65,6 +65,11 @@ def test_endpoint_permissions_cover_security_and_closed_loop_actions() -> None:
     assert required_permission("PATCH", "/api/v1/ai/models/model-1/status") == "ai.train"
     assert required_permission("POST", "/api/v1/ai/models/datasets") == "ai.train"
     assert required_permission("POST", "/api/v1/ai/models/model-1/acceptance") == "ai.train"
+    assert required_permission("PUT", "/api/v1/ai/models/model-1/ood-policy") == "ai.train"
+    assert (
+        required_permission("POST", "/api/v1/ai/models/model-1/applicability-scopes")
+        == "ai.train"
+    )
     assert (
         required_permission("POST", "/api/v1/ai/recommendations/rec-1/approval")
         == "ai.approve"

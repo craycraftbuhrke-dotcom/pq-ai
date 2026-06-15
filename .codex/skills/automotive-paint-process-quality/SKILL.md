@@ -28,9 +28,11 @@ Use this skill for every change that touches process stages, parameters, materia
 8. Train separate model families for thickness, color, and orange peel. Split data by time and production event/body/batch to prevent leakage.
 9. Freeze every acceptance dataset with feature values, target values, quality-measurement IDs, group/split membership, temporal cutoff, and leakage checks. Fit only on `TRAIN`; evaluate only on independent `VALIDATION`.
 10. Never activate a model from training metrics. Require recorded independent-validation metrics and a human acceptance decision before activation.
-11. Treat diagnosis as association unless supported by controlled DOE or other causal evidence.
-12. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require human approval and post-change measurement.
-13. Reject or quarantine out-of-scope features before snapshot creation and training.
+11. Derive initial factory/model/color applicability from the governed dataset, keep it pending until human acceptance, and require an approved statistical OOD blocking policy before activation.
+12. Block prediction, diagnosis, and recommendation for unsupported contexts, incomplete model inputs, or distribution-outlier inputs; persist the scope/OOD evidence with each accepted prediction.
+13. Treat diagnosis as association unless supported by controlled DOE or other causal evidence.
+14. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require human approval and post-change measurement.
+15. Reject or quarantine out-of-scope features before snapshot creation and training.
 
 ## Reference Loading
 
