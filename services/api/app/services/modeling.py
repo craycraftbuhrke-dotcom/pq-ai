@@ -18,6 +18,7 @@ from app.models.domain import (
     Color,
     Factory,
     FactoryVehicleModel,
+    ModelAcceptancePolicy,
     ModelApplicabilityScope,
     ModelAcceptanceDecision,
     ModelOodPolicy,
@@ -334,6 +335,167 @@ def update_model_ood_policy(db: Session, model: ModelVersion, payload) -> ModelO
     return policy
 
 
+def create_model_acceptance_policy(db: Session, payload) -> ModelAcceptancePolicy:
+    _target_family(payload.target_metric)
+    if not db.get(Factory, payload.factory_id):
+        raise HTTPException(status_code=422, detail="验收策略引用的工厂不存在")
+    if db.scalar(
+        select(ModelAcceptancePolicy).where(
+            ModelAcceptancePolicy.policy_code == payload.policy_code,
+            ModelAcceptancePolicy.version == payload.version,
+        )
+    ):
+        raise HTTPException(status_code=409, detail="验收策略代码与版本已存在")
+    policy = ModelAcceptancePolicy(
+        policy_code=payload.policy_code,
+        version=payload.version,
+        factory_id=payload.factory_id,
+        target_metric=payload.target_metric,
+        policy_type="FACTORY_APPROVED",
+        max_validation_rmse=payload.max_validation_rmse,
+        min_validation_r2=payload.min_validation_r2,
+        min_train_groups=payload.min_train_groups,
+        min_validation_groups=payload.min_validation_groups,
+        status="DRAFT",
+        source_uri=payload.source_uri,
+        remark=payload.remark,
+    )
+    db.add(policy)
+    db.commit()
+    db.refresh(policy)
+    return policy
+
+
+def update_model_acceptance_policy_status(
+    db: Session, policy: ModelAcceptancePolicy, payload
+) -> ModelAcceptancePolicy:
+    if payload.status == "ACTIVE" and not payload.approved_by:
+        raise HTTPException(status_code=422, detail="激活工厂验收策略必须记录批准人")
+    if payload.status == "ACTIVE":
+        for active_policy in db.scalars(
+            select(ModelAcceptancePolicy).where(
+                ModelAcceptancePolicy.factory_id == policy.factory_id,
+                ModelAcceptancePolicy.target_metric == policy.target_metric,
+                ModelAcceptancePolicy.policy_type == policy.policy_type,
+                ModelAcceptancePolicy.status == "ACTIVE",
+                ModelAcceptancePolicy.id != policy.id,
+            )
+        ):
+            active_policy.status = "RETIRED"
+        policy.approved_by = payload.approved_by
+        policy.approved_at = datetime.now(UTC)
+    else:
+        policy.approved_by = None
+        policy.approved_at = None
+    policy.status = payload.status
+    for model in db.scalars(
+        select(ModelVersion)
+        .join(ModelApplicabilityScope, ModelApplicabilityScope.model_version_id == ModelVersion.id)
+        .where(
+            ModelVersion.target_metric == policy.target_metric,
+            ModelVersion.status == "ACTIVE",
+            ModelApplicabilityScope.factory_id == policy.factory_id,
+            ModelApplicabilityScope.status == "ACTIVE",
+        )
+    ):
+        model.status = "RETIRED"
+    db.commit()
+    db.refresh(policy)
+    return policy
+
+
+def _factory_acceptance_evidence(
+    db: Session,
+    model: ModelVersion,
+    scopes: list[ModelApplicabilityScope] | None = None,
+) -> dict:
+    if scopes is None:
+        scopes = list(
+            db.scalars(
+                select(ModelApplicabilityScope).where(
+                    ModelApplicabilityScope.model_version_id == model.id,
+                    ModelApplicabilityScope.status != "INACTIVE",
+                )
+            )
+        )
+    dataset = db.get(DatasetSnapshot, model.dataset_snapshot_id) if model.dataset_snapshot_id else None
+    allowed_types = ["FACTORY_APPROVED"]
+    if model.model_code.startswith("DEMO-"):
+        allowed_types.append("DEMO")
+    details = []
+    for factory_id in sorted({scope.factory_id for scope in scopes}):
+        policy = db.scalar(
+            select(ModelAcceptancePolicy)
+            .where(
+                ModelAcceptancePolicy.factory_id == factory_id,
+                ModelAcceptancePolicy.target_metric == model.target_metric,
+                ModelAcceptancePolicy.policy_type.in_(allowed_types),
+                ModelAcceptancePolicy.status == "ACTIVE",
+            )
+            .order_by(
+                ModelAcceptancePolicy.approved_at.desc(),
+                ModelAcceptancePolicy.created_at.desc(),
+            )
+        )
+        if not policy:
+            details.append(
+                {
+                    "factory_id": factory_id,
+                    "policy_id": None,
+                    "policy_code": None,
+                    "policy_type": None,
+                    "checks_passed": False,
+                    "checks": {"policy_present": False},
+                }
+            )
+            continue
+        metrics = model.evaluation_metrics
+        checks = {
+            "policy_present": True,
+            "validation_rmse": (
+                metrics.get("validation_rmse") is not None
+                and metrics["validation_rmse"] <= policy.max_validation_rmse
+            ),
+            "validation_r2": (
+                metrics.get("validation_r2") is not None
+                and metrics["validation_r2"] >= policy.min_validation_r2
+            ),
+            "train_group_count": (
+                dataset is not None and dataset.train_group_count >= policy.min_train_groups
+            ),
+            "validation_group_count": (
+                dataset is not None
+                and dataset.validation_group_count >= policy.min_validation_groups
+            ),
+        }
+        details.append(
+            {
+                "factory_id": factory_id,
+                "policy_id": policy.id,
+                "policy_code": f"{policy.policy_code}:{policy.version}",
+                "policy_type": policy.policy_type,
+                "source_uri": policy.source_uri,
+                "thresholds": {
+                    "max_validation_rmse": policy.max_validation_rmse,
+                    "min_validation_r2": policy.min_validation_r2,
+                    "min_train_groups": policy.min_train_groups,
+                    "min_validation_groups": policy.min_validation_groups,
+                },
+                "checks_passed": all(checks.values()),
+                "checks": checks,
+            }
+        )
+    return {
+        "policies_present": bool(details) and all(
+            detail["checks"].get("policy_present", False) for detail in details
+        ),
+        "thresholds_passed": bool(details) and all(
+            detail["checks_passed"] for detail in details
+        ),
+        "details": details,
+    }
+
+
 def build_dataset_snapshot(db: Session, payload) -> DatasetSnapshot:
     try:
         require_scope_safe_model(payload.target_metric, payload.feature_set_version, [])
@@ -604,6 +766,7 @@ def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelA
         )
     )
     policy = db.scalar(select(ModelOodPolicy).where(ModelOodPolicy.model_version_id == model.id))
+    factory_acceptance = _factory_acceptance_evidence(db, model, scopes)
     leakage_passed = bool(dataset and dataset.leakage_check.get("passed"))
     metrics = model.evaluation_metrics
     threshold_checks = {
@@ -622,6 +785,8 @@ def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelA
         "has_independent_validation": bool(dataset and dataset.validation_group_count > 0),
         "has_configured_applicability_scope": bool(scopes),
         "has_configured_ood_policy": policy is not None and policy.action == "BLOCK",
+        "factory_acceptance_policies_present": factory_acceptance["policies_present"],
+        "factory_acceptance_thresholds_passed": factory_acceptance["thresholds_passed"],
         **threshold_checks,
     }
     checks["all_required_checks_passed"] = all(checks.values())
@@ -634,6 +799,7 @@ def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelA
         criteria={
             "max_validation_rmse": payload.max_validation_rmse,
             "min_validation_r2": payload.min_validation_r2,
+            "factory_acceptance_policies": factory_acceptance["details"],
         },
         checks=checks,
         decided_by=payload.decided_by,
@@ -856,6 +1022,11 @@ def update_model_status(db: Session, model: ModelVersion, next_status: str) -> M
         )
         if not policy or policy.action != "BLOCK":
             raise HTTPException(status_code=409, detail="模型没有已批准的 OOD 阻断策略，不能激活")
+        factory_acceptance = _factory_acceptance_evidence(db, model)
+        if not factory_acceptance["policies_present"]:
+            raise HTTPException(status_code=409, detail="模型全部适用工厂必须配置生效验收策略")
+        if not factory_acceptance["thresholds_passed"]:
+            raise HTTPException(status_code=409, detail="模型未满足当前生效的工厂验收阈值")
         for active_model in db.scalars(
             select(ModelVersion).where(
                 ModelVersion.model_code == model.model_code,

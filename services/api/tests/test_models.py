@@ -47,6 +47,7 @@ def test_core_closed_loop_tables_are_registered() -> None:
         "dataset_split_member",
         "model_version",
         "model_acceptance_decision",
+        "model_acceptance_policy",
         "model_applicability_scope",
         "model_ood_policy",
         "prediction_result",

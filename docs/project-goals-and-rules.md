@@ -28,6 +28,7 @@ Explicitly excluded: pretreatment, e-coat, sealing, booth temperature/humidity, 
 10. A model can be activated only after an immutable dataset snapshot passes grouped temporal leakage checks, the model is evaluated on its independent validation split, and a human acceptance decision is recorded.
 11. A model's factory/model/color applicability and statistical OOD blocking policy are governed acceptance facts. Unsupported, incomplete, or distribution-outlier inputs must never reach prediction, diagnosis, or recommendation.
 12. Statistical OOD policy does not replace approved device, material, TDS, program, or process safety constraints.
+13. Every production model must satisfy a versioned, source-backed, active factory acceptance policy for every applicable factory and target metric. Demo thresholds never qualify as factory approval.
 
 ## Development Gate
 

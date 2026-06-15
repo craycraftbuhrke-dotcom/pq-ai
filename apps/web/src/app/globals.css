@@ -2440,6 +2440,13 @@ button.message-banner {
   font-size: 8px;
 }
 
+.ai-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .ai-governance-warning {
   background: color-mix(in srgb, var(--danger) 8%, var(--bg-elevated));
   border-left: 3px solid var(--danger);

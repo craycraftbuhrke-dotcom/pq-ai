@@ -57,11 +57,30 @@ type AcceptanceDecision = {
   model_version_id: string;
   dataset_snapshot_id: string;
   decision: string;
-  criteria: Record<string, number | null>;
+  criteria: Record<string, unknown>;
   checks: Record<string, boolean>;
   decided_by: string;
   decided_at: string;
   comment?: string | null;
+};
+type AcceptancePolicy = {
+  id: string;
+  policy_code: string;
+  version: string;
+  factory_id: string;
+  factory_code: string;
+  factory_name: string;
+  target_metric: string;
+  policy_type: string;
+  max_validation_rmse: number;
+  min_validation_r2: number;
+  min_train_groups: number;
+  min_validation_groups: number;
+  status: string;
+  source_uri: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  remark?: string | null;
 };
 type Snapshot = {
   id: string;
@@ -303,6 +322,7 @@ export function AiWorkbench() {
   const [models, setModels] = useState<ModelVersion[]>([]);
   const [datasets, setDatasets] = useState<DatasetSnapshot[]>([]);
   const [acceptanceDecisions, setAcceptanceDecisions] = useState<AcceptanceDecision[]>([]);
+  const [acceptancePolicies, setAcceptancePolicies] = useState<AcceptancePolicy[]>([]);
   const [applicabilityScopes, setApplicabilityScopes] = useState<ApplicabilityScope[]>([]);
   const [oodPolicies, setOodPolicies] = useState<OodPolicy[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
@@ -325,6 +345,7 @@ export function AiWorkbench() {
   const [verificationMeasurementId, setVerificationMeasurementId] = useState("");
   const [defaultModelCode] = useState(() => `PQ-MODEL-${Date.now().toString().slice(-6)}`);
   const [defaultDatasetCode] = useState(() => `PQ-DATASET-${Date.now().toString().slice(-6)}`);
+  const [defaultPolicyCode] = useState(() => `FACTORY-POLICY-${Date.now().toString().slice(-6)}`);
   const [loading, setLoading] = useState(true);
   const [driftLoading, setDriftLoading] = useState(false);
   const [governanceLoading, setGovernanceLoading] = useState(false);
@@ -336,11 +357,12 @@ export function AiWorkbench() {
     setLoading(true);
     setError("");
     try {
-      const [nextModels, nextDatasets, nextAcceptanceDecisions, nextApplicabilityScopes, nextOodPolicies, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextMeasurements, nextMetrics] =
+      const [nextModels, nextDatasets, nextAcceptanceDecisions, nextAcceptancePolicies, nextApplicabilityScopes, nextOodPolicies, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextMeasurements, nextMetrics] =
         await Promise.all([
           request<ModelVersion[]>("/api/ai/models"),
           request<DatasetSnapshot[]>("/api/ai/models/datasets"),
           request<AcceptanceDecision[]>("/api/ai/models/acceptance-decisions"),
+          request<AcceptancePolicy[]>("/api/ai/models/acceptance-policies"),
           request<ApplicabilityScope[]>("/api/ai/models/applicability-scopes"),
           request<OodPolicy[]>("/api/ai/models/ood-policies"),
           request<Snapshot[]>("/api/ai/models/feature-snapshots"),
@@ -353,6 +375,7 @@ export function AiWorkbench() {
       setModels(nextModels);
       setDatasets(nextDatasets);
       setAcceptanceDecisions(nextAcceptanceDecisions);
+      setAcceptancePolicies(nextAcceptancePolicies);
       setApplicabilityScopes(nextApplicabilityScopes);
       setOodPolicies(nextOodPolicies);
       setSnapshots(nextSnapshots);
@@ -419,11 +442,39 @@ export function AiWorkbench() {
   const selectedDataset = datasets.find((item) => item.id === selectedDatasetId);
   const modelDataset = datasets.find((item) => item.id === selectedModel?.dataset_snapshot_id);
   const selectedAcceptance = acceptanceDecisions.find((item) => item.model_version_id === selectedModelId);
+  const selectedAcceptancePolicies = acceptancePolicies.filter(
+    (item) => !selectedModel || item.target_metric === selectedModel.target_metric,
+  );
   const selectedScopes = applicabilityScopes.filter((item) => item.model_version_id === selectedModelId);
+  const selectedApplicableScopes = selectedScopes.filter((scope) => scope.status !== "INACTIVE");
   const selectedOodPolicy = oodPolicies.find((item) => item.model_version_id === selectedModelId);
-  const compatibleSnapshots = useMemo(
-    () => snapshots.filter((item) => !selectedModel || item.feature_set_version === selectedModel.feature_set_version),
-    [selectedModel, snapshots],
+  const factoryOptions = useMemo(
+    () => Array.from(
+      new Map(
+        snapshots.map((snapshot) => [
+          snapshot.factory_id,
+          {
+            id: snapshot.factory_id,
+            code: snapshot.factory_code,
+            name: snapshot.factory_name,
+          },
+        ]),
+      ).values(),
+    ),
+    [snapshots],
+  );
+  const factoryPolicyCoverage = selectedApplicableScopes.length > 0 && selectedApplicableScopes.every(
+    (scope) => selectedAcceptancePolicies.some(
+      (policy) =>
+        policy.factory_id === scope.factory_id &&
+        policy.status === "ACTIVE" &&
+        (policy.policy_type === "FACTORY_APPROVED" ||
+          (selectedModel?.model_code.startsWith("DEMO-") && policy.policy_type === "DEMO")),
+    ),
+  );
+  const selectedModelFeatureSetVersion = selectedModel?.feature_set_version;
+  const compatibleSnapshots = snapshots.filter(
+    (item) => !selectedModelFeatureSetVersion || item.feature_set_version === selectedModelFeatureSetVersion,
   );
   const selectedSnapshot = compatibleSnapshots.find((item) => item.id === selectedSnapshotId) ?? compatibleSnapshots[0];
   const governanceAllowed = Boolean(
@@ -569,6 +620,56 @@ export function AiWorkbench() {
         }),
       });
       showSuccess(decision === "ACCEPTED" ? "模型已通过验收，可以激活" : "模型已记录为验收驳回");
+      await reload();
+    } catch (operationError) {
+      showError(operationError);
+    } finally {
+      setSubmitting("");
+    }
+  }
+
+  async function createAcceptancePolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    setSubmitting("acceptance-policy-create");
+    try {
+      await request<AcceptancePolicy>("/api/ai/models/acceptance-policies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          policy_code: String(data.get("policy_code")),
+          version: String(data.get("version")),
+          factory_id: String(data.get("factory_id")),
+          target_metric: String(data.get("target_metric")),
+          max_validation_rmse: Number(data.get("max_validation_rmse")),
+          min_validation_r2: Number(data.get("min_validation_r2")),
+          min_train_groups: Number(data.get("min_train_groups")),
+          min_validation_groups: Number(data.get("min_validation_groups")),
+          source_uri: String(data.get("source_uri")),
+          remark: String(data.get("remark") || ""),
+        }),
+      });
+      showSuccess("工厂模型验收策略草稿已创建，批准激活后才能用于模型验收");
+      await reload();
+    } catch (operationError) {
+      showError(operationError);
+    } finally {
+      setSubmitting("");
+    }
+  }
+
+  async function changeAcceptancePolicyStatus(policy: AcceptancePolicy, status: "ACTIVE" | "RETIRED") {
+    setSubmitting(`acceptance-policy-${policy.id}-${status}`);
+    try {
+      await request<AcceptancePolicy>(`/api/ai/models/acceptance-policies/${policy.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status,
+          approved_by: status === "ACTIVE" ? "工厂模型治理人" : null,
+        }),
+      });
+      showSuccess(status === "ACTIVE" ? "工厂验收策略已批准激活" : "工厂验收策略已退役");
       await reload();
     } catch (operationError) {
       showError(operationError);
@@ -883,13 +984,30 @@ export function AiWorkbench() {
               <div className="program-subheading"><div><span className="eyebrow">Model Registry</span><h3>版本状态治理</h3></div><ShieldCheck /></div>
               <div className="ai-form-stack">
                 <label className="form-field"><span>模型版本</span><select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {statusLabel(model.status)}</option>)}</select></label>
-                <div className="ai-context-box"><span>目标指标</span><strong>{selectedModel?.target_metric ?? "—"}</strong><span>当前状态</span><strong>{statusLabel(selectedModel?.status ?? "—")}</strong><span>数据集</span><strong>{modelDataset ? `${modelDataset.dataset_code}:${modelDataset.version}` : "旧模型未绑定"}</strong><span>分组切分</span><strong>{modelDataset ? `${modelDataset.train_group_count} 训练 / ${modelDataset.validation_group_count} 验证` : "—"}</strong><span>验证 R² / RMSE</span><strong>{selectedModel ? `${formatNumber(selectedModel.evaluation_metrics.validation_r2)} / ${formatNumber(selectedModel.evaluation_metrics.validation_rmse)}` : "—"}</strong><span>验收结论</span><strong>{selectedAcceptance ? statusLabel(selectedAcceptance.decision) : "待验收"}</strong><span>适用范围</span><strong>{selectedScopes.filter((item) => item.status === "ACTIVE").length} 生效 / {selectedScopes.length} 条</strong><span>OOD 策略</span><strong>{selectedOodPolicy ? statusLabel(selectedOodPolicy.status) : "未配置"}</strong></div>
+                <div className="ai-context-box"><span>目标指标</span><strong>{selectedModel?.target_metric ?? "—"}</strong><span>当前状态</span><strong>{statusLabel(selectedModel?.status ?? "—")}</strong><span>数据集</span><strong>{modelDataset ? `${modelDataset.dataset_code}:${modelDataset.version}` : "旧模型未绑定"}</strong><span>分组切分</span><strong>{modelDataset ? `${modelDataset.train_group_count} 训练 / ${modelDataset.validation_group_count} 验证` : "—"}</strong><span>验证 R² / RMSE</span><strong>{selectedModel ? `${formatNumber(selectedModel.evaluation_metrics.validation_r2)} / ${formatNumber(selectedModel.evaluation_metrics.validation_rmse)}` : "—"}</strong><span>验收结论</span><strong>{selectedAcceptance ? statusLabel(selectedAcceptance.decision) : "待验收"}</strong><span>适用范围</span><strong>{selectedScopes.filter((item) => item.status === "ACTIVE").length} 生效 / {selectedScopes.length} 条</strong><span>OOD 策略</span><strong>{selectedOodPolicy ? statusLabel(selectedOodPolicy.status) : "未配置"}</strong><span>工厂验收策略</span><strong>{factoryPolicyCoverage ? "全部覆盖" : "覆盖不完整"}</strong></div>
                 <p className="ai-hint">模型必须通过无泄漏独立验证，并同时验收工厂/车型/颜色适用范围与统计 OOD 阻断策略，才允许激活。</p>
+                <div className="ai-governance-block">
+                  <strong>工厂模型验收策略</strong>
+                  {selectedAcceptancePolicies.map((policy) => <div className="ai-scope-row" key={policy.id}><span><b>{policy.factory_code} · {policy.policy_code}:{policy.version}</b><small>{policy.policy_type} · {statusLabel(policy.status)} · RMSE ≤ {formatNumber(policy.max_validation_rmse)} · R² ≥ {formatNumber(policy.min_validation_r2)}</small></span><div className="ai-inline-actions">{policy.status !== "ACTIVE" ? <button type="button" className="button button-secondary" disabled={submitting === `acceptance-policy-${policy.id}-ACTIVE`} onClick={() => void changeAcceptancePolicyStatus(policy, "ACTIVE")}>批准激活</button> : null}{policy.status === "ACTIVE" ? <button type="button" className="button button-secondary danger-button" disabled={submitting === `acceptance-policy-${policy.id}-RETIRED`} onClick={() => void changeAcceptancePolicyStatus(policy, "RETIRED")}>退役</button> : null}</div></div>)}
+                  {!selectedAcceptancePolicies.length ? <p className="ai-hint">当前目标指标没有工厂验收策略，模型不能验收。</p> : null}
+                </div>
+                <form className="ai-governance-block" onSubmit={createAcceptancePolicy}>
+                  <strong>创建工厂批准策略草稿</strong>
+                  <label className="form-field"><span>工厂</span><select name="factory_id" required>{factoryOptions.map((factory) => <option key={factory.id} value={factory.id}>{factory.code} · {factory.name}</option>)}</select></label>
+                  <input type="hidden" name="target_metric" value={selectedModel?.target_metric ?? ""} />
+                  <div className="ai-two-fields"><label className="form-field"><span>策略代码</span><input name="policy_code" required defaultValue={defaultPolicyCode} /></label><label className="form-field"><span>版本</span><input name="version" required defaultValue="1.0" /></label></div>
+                  <div className="ai-two-fields"><label className="form-field"><span>验证 RMSE 上限</span><input name="max_validation_rmse" type="number" min="0" step="any" required /></label><label className="form-field"><span>验证 R² 下限</span><input name="min_validation_r2" type="number" step="any" required /></label></div>
+                  <div className="ai-two-fields"><label className="form-field"><span>最少训练分组</span><input name="min_train_groups" type="number" min="2" required /></label><label className="form-field"><span>最少验证分组</span><input name="min_validation_groups" type="number" min="1" required /></label></div>
+                  <label className="form-field"><span>批准来源 URI</span><input name="source_uri" required placeholder="例如：dms://factory/model-policy/..." /></label>
+                  <label className="form-field"><span>备注</span><textarea name="remark" rows={2} /></label>
+                  <p className="ai-hint">阈值必须来自工厂批准文件或评审结论，系统不会自动生成或猜测工厂验收阈值。</p>
+                  <button className="button button-secondary" disabled={!selectedModel || !factoryOptions.length || submitting === "acceptance-policy-create"}>{submitting === "acceptance-policy-create" ? <LoaderCircle className="spin" /> : <ShieldCheck />} 创建策略草稿</button>
+                </form>
                 <div className="ai-two-fields">
                   <button className="button button-secondary danger-button" disabled={!selectedModel || submitting === "acceptance-REJECTED"} onClick={() => void decideModelAcceptance("REJECTED")}><X /> 验收驳回</button>
-                  <button className="button button-secondary" disabled={!selectedModel || !modelDataset?.leakage_check.passed || submitting === "acceptance-ACCEPTED"} onClick={() => void decideModelAcceptance("ACCEPTED")}><ShieldCheck /> 验收通过</button>
+                  <button className="button button-secondary" disabled={!selectedModel || !modelDataset?.leakage_check.passed || !factoryPolicyCoverage || submitting === "acceptance-ACCEPTED"} onClick={() => void decideModelAcceptance("ACCEPTED")}><ShieldCheck /> 验收通过</button>
                 </div>
-                <button className="button button-primary" disabled={!selectedModel || selectedModel.status === "ACTIVE" || selectedAcceptance?.decision !== "ACCEPTED" || selectedOodPolicy?.status !== "ACTIVE" || !selectedScopes.some((item) => item.status === "ACTIVE") || submitting === "model-status-ACTIVE"} onClick={() => void changeModelStatus("ACTIVE")}>{submitting === "model-status-ACTIVE" ? <LoaderCircle className="spin" /> : <Check />} 激活版本</button>
+                <button className="button button-primary" disabled={!selectedModel || selectedModel.status === "ACTIVE" || selectedAcceptance?.decision !== "ACCEPTED" || selectedOodPolicy?.status !== "ACTIVE" || !selectedScopes.some((item) => item.status === "ACTIVE") || !factoryPolicyCoverage || submitting === "model-status-ACTIVE"} onClick={() => void changeModelStatus("ACTIVE")}>{submitting === "model-status-ACTIVE" ? <LoaderCircle className="spin" /> : <Check />} 激活版本</button>
                 <div className="ai-two-fields">
                   <button className="button button-secondary" disabled={!selectedModel || selectedModel.status === "DRAFT" || submitting === "model-status-DRAFT"} onClick={() => void changeModelStatus("DRAFT")}>转为草稿</button>
                   <button className="button button-secondary danger-button" disabled={!selectedModel || selectedModel.status === "RETIRED" || submitting === "model-status-RETIRED"} onClick={() => void changeModelStatus("RETIRED")}>退役版本</button>

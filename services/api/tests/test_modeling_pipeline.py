@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.api.routes.modeling import (
+    add_acceptance_policy,
     build_dataset,
+    change_acceptance_policy_status,
     change_model_status,
     decide_model_acceptance,
     diagnose_from_prediction,
@@ -55,6 +57,8 @@ from app.schemas.common import (
 from app.schemas.modeling import (
     DatasetBuildRequest,
     ModelAcceptanceRequest,
+    ModelAcceptancePolicyCreate,
+    ModelAcceptancePolicyStatusUpdate,
     ModelGovernanceCheckRequest,
     ModelPredictionRequest,
     ModelRecommendationRequest,
@@ -194,6 +198,39 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert policies[0].status == "PENDING"
         with pytest.raises(HTTPException, match="必须先通过独立验证和人工验收"):
             change_model_status(trained.id, ModelStatusUpdate(status="ACTIVE"), db)
+        with pytest.raises(HTTPException, match="模型未满足验收检查"):
+            decide_model_acceptance(
+                trained.id,
+                ModelAcceptanceRequest(
+                    decision="ACCEPTED",
+                    decided_by="模型验收人",
+                ),
+                db,
+            )
+        factory_policy = add_acceptance_policy(
+            ModelAcceptancePolicyCreate(
+                policy_code="F1-DOI-ACCEPTANCE",
+                version="1.0",
+                factory_id=factory.id,
+                target_metric="doi",
+                max_validation_rmse=0.5,
+                min_validation_r2=0.9,
+                min_train_groups=5,
+                min_validation_groups=2,
+                source_uri="factory://F1/model-acceptance/doi/1.0",
+            ),
+            db,
+        )
+        assert factory_policy.status == "DRAFT"
+        factory_policy = change_acceptance_policy_status(
+            factory_policy.id,
+            ModelAcceptancePolicyStatusUpdate(
+                status="ACTIVE",
+                approved_by="工厂模型治理委员会",
+            ),
+            db,
+        )
+        assert factory_policy.status == "ACTIVE"
         acceptance = decide_model_acceptance(
             trained.id,
             ModelAcceptanceRequest(
@@ -206,6 +243,11 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert acceptance.decision == "ACCEPTED"
         assert acceptance.checks["has_configured_applicability_scope"] is True
         assert acceptance.checks["has_configured_ood_policy"] is True
+        assert acceptance.checks["factory_acceptance_policies_present"] is True
+        assert acceptance.checks["factory_acceptance_thresholds_passed"] is True
+        assert acceptance.criteria["factory_acceptance_policies"][0]["policy_code"] == (
+            "F1-DOI-ACCEPTANCE:1.0"
+        )
         assert list_applicability_scopes(db)[0]["status"] == "ACTIVE"
         assert list_ood_policies(db)[0].status == "ACTIVE"
         trained = change_model_status(trained.id, ModelStatusUpdate(status="ACTIVE"), db)

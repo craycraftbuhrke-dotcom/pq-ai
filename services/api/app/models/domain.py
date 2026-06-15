@@ -1153,6 +1153,34 @@ class ModelOodPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     remark: Mapped[str | None] = mapped_column(Text)
 
 
+class ModelAcceptancePolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "model_acceptance_policy"
+    __table_args__ = (
+        UniqueConstraint("policy_code", "version", name="uq_model_acceptance_policy_version"),
+        Index(
+            "ix_model_acceptance_policy_match",
+            "factory_id",
+            "target_metric",
+            "status",
+        ),
+    )
+
+    policy_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
+    target_metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    policy_type: Mapped[str] = mapped_column(String(24), default="FACTORY_APPROVED", nullable=False)
+    max_validation_rmse: Mapped[float] = mapped_column(Float, nullable=False)
+    min_validation_r2: Mapped[float] = mapped_column(Float, nullable=False)
+    min_train_groups: Mapped[int] = mapped_column(Integer, nullable=False)
+    min_validation_groups: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    source_uri: Mapped[str] = mapped_column(String(500), nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
 class PredictionResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "prediction_result"
     __table_args__ = (

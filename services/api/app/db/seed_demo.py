@@ -42,6 +42,8 @@ from app.models.domain import (
     MeasurementPoint,
     MeasurementReferenceStandard,
     MeasurementRepeatReading,
+    ModelAcceptancePolicy,
+    ModelApplicabilityScope,
     ModelVersion,
     ModelAcceptanceDecision,
     ParameterDefinition,
@@ -125,6 +127,43 @@ def _ensure_demo_governed_model(db: Session) -> ModelVersion:
         )
     ensure_model_governance(db, model)
     db.commit()
+    model_scopes = list(
+        db.scalars(
+            select(ModelApplicabilityScope).where(
+                ModelApplicabilityScope.model_version_id == model.id,
+                ModelApplicabilityScope.status != "INACTIVE",
+            )
+        )
+    )
+    for scope in model_scopes:
+        demo_policy = db.scalar(
+            select(ModelAcceptancePolicy).where(
+                ModelAcceptancePolicy.factory_id == scope.factory_id,
+                ModelAcceptancePolicy.target_metric == model.target_metric,
+                ModelAcceptancePolicy.policy_type == "DEMO",
+                ModelAcceptancePolicy.status == "ACTIVE",
+            )
+        )
+        if not demo_policy:
+            db.add(
+                ModelAcceptancePolicy(
+                    policy_code=f"DEMO-{model.target_metric.upper()}-{scope.factory_id[:8]}",
+                    version="1.0",
+                    factory_id=scope.factory_id,
+                    target_metric=model.target_metric,
+                    policy_type="DEMO",
+                    max_validation_rmse=0.05,
+                    min_validation_r2=0.95,
+                    min_train_groups=3,
+                    min_validation_groups=2,
+                    status="ACTIVE",
+                    source_uri="demo://model-acceptance-policy",
+                    approved_by="演示模型治理员",
+                    approved_at=datetime.now(UTC),
+                    remark="仅用于功能体验，不代表工厂批准的生产模型验收阈值。",
+                )
+            )
+    db.commit()
     acceptance = db.scalar(
         select(ModelAcceptanceDecision)
         .where(ModelAcceptanceDecision.model_version_id == model.id)
@@ -135,6 +174,8 @@ def _ensure_demo_governed_model(db: Session) -> ModelVersion:
         or acceptance.decision != "ACCEPTED"
         or not acceptance.checks.get("has_configured_applicability_scope")
         or not acceptance.checks.get("has_configured_ood_policy")
+        or not acceptance.checks.get("factory_acceptance_policies_present")
+        or not acceptance.checks.get("factory_acceptance_thresholds_passed")
     ):
         record_model_acceptance(
             db,

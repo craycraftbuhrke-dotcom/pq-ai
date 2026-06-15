@@ -10,6 +10,7 @@ from app.models.domain import (
     Color,
     Factory,
     MeasurementPoint,
+    ModelAcceptancePolicy,
     ModelApplicabilityScope,
     ModelAcceptanceDecision,
     ModelOodPolicy,
@@ -25,6 +26,9 @@ from app.schemas.modeling import (
     DatasetSplitMemberRead,
     ModelAcceptanceDecisionRead,
     ModelAcceptanceRequest,
+    ModelAcceptancePolicyCreate,
+    ModelAcceptancePolicyRead,
+    ModelAcceptancePolicyStatusUpdate,
     ModelApplicabilityScopeCreate,
     ModelApplicabilityScopeRead,
     ModelApplicabilityScopeStatusUpdate,
@@ -44,6 +48,7 @@ from app.schemas.modeling import (
 )
 from app.services.modeling import (
     build_dataset_snapshot,
+    create_model_acceptance_policy,
     create_model_applicability_scope,
     diagnose_prediction,
     model_governance_check,
@@ -53,6 +58,7 @@ from app.services.modeling import (
     record_model_acceptance,
     train_model,
     update_model_applicability_scope,
+    update_model_acceptance_policy_status,
     update_model_ood_policy,
     update_model_status,
 )
@@ -154,6 +160,66 @@ def train_baseline_model(
     payload: ModelTrainingRequest, db: Session = Depends(get_db)
 ) -> ModelVersion:
     return train_model(db, payload)
+
+
+@router.get("/acceptance-policies")
+def list_acceptance_policies(db: Session = Depends(get_db)) -> list[dict]:
+    rows = db.execute(
+        select(ModelAcceptancePolicy, Factory)
+        .join(Factory, Factory.id == ModelAcceptancePolicy.factory_id)
+        .order_by(ModelAcceptancePolicy.created_at.desc())
+    ).all()
+    return [
+        {
+            "id": policy.id,
+            "policy_code": policy.policy_code,
+            "version": policy.version,
+            "factory_id": policy.factory_id,
+            "factory_code": factory.code,
+            "factory_name": factory.name,
+            "target_metric": policy.target_metric,
+            "policy_type": policy.policy_type,
+            "max_validation_rmse": policy.max_validation_rmse,
+            "min_validation_r2": policy.min_validation_r2,
+            "min_train_groups": policy.min_train_groups,
+            "min_validation_groups": policy.min_validation_groups,
+            "status": policy.status,
+            "source_uri": policy.source_uri,
+            "approved_by": policy.approved_by,
+            "approved_at": policy.approved_at,
+            "remark": policy.remark,
+            "created_at": policy.created_at,
+            "updated_at": policy.updated_at,
+        }
+        for policy, factory in rows
+    ]
+
+
+@router.post(
+    "/acceptance-policies",
+    response_model=ModelAcceptancePolicyRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_acceptance_policy(
+    payload: ModelAcceptancePolicyCreate,
+    db: Session = Depends(get_db),
+) -> ModelAcceptancePolicy:
+    return create_model_acceptance_policy(db, payload)
+
+
+@router.patch(
+    "/acceptance-policies/{policy_id}/status",
+    response_model=ModelAcceptancePolicyRead,
+)
+def change_acceptance_policy_status(
+    policy_id: str,
+    payload: ModelAcceptancePolicyStatusUpdate,
+    db: Session = Depends(get_db),
+) -> ModelAcceptancePolicy:
+    policy = db.get(ModelAcceptancePolicy, policy_id)
+    if not policy:
+        raise HTTPException(status_code=404, detail="模型验收策略不存在")
+    return update_model_acceptance_policy_status(db, policy, payload)
 
 
 @router.get("/applicability-scopes")

@@ -119,6 +119,46 @@ class ModelAcceptanceDecisionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ModelAcceptancePolicyCreate(BaseModel):
+    policy_code: str = Field(min_length=1, max_length=64)
+    version: str = Field(min_length=1, max_length=32)
+    factory_id: str
+    target_metric: str = Field(min_length=1, max_length=64)
+    max_validation_rmse: float = Field(gt=0)
+    min_validation_r2: float
+    min_train_groups: int = Field(default=3, ge=2)
+    min_validation_groups: int = Field(default=2, ge=1)
+    source_uri: str = Field(min_length=1, max_length=500)
+    remark: str | None = Field(default=None, max_length=1000)
+
+
+class ModelAcceptancePolicyStatusUpdate(BaseModel):
+    status: Literal["ACTIVE", "RETIRED", "DRAFT"]
+    approved_by: str | None = Field(default=None, max_length=80)
+
+
+class ModelAcceptancePolicyRead(BaseModel):
+    id: str
+    policy_code: str
+    version: str
+    factory_id: str
+    target_metric: str
+    policy_type: str
+    max_validation_rmse: float
+    min_validation_r2: float
+    min_train_groups: int
+    min_validation_groups: int
+    status: str
+    source_uri: str
+    approved_by: str | None
+    approved_at: datetime | None
+    remark: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ModelApplicabilityScopeCreate(BaseModel):
     factory_id: str
     vehicle_model_id: str
