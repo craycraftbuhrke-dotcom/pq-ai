@@ -2347,6 +2347,16 @@ button.message-banner {
   background: var(--surface);
 }
 
+.ai-governed-training {
+  display: grid;
+  gap: 24px;
+}
+
+.ai-governed-training form + form {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+}
+
 .ai-control-panel .program-subheading svg,
 .ai-evidence-panel .program-subheading svg {
   color: var(--teal);

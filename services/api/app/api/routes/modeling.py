@@ -4,8 +4,22 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.domain.scope_policy import CURRENT_FEATURE_SET_VERSION
-from app.models.domain import MeasurementPoint, ModelVersion, PointFeatureSnapshot, PredictionResult, ProductionRun
+from app.models.domain import (
+    DatasetSnapshot,
+    DatasetSplitMember,
+    MeasurementPoint,
+    ModelAcceptanceDecision,
+    ModelVersion,
+    PointFeatureSnapshot,
+    PredictionResult,
+    ProductionRun,
+)
 from app.schemas.modeling import (
+    DatasetBuildRequest,
+    DatasetSnapshotRead,
+    DatasetSplitMemberRead,
+    ModelAcceptanceDecisionRead,
+    ModelAcceptanceRequest,
     ModelDiagnosisResponse,
     ModelDriftReport,
     ModelPredictionRequest,
@@ -17,10 +31,12 @@ from app.schemas.modeling import (
     ModelVersionRead,
 )
 from app.services.modeling import (
+    build_dataset_snapshot,
     diagnose_prediction,
     model_drift_report,
     predict_with_model,
     recommend_with_model,
+    record_model_acceptance,
     train_model,
     update_model_status,
 )
@@ -31,6 +47,42 @@ router = APIRouter(prefix="/ai/models", tags=["ai-modeling"])
 @router.get("", response_model=list[ModelVersionRead])
 def list_models(db: Session = Depends(get_db)) -> list[ModelVersion]:
     return list(db.scalars(select(ModelVersion).order_by(ModelVersion.created_at.desc())))
+
+
+@router.get("/datasets", response_model=list[DatasetSnapshotRead])
+def list_datasets(db: Session = Depends(get_db)) -> list[DatasetSnapshot]:
+    return list(db.scalars(select(DatasetSnapshot).order_by(DatasetSnapshot.created_at.desc())))
+
+
+@router.post("/datasets", response_model=DatasetSnapshotRead, status_code=status.HTTP_201_CREATED)
+def build_dataset(
+    payload: DatasetBuildRequest, db: Session = Depends(get_db)
+) -> DatasetSnapshot:
+    return build_dataset_snapshot(db, payload)
+
+
+@router.get("/datasets/{dataset_snapshot_id}/members", response_model=list[DatasetSplitMemberRead])
+def list_dataset_members(
+    dataset_snapshot_id: str, db: Session = Depends(get_db)
+) -> list[DatasetSplitMember]:
+    if not db.get(DatasetSnapshot, dataset_snapshot_id):
+        raise HTTPException(status_code=404, detail="数据集快照不存在")
+    return list(
+        db.scalars(
+            select(DatasetSplitMember)
+            .where(DatasetSplitMember.dataset_snapshot_id == dataset_snapshot_id)
+            .order_by(DatasetSplitMember.occurred_at, DatasetSplitMember.measurement_point_id)
+        )
+    )
+
+
+@router.get("/acceptance-decisions", response_model=list[ModelAcceptanceDecisionRead])
+def list_acceptance_decisions(db: Session = Depends(get_db)) -> list[ModelAcceptanceDecision]:
+    return list(
+        db.scalars(
+            select(ModelAcceptanceDecision).order_by(ModelAcceptanceDecision.decided_at.desc())
+        )
+    )
 
 
 @router.get("/feature-snapshots")
@@ -67,6 +119,22 @@ def train_baseline_model(
     payload: ModelTrainingRequest, db: Session = Depends(get_db)
 ) -> ModelVersion:
     return train_model(db, payload)
+
+
+@router.post(
+    "/{model_version_id}/acceptance",
+    response_model=ModelAcceptanceDecisionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def decide_model_acceptance(
+    model_version_id: str,
+    payload: ModelAcceptanceRequest,
+    db: Session = Depends(get_db),
+) -> ModelAcceptanceDecision:
+    model = db.get(ModelVersion, model_version_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="模型版本不存在")
+    return record_model_acceptance(db, model, payload)
 
 
 @router.get("/{model_version_id}/drift", response_model=ModelDriftReport)

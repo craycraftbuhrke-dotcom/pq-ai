@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.api.routes.modeling import (
+    build_dataset,
     change_model_status,
+    decide_model_acceptance,
     diagnose_from_prediction,
     get_model_drift,
     list_feature_snapshots,
@@ -48,6 +50,8 @@ from app.schemas.common import (
     RecommendationVerification,
 )
 from app.schemas.modeling import (
+    DatasetBuildRequest,
+    ModelAcceptanceRequest,
     ModelPredictionRequest,
     ModelRecommendationRequest,
     ModelStatusUpdate,
@@ -148,19 +152,48 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             runs.append((run, target))
         db.commit()
 
+        dataset = build_dataset(
+            DatasetBuildRequest(
+                dataset_code="DOI-DATASET",
+                version="1.0",
+                target_metric="doi",
+                holdout_ratio=0.25,
+            ),
+            db,
+        )
+        assert dataset.train_group_count == 6
+        assert dataset.validation_group_count == 2
+        assert dataset.leakage_check["passed"] is True
+        assert dataset.leakage_check["group_overlap_count"] == 0
         trained = train_baseline_model(
             ModelTrainingRequest(
                 model_code="DOI-BASELINE",
                 version="1.0",
                 target_metric="doi",
+                dataset_snapshot_id=dataset.id,
                 min_samples=5,
                 ridge_lambda=0.01,
             ),
             db,
         )
         assert trained.model_type == "RIDGE_REGRESSION_BASELINE"
-        assert trained.training_sample_count == 8
+        assert trained.status == "DRAFT"
+        assert trained.training_sample_count == 6
         assert trained.evaluation_metrics["training_r2"] > 0.99
+        assert "validation_rmse" in trained.evaluation_metrics
+        with pytest.raises(HTTPException, match="必须先通过独立验证和人工验收"):
+            change_model_status(trained.id, ModelStatusUpdate(status="ACTIVE"), db)
+        acceptance = decide_model_acceptance(
+            trained.id,
+            ModelAcceptanceRequest(
+                decision="ACCEPTED",
+                decided_by="模型验收人",
+                comment="独立验证指标符合本次受控试验目标",
+            ),
+            db,
+        )
+        assert acceptance.decision == "ACCEPTED"
+        trained = change_model_status(trained.id, ModelStatusUpdate(status="ACTIVE"), db)
         snapshots = list_feature_snapshots(db)
         assert len(snapshots) == 8
         assert snapshots[0]["feature_count"] == 2
@@ -180,6 +213,8 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert drift["monitored_snapshot_count"] == 8
         assert drift["prediction_count"] == 1
         assert drift["labeled_prediction_count"] == 1
+        assert drift["baseline_source"] == "VALIDATION"
+        assert drift["baseline_rmse"] == trained.evaluation_metrics["validation_rmse"]
         assert drift["feature_drift"]
         assert drift["feature_drift"][0]["standardized_mean_shift"] is not None
         assert drift["drift_status"] in {"STABLE", "WATCH", "DRIFT"}
@@ -311,9 +346,25 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
                 model_code="DOI-BASELINE",
                 version="2.0",
                 target_metric="doi",
+                dataset_snapshot_id=dataset.id,
                 min_samples=5,
                 ridge_lambda=0.01,
             ),
+            db,
+        )
+        assert trained.status == "ACTIVE"
+        assert next_model.status == "DRAFT"
+        decide_model_acceptance(
+            next_model.id,
+            ModelAcceptanceRequest(
+                decision="ACCEPTED",
+                decided_by="模型验收人",
+            ),
+            db,
+        )
+        next_model = change_model_status(
+            next_model.id,
+            ModelStatusUpdate(status="ACTIVE"),
             db,
         )
         assert trained.status == "RETIRED"
@@ -325,6 +376,17 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         )
         assert reactivated.status == "ACTIVE"
         assert next_model.status == "RETIRED"
+        rejected = decide_model_acceptance(
+            trained.id,
+            ModelAcceptanceRequest(
+                decision="REJECTED",
+                decided_by="模型验收人",
+                comment="上线后复核发现不再适用",
+            ),
+            db,
+        )
+        assert rejected.decision == "REJECTED"
+        assert trained.status == "RETIRED"
         with pytest.raises(HTTPException, match="只有生效模型可以执行在线预测"):
             predict_from_snapshot(
                 next_model.id,

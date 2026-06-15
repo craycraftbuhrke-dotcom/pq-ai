@@ -29,6 +29,8 @@ These rules are mandatory for code, schema, APIs, UI, seed data, tests, analytic
 - Material definition, test method, specification, applicability, batch result, and production use are separate facts. Never infer an approved material feature from a legacy batch field or free-form COA JSON.
 - Approved material features require an active stage/target-family applicability and a `VERIFIED` batch result tested no later than production start. A missing required result blocks feature generation and AI use.
 - Random point-row train/test splits are prohibited.
+- An approved dataset snapshot must freeze feature values, target values, source quality-measurement IDs, group membership, temporal split, and leakage-check result.
+- Models are trained only on the training split. Training metrics are never acceptance evidence; activation requires independent validation plus a recorded human acceptance decision.
 - Model explanations are associations unless supported by controlled causal evidence.
 - Recommendations require approved constraints, human approval, execution capture, verification, and rollback.
 - Never invent factory limits, TDS values, device semantics, instrument fields, or standards.

@@ -20,6 +20,7 @@ from app.models.domain import (
     BrushParameter,
     BrushPointContribution,
     Color,
+    DatasetSnapshot,
     DurrApplicationController,
     DurrRobot,
     DurrRotaryAtomizer,
@@ -42,6 +43,7 @@ from app.models.domain import (
     MeasurementReferenceStandard,
     MeasurementRepeatReading,
     ModelVersion,
+    ModelAcceptanceDecision,
     ParameterDefinition,
     Part,
     PointContributionEntry,
@@ -68,11 +70,76 @@ from app.models.domain import (
     UserRole,
     Permission,
 )
-from app.schemas.modeling import ModelTrainingRequest
+from app.schemas.modeling import (
+    DatasetBuildRequest,
+    ModelAcceptanceRequest,
+    ModelTrainingRequest,
+)
 from app.services.feature_aggregation import build_point_feature_snapshot
 from app.services.measurement_reliability import refresh_measurement_reliability
 from app.services.material_governance import refresh_material_result_reliability
-from app.services.modeling import train_model
+from app.services.modeling import (
+    build_dataset_snapshot,
+    record_model_acceptance,
+    train_model,
+    update_model_status,
+)
+
+
+def _ensure_demo_governed_model(db: Session) -> ModelVersion:
+    dataset = db.scalar(
+        select(DatasetSnapshot).where(
+            DatasetSnapshot.dataset_code == "DEMO-DOI-DATASET",
+            DatasetSnapshot.version == "6.0-leakage-safe",
+        )
+    )
+    if not dataset:
+        dataset = build_dataset_snapshot(
+            db,
+            DatasetBuildRequest(
+                dataset_code="DEMO-DOI-DATASET",
+                version="6.0-leakage-safe",
+                target_metric="doi",
+                feature_set_version=CURRENT_FEATURE_SET_VERSION,
+            ),
+        )
+    model = db.scalar(
+        select(ModelVersion).where(
+            ModelVersion.model_code == "DEMO-DOI-BASELINE",
+            ModelVersion.version == "6.0-leakage-safe",
+        )
+    )
+    if not model:
+        model = train_model(
+            db,
+            ModelTrainingRequest(
+                model_code="DEMO-DOI-BASELINE",
+                version="6.0-leakage-safe",
+                target_metric="doi",
+                feature_set_version=CURRENT_FEATURE_SET_VERSION,
+                dataset_snapshot_id=dataset.id,
+                min_samples=5,
+                ridge_lambda=0.1,
+            ),
+        )
+    acceptance = db.scalar(
+        select(ModelAcceptanceDecision)
+        .where(ModelAcceptanceDecision.model_version_id == model.id)
+        .order_by(ModelAcceptanceDecision.decided_at.desc())
+    )
+    if not acceptance or acceptance.decision != "ACCEPTED":
+        record_model_acceptance(
+            db,
+            model,
+            ModelAcceptanceRequest(
+                decision="ACCEPTED",
+                decided_by="演示模型治理员",
+                comment="演示数据已通过分组时间留出检查，仅用于功能体验。",
+            ),
+        )
+    if model.status != "ACTIVE":
+        update_model_status(db, model, "ACTIVE")
+    return model
 
 
 def _seed_catalogs(db: Session) -> None:
@@ -905,21 +972,11 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
     model = db.scalar(
         select(ModelVersion).where(
             ModelVersion.model_code == "DEMO-DOI-BASELINE",
-            ModelVersion.version == "5.0-material-governed",
+            ModelVersion.version == "6.0-leakage-safe",
         )
     )
     if model:
-        model.status = "ACTIVE"
-        for legacy_model in db.scalars(
-            select(ModelVersion).where(
-                ModelVersion.model_code == model.model_code,
-                ModelVersion.id != model.id,
-                ModelVersion.status == "ACTIVE",
-            )
-        ):
-            legacy_model.status = "RETIRED"
-        db.commit()
-        return model
+        return _ensure_demo_governed_model(db)
 
     scoped_snapshot_count = len(
         list(
@@ -938,17 +995,7 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
     )
     if scoped_snapshot_count < 5:
         return None
-    return train_model(
-        db,
-        ModelTrainingRequest(
-            model_code="DEMO-DOI-BASELINE",
-            version="5.0-material-governed",
-            target_metric="doi",
-            feature_set_version=CURRENT_FEATURE_SET_VERSION,
-            min_samples=5,
-            ridge_lambda=0.1,
-        ),
-    )
+    return _ensure_demo_governed_model(db)
 
 
 def seed_demo(db: Session) -> dict:
@@ -1360,17 +1407,7 @@ def seed_demo(db: Session) -> dict:
         )
     db.commit()
     _govern_demo_measurements(db, measurement_governance)
-    model = train_model(
-        db,
-        ModelTrainingRequest(
-            model_code="DEMO-DOI-BASELINE",
-            version="5.0-material-governed",
-            target_metric="doi",
-            feature_set_version=CURRENT_FEATURE_SET_VERSION,
-            min_samples=5,
-            ridge_lambda=0.1,
-        ),
-    )
+    model = _ensure_demo_governed_model(db)
     return {
         "status": "seeded",
         "factory_id": factory.id,

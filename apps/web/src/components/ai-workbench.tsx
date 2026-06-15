@@ -23,10 +23,45 @@ type ModelVersion = {
   model_type: string;
   target_metric: string;
   feature_set_version: string;
+  dataset_snapshot_id?: string | null;
   evaluation_metrics: Record<string, number>;
   training_sample_count: number;
   trained_at?: string | null;
   status: string;
+};
+type DatasetSnapshot = {
+  id: string;
+  dataset_code: string;
+  version: string;
+  target_metric: string;
+  feature_set_version: string;
+  split_strategy: string;
+  group_key: string;
+  status: string;
+  sample_count: number;
+  group_count: number;
+  train_sample_count: number;
+  validation_sample_count: number;
+  train_group_count: number;
+  validation_group_count: number;
+  cutoff_at?: string | null;
+  leakage_check: {
+    passed: boolean;
+    group_overlap_count: number;
+    snapshot_overlap_count: number;
+    temporal_order_valid: boolean;
+  };
+};
+type AcceptanceDecision = {
+  id: string;
+  model_version_id: string;
+  dataset_snapshot_id: string;
+  decision: string;
+  criteria: Record<string, number | null>;
+  checks: Record<string, boolean>;
+  decided_by: string;
+  decided_at: string;
+  comment?: string | null;
 };
 type Snapshot = {
   id: string;
@@ -147,6 +182,9 @@ type DriftReport = {
   average_feature_completeness?: number | null;
   average_confidence?: number | null;
   training_rmse?: number | null;
+  validation_rmse?: number | null;
+  baseline_rmse?: number | null;
+  baseline_source: string;
   live_mae?: number | null;
   live_rmse?: number | null;
   rmse_ratio?: number | null;
@@ -182,6 +220,8 @@ function statusLabel(status: string): string {
     REJECTED: "已驳回",
     EXECUTED: "已执行",
     VERIFIED: "已复测",
+    ACCEPTED: "验收通过",
+    BUILT: "已构建",
   }[status] ?? status;
 }
 
@@ -195,6 +235,8 @@ function driftStatusClass(status: string): string {
 export function AiWorkbench() {
   const [tab, setTab] = useState<Tab>("models");
   const [models, setModels] = useState<ModelVersion[]>([]);
+  const [datasets, setDatasets] = useState<DatasetSnapshot[]>([]);
+  const [acceptanceDecisions, setAcceptanceDecisions] = useState<AcceptanceDecision[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
@@ -203,6 +245,7 @@ export function AiWorkbench() {
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [driftReport, setDriftReport] = useState<DriftReport | null>(null);
   const [selectedModelId, setSelectedModelId] = useState("");
+  const [selectedDatasetId, setSelectedDatasetId] = useState("");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState("");
   const [selectedPredictionId, setSelectedPredictionId] = useState("");
   const [selectedRecommendationId, setSelectedRecommendationId] = useState("");
@@ -212,6 +255,7 @@ export function AiWorkbench() {
   const [executedValues, setExecutedValues] = useState<Record<string, string>>({});
   const [verificationMeasurementId, setVerificationMeasurementId] = useState("");
   const [defaultModelCode] = useState(() => `PQ-MODEL-${Date.now().toString().slice(-6)}`);
+  const [defaultDatasetCode] = useState(() => `PQ-DATASET-${Date.now().toString().slice(-6)}`);
   const [loading, setLoading] = useState(true);
   const [driftLoading, setDriftLoading] = useState(false);
   const [submitting, setSubmitting] = useState("");
@@ -222,9 +266,11 @@ export function AiWorkbench() {
     setLoading(true);
     setError("");
     try {
-      const [nextModels, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextMeasurements, nextMetrics] =
+      const [nextModels, nextDatasets, nextAcceptanceDecisions, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextMeasurements, nextMetrics] =
         await Promise.all([
           request<ModelVersion[]>("/api/ai/models"),
+          request<DatasetSnapshot[]>("/api/ai/models/datasets"),
+          request<AcceptanceDecision[]>("/api/ai/models/acceptance-decisions"),
           request<Snapshot[]>("/api/ai/models/feature-snapshots"),
           request<Prediction[]>("/api/ai/predictions"),
           request<Diagnosis[]>("/api/ai/diagnoses"),
@@ -233,6 +279,8 @@ export function AiWorkbench() {
           request<MetricDefinition[]>("/api/quality/metric-definitions"),
         ]);
       setModels(nextModels);
+      setDatasets(nextDatasets);
+      setAcceptanceDecisions(nextAcceptanceDecisions);
       setSnapshots(nextSnapshots);
       setPredictions(nextPredictions);
       setDiagnoses(nextDiagnoses);
@@ -240,6 +288,7 @@ export function AiWorkbench() {
       setMeasurements(nextMeasurements);
       setMetrics(nextMetrics);
       setSelectedModelId((current) => current || nextModels[0]?.id || "");
+      setSelectedDatasetId((current) => current || nextDatasets[0]?.id || "");
       setSelectedSnapshotId((current) => current || nextSnapshots[0]?.id || "");
       setSelectedPredictionId((current) => current || nextPredictions[0]?.id || "");
       setSelectedRecommendationId((current) => current || nextRecommendations[0]?.id || "");
@@ -274,6 +323,9 @@ export function AiWorkbench() {
   }, [loadDrift, selectedModelId]);
 
   const selectedModel = models.find((item) => item.id === selectedModelId);
+  const selectedDataset = datasets.find((item) => item.id === selectedDatasetId);
+  const modelDataset = datasets.find((item) => item.id === selectedModel?.dataset_snapshot_id);
+  const selectedAcceptance = acceptanceDecisions.find((item) => item.model_version_id === selectedModelId);
   const compatibleSnapshots = useMemo(
     () => snapshots.filter((item) => !selectedModel || item.feature_set_version === selectedModel.feature_set_version),
     [selectedModel, snapshots],
@@ -347,12 +399,63 @@ export function AiWorkbench() {
           version: String(data.get("version")),
           target_metric: String(data.get("target_metric")),
           feature_set_version: String(data.get("feature_set_version")),
+          dataset_snapshot_id: String(data.get("dataset_snapshot_id")),
           min_samples: Number(data.get("min_samples")),
           ridge_lambda: Number(data.get("ridge_lambda")),
         }),
       });
-      showSuccess("基础模型训练完成并已注册为生效版本");
+      showSuccess("基础模型训练完成，已保存为待验收草稿版本");
       event.currentTarget.reset();
+      await reload();
+    } catch (operationError) {
+      showError(operationError);
+    } finally {
+      setSubmitting("");
+    }
+  }
+
+  async function buildDataset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    setSubmitting("dataset");
+    try {
+      const dataset = await request<DatasetSnapshot>("/api/ai/models/datasets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataset_code: String(data.get("dataset_code")),
+          version: String(data.get("version")),
+          target_metric: String(data.get("target_metric")),
+          feature_set_version: String(data.get("feature_set_version")),
+          holdout_ratio: Number(data.get("holdout_ratio")),
+          min_train_groups: Number(data.get("min_train_groups")),
+          min_validation_groups: Number(data.get("min_validation_groups")),
+        }),
+      });
+      setSelectedDatasetId(dataset.id);
+      showSuccess("数据集快照已固化，并通过分组与时间泄漏检查");
+      await reload();
+    } catch (operationError) {
+      showError(operationError);
+    } finally {
+      setSubmitting("");
+    }
+  }
+
+  async function decideModelAcceptance(decision: "ACCEPTED" | "REJECTED") {
+    if (!selectedModel) return;
+    setSubmitting(`acceptance-${decision}`);
+    try {
+      await request<AcceptanceDecision>(`/api/ai/models/${selectedModel.id}/acceptance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision,
+          decided_by: "模型验收人",
+          comment: decision === "ACCEPTED" ? "已复核独立验证指标与适用范围" : "独立验证或适用范围未满足上线要求",
+        }),
+      });
+      showSuccess(decision === "ACCEPTED" ? "模型已通过验收，可以激活" : "模型已记录为验收驳回");
       await reload();
     } catch (operationError) {
       showError(operationError);
@@ -535,7 +638,7 @@ export function AiWorkbench() {
 
       <section className="module-stat-strip">
         <article><span>模型版本</span><strong>{models.length}</strong><small>{models.filter((model) => model.status === "ACTIVE").length} 个生效</small></article>
-        <article><span>点位特征快照</span><strong>{snapshots.length}</strong><small>平均完整率 {formatNumber(snapshots.reduce((sum, item) => sum + item.completeness_score, 0) / Math.max(snapshots.length, 1) * 100, 1)}%</small></article>
+        <article><span>数据集 / 点位快照</span><strong>{datasets.length} / {snapshots.length}</strong><small>{datasets.filter((item) => item.leakage_check.passed).length} 个数据集通过泄漏检查</small></article>
         <article><span>预测 / 诊断</span><strong>{predictions.length} / {diagnoses.length}</strong><small>全部结果保存至 MySQL</small></article>
         <article><span>闭环推荐</span><strong>{recommendations.length}</strong><small>{recommendations.filter((item) => item.status === "VERIFIED").length} 条已完成复测</small></article>
       </section>
@@ -550,22 +653,37 @@ export function AiWorkbench() {
 
         {tab === "models" ? (
           <div className="ai-split">
-            <form className="ai-control-panel" onSubmit={trainModel}>
-              <div className="program-subheading"><div><span className="eyebrow">Training</span><h3>训练基础模型</h3></div><FlaskConical /></div>
-              <div className="ai-form-stack">
-                <label className="form-field"><span>模型代码 <b>*</b></span><input name="model_code" required defaultValue={defaultModelCode} /></label>
-                <label className="form-field"><span>版本 <b>*</b></span><input name="version" required defaultValue="1.0" /></label>
-                <label className="form-field"><span>目标质量指标 <b>*</b></span><select name="target_metric" required>{metrics.filter((item) => item.is_primary).map((item) => <option key={`${item.quality_type}-${item.code}`} value={item.code}>{item.name} / {item.code}</option>)}</select></label>
-                <label className="form-field"><span>特征集版本</span><select name="feature_set_version">{Array.from(new Set(snapshots.map((item) => item.feature_set_version))).map((value) => <option key={value}>{value}</option>)}</select></label>
-                <div className="ai-two-fields"><label className="form-field"><span>最小样本</span><input name="min_samples" type="number" min="3" defaultValue="5" /></label><label className="form-field"><span>岭惩罚系数</span><input name="ridge_lambda" type="number" min="0" step="0.01" defaultValue="0.1" /></label></div>
-                <button className="button button-primary" disabled={submitting === "train"}>{submitting === "train" ? <LoaderCircle className="spin" /> : <BrainCircuit />} 训练并注册</button>
-              </div>
-            </form>
+            <div className="ai-control-panel ai-governed-training">
+              <form onSubmit={buildDataset}>
+                <div className="program-subheading"><div><span className="eyebrow">Dataset Governance</span><h3>构建无泄漏数据集</h3></div><ShieldCheck /></div>
+                <div className="ai-form-stack">
+                  <label className="form-field"><span>数据集代码 <b>*</b></span><input name="dataset_code" required defaultValue={defaultDatasetCode} /></label>
+                  <div className="ai-two-fields"><label className="form-field"><span>版本</span><input name="version" required defaultValue="1.0" /></label><label className="form-field"><span>时间留出比例</span><input name="holdout_ratio" type="number" min="0.1" max="0.5" step="0.05" defaultValue="0.25" /></label></div>
+                  <label className="form-field"><span>目标质量指标</span><select name="target_metric" required>{metrics.filter((item) => item.is_primary).map((item) => <option key={`${item.quality_type}-${item.code}`} value={item.code}>{item.name} / {item.code}</option>)}</select></label>
+                  <label className="form-field"><span>特征集版本</span><select name="feature_set_version">{Array.from(new Set(snapshots.map((item) => item.feature_set_version))).map((value) => <option key={value}>{value}</option>)}</select></label>
+                  <div className="ai-two-fields"><label className="form-field"><span>最少训练分组</span><input name="min_train_groups" type="number" min="2" defaultValue="3" /></label><label className="form-field"><span>最少验证分组</span><input name="min_validation_groups" type="number" min="1" defaultValue="2" /></label></div>
+                  <button className="button button-secondary" disabled={submitting === "dataset"}>{submitting === "dataset" ? <LoaderCircle className="spin" /> : <ShieldCheck />} 固化数据集快照</button>
+                </div>
+              </form>
+              <form onSubmit={trainModel}>
+                <div className="program-subheading"><div><span className="eyebrow">Training</span><h3>训练候选模型</h3></div><FlaskConical /></div>
+                <div className="ai-form-stack">
+                  <label className="form-field"><span>受治理数据集</span><select name="dataset_snapshot_id" required value={selectedDatasetId} onChange={(event) => setSelectedDatasetId(event.target.value)}>{datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.dataset_code}:{dataset.version} · {dataset.train_group_count}/{dataset.validation_group_count} 组</option>)}</select></label>
+                  <input type="hidden" name="target_metric" value={selectedDataset?.target_metric ?? ""} />
+                  <input type="hidden" name="feature_set_version" value={selectedDataset?.feature_set_version ?? ""} />
+                  <label className="form-field"><span>模型代码 <b>*</b></span><input name="model_code" required defaultValue={defaultModelCode} /></label>
+                  <label className="form-field"><span>版本 <b>*</b></span><input name="version" required defaultValue="1.0" /></label>
+                  <div className="ai-context-box"><span>训练 / 验证样本</span><strong>{selectedDataset ? `${selectedDataset.train_sample_count} / ${selectedDataset.validation_sample_count}` : "—"}</strong><span>独立分组</span><strong>{selectedDataset ? `${selectedDataset.train_group_count} / ${selectedDataset.validation_group_count}` : "—"}</strong><span>泄漏检查</span><strong>{selectedDataset?.leakage_check.passed ? "通过" : "—"}</strong></div>
+                  <div className="ai-two-fields"><label className="form-field"><span>最小训练样本</span><input name="min_samples" type="number" min="3" defaultValue="5" /></label><label className="form-field"><span>岭惩罚系数</span><input name="ridge_lambda" type="number" min="0" step="0.01" defaultValue="0.1" /></label></div>
+                  <button className="button button-primary" disabled={!selectedDataset || submitting === "train"}>{submitting === "train" ? <LoaderCircle className="spin" /> : <BrainCircuit />} 训练候选版本</button>
+                </div>
+              </form>
+            </div>
             <div className="ai-record-list">
               {filteredModels.map((model) => (
                 <article className={`ai-model-card ${model.id === selectedModelId ? "selected" : ""}`} key={model.id} onClick={() => setSelectedModelId(model.id)}>
                   <div><span className={`record-status ${model.status === "ACTIVE" ? "status-on" : "status-off"}`}>{statusLabel(model.status)}</span><strong>{model.model_code}:{model.version}</strong><small>{model.model_type}</small></div>
-                  <div className="ai-model-metrics"><span>目标 <b>{model.target_metric}</b></span><span>样本 <b>{model.training_sample_count}</b></span><span>R² <b>{formatNumber(model.evaluation_metrics.training_r2)}</b></span><span>RMSE <b>{formatNumber(model.evaluation_metrics.training_rmse)}</b></span></div>
+                  <div className="ai-model-metrics"><span>目标 <b>{model.target_metric}</b></span><span>训练样本 <b>{model.training_sample_count}</b></span><span>验证 R² <b>{formatNumber(model.evaluation_metrics.validation_r2)}</b></span><span>验证 RMSE <b>{formatNumber(model.evaluation_metrics.validation_rmse)}</b></span></div>
                 </article>
               ))}
               {!filteredModels.length ? <div className="master-empty"><BrainCircuit /> 暂无模型版本</div> : null}
@@ -579,9 +697,13 @@ export function AiWorkbench() {
               <div className="program-subheading"><div><span className="eyebrow">Model Registry</span><h3>版本状态治理</h3></div><ShieldCheck /></div>
               <div className="ai-form-stack">
                 <label className="form-field"><span>模型版本</span><select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {statusLabel(model.status)}</option>)}</select></label>
-                <div className="ai-context-box"><span>目标指标</span><strong>{selectedModel?.target_metric ?? "—"}</strong><span>特征版本</span><strong>{selectedModel?.feature_set_version ?? "—"}</strong><span>当前状态</span><strong>{statusLabel(selectedModel?.status ?? "—")}</strong><span>训练样本</span><strong>{selectedModel?.training_sample_count ?? "—"}</strong></div>
-                <p className="ai-hint">激活一个模型版本时，同模型代码与目标指标的其他生效版本会自动退役。</p>
-                <button className="button button-primary" disabled={!selectedModel || selectedModel.status === "ACTIVE" || submitting === "model-status-ACTIVE"} onClick={() => void changeModelStatus("ACTIVE")}>{submitting === "model-status-ACTIVE" ? <LoaderCircle className="spin" /> : <Check />} 激活版本</button>
+                <div className="ai-context-box"><span>目标指标</span><strong>{selectedModel?.target_metric ?? "—"}</strong><span>当前状态</span><strong>{statusLabel(selectedModel?.status ?? "—")}</strong><span>数据集</span><strong>{modelDataset ? `${modelDataset.dataset_code}:${modelDataset.version}` : "旧模型未绑定"}</strong><span>分组切分</span><strong>{modelDataset ? `${modelDataset.train_group_count} 训练 / ${modelDataset.validation_group_count} 验证` : "—"}</strong><span>验证 R² / RMSE</span><strong>{selectedModel ? `${formatNumber(selectedModel.evaluation_metrics.validation_r2)} / ${formatNumber(selectedModel.evaluation_metrics.validation_rmse)}` : "—"}</strong><span>验收结论</span><strong>{selectedAcceptance ? statusLabel(selectedAcceptance.decision) : "待验收"}</strong></div>
+                <p className="ai-hint">模型必须先通过无泄漏独立验证和人工验收，才允许激活；激活后同模型代码与目标指标的其他版本会自动退役。</p>
+                <div className="ai-two-fields">
+                  <button className="button button-secondary danger-button" disabled={!selectedModel || submitting === "acceptance-REJECTED"} onClick={() => void decideModelAcceptance("REJECTED")}><X /> 验收驳回</button>
+                  <button className="button button-secondary" disabled={!selectedModel || !modelDataset?.leakage_check.passed || submitting === "acceptance-ACCEPTED"} onClick={() => void decideModelAcceptance("ACCEPTED")}><ShieldCheck /> 验收通过</button>
+                </div>
+                <button className="button button-primary" disabled={!selectedModel || selectedModel.status === "ACTIVE" || selectedAcceptance?.decision !== "ACCEPTED" || submitting === "model-status-ACTIVE"} onClick={() => void changeModelStatus("ACTIVE")}>{submitting === "model-status-ACTIVE" ? <LoaderCircle className="spin" /> : <Check />} 激活版本</button>
                 <div className="ai-two-fields">
                   <button className="button button-secondary" disabled={!selectedModel || selectedModel.status === "DRAFT" || submitting === "model-status-DRAFT"} onClick={() => void changeModelStatus("DRAFT")}>转为草稿</button>
                   <button className="button button-secondary danger-button" disabled={!selectedModel || selectedModel.status === "RETIRED" || submitting === "model-status-RETIRED"} onClick={() => void changeModelStatus("RETIRED")}>退役版本</button>
@@ -601,7 +723,7 @@ export function AiWorkbench() {
                 </div>
                 <div className="ai-drift-stat-grid">
                   <article><span>最大特征偏移</span><strong>{formatNumber(driftReport.max_feature_shift)}</strong><small>标准差倍数</small></article>
-                  <article><span>在线 RMSE</span><strong>{formatNumber(driftReport.live_rmse)}</strong><small>训练期 {formatNumber(driftReport.training_rmse)}</small></article>
+                  <article><span>在线 RMSE</span><strong>{formatNumber(driftReport.live_rmse)}</strong><small>验收基线 {formatNumber(driftReport.baseline_rmse)}</small></article>
                   <article><span>RMSE 比率</span><strong>{formatNumber(driftReport.rmse_ratio, 2)}</strong><small>在线 / 训练期</small></article>
                   <article><span>有标签预测</span><strong>{driftReport.labeled_prediction_count}</strong><small>共 {driftReport.prediction_count} 条预测</small></article>
                   <article><span>平均完整率</span><strong>{formatNumber((driftReport.average_feature_completeness ?? 0) * 100, 1)}%</strong><small>监控窗口输入</small></article>

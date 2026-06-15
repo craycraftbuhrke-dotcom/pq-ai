@@ -26,9 +26,11 @@ Use this skill for every change that touches process stages, parameters, materia
 6. Admit a material value to AI only through an active characteristic definition, matching active test method, time-valid approved specification, active material-type/stage/target-family applicability, and a `VERIFIED` batch result tested no later than production start.
 7. Keep legacy viscosity, solids, and free-form COA fields only for compatibility and traceability; never promote them directly into approved feature snapshots.
 8. Train separate model families for thickness, color, and orange peel. Split data by time and production event/body/batch to prevent leakage.
-9. Treat diagnosis as association unless supported by controlled DOE or other causal evidence.
-10. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require human approval and post-change measurement.
-11. Reject or quarantine out-of-scope features before snapshot creation and training.
+9. Freeze every acceptance dataset with feature values, target values, quality-measurement IDs, group/split membership, temporal cutoff, and leakage checks. Fit only on `TRAIN`; evaluate only on independent `VALIDATION`.
+10. Never activate a model from training metrics. Require recorded independent-validation metrics and a human acceptance decision before activation.
+11. Treat diagnosis as association unless supported by controlled DOE or other causal evidence.
+12. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require human approval and post-change measurement.
+13. Reject or quarantine out-of-scope features before snapshot creation and training.
 
 ## Reference Loading
 

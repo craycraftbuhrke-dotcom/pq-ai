@@ -1016,6 +1016,64 @@ class PointFeatureSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class DatasetSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "dataset_snapshot"
+    __table_args__ = (
+        UniqueConstraint("dataset_code", "version", name="uq_dataset_snapshot_version"),
+    )
+
+    dataset_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    feature_set_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    split_strategy: Mapped[str] = mapped_column(String(48), nullable=False)
+    group_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    holdout_ratio: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="BUILT", nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    group_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    train_sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    validation_sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    train_group_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    validation_group_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    cutoff_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    feature_names: Mapped[list] = mapped_column(JSON, nullable=False)
+    lineage: Mapped[dict] = mapped_column(JSON, nullable=False)
+    leakage_check: Mapped[dict] = mapped_column(JSON, nullable=False)
+    built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DatasetSplitMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "dataset_split_member"
+    __table_args__ = (
+        UniqueConstraint(
+            "dataset_snapshot_id",
+            "point_feature_snapshot_id",
+            name="uq_dataset_feature_snapshot",
+        ),
+        Index("ix_dataset_split_group", "dataset_snapshot_id", "split", "group_value"),
+    )
+
+    dataset_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("dataset_snapshot.id"), nullable=False
+    )
+    point_feature_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("point_feature_snapshot.id"), nullable=False
+    )
+    production_run_id: Mapped[str] = mapped_column(ForeignKey("production_run.id"), nullable=False)
+    measurement_point_id: Mapped[str] = mapped_column(
+        ForeignKey("measurement_point.id"), nullable=False
+    )
+    target_measurement_id: Mapped[str] = mapped_column(
+        ForeignKey("quality_measurement.id"), nullable=False
+    )
+    group_value: Mapped[str] = mapped_column(String(100), nullable=False)
+    split: Mapped[str] = mapped_column(String(24), nullable=False)
+    target_value: Mapped[float] = mapped_column(Float, nullable=False)
+    feature_values: Mapped[dict] = mapped_column(JSON, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ModelVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "model_version"
     __table_args__ = (
@@ -1028,11 +1086,30 @@ class ModelVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     target_metric: Mapped[str] = mapped_column(String(64), nullable=False)
     feature_set_version: Mapped[str] = mapped_column(String(64), nullable=False)
     artifact_uri: Mapped[str] = mapped_column(String(500), nullable=False)
+    dataset_snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("dataset_snapshot.id"))
     model_payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     evaluation_metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
     training_sample_count: Mapped[int] = mapped_column(default=0, nullable=False)
     trained_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(24), default=VersionStatus.DRAFT, nullable=False)
+
+
+class ModelAcceptanceDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "model_acceptance_decision"
+    __table_args__ = (
+        Index("ix_model_acceptance_decision_time", "model_version_id", "decided_at"),
+    )
+
+    model_version_id: Mapped[str] = mapped_column(ForeignKey("model_version.id"), nullable=False)
+    dataset_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("dataset_snapshot.id"), nullable=False
+    )
+    decision: Mapped[str] = mapped_column(String(24), nullable=False)
+    criteria: Mapped[dict] = mapped_column(JSON, nullable=False)
+    checks: Mapped[dict] = mapped_column(JSON, nullable=False)
+    decided_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
 
 
 class PredictionResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):

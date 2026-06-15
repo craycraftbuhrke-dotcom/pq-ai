@@ -27,6 +27,8 @@ The independent training unit is a production event/body or controlled trial, no
 
 Never randomly split point rows from the same body/run between train and validation. Use temporal holdout and grouped validation to estimate performance on future production and unseen runs.
 
+The implemented PQ-AI acceptance baseline freezes an immutable dataset snapshot containing point-feature values, target values, source quality-measurement IDs, body/run group membership, train/validation split, temporal cutoff, and leakage-check result. The model service fits only `TRAIN`, reports independent `VALIDATION` metrics, creates a `DRAFT` model, and requires a recorded human acceptance decision before activation. Factory-specific acceptance thresholds, applicability scope, OOD policy, and real factory-run evidence are still mandatory before production use.
+
 ## Model Strategy
 
 Start with models suitable for small, correlated industrial tabular data:
