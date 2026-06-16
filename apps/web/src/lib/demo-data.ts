@@ -111,6 +111,7 @@ export const navItems = [
   { href: "/production", label: "生产实绩中心", icon: "production" },
   { href: "/quality", label: "质量数据中心", icon: "quality" },
   { href: "/ai-workbench", label: "AI 闭环工作台", icon: "ai" },
+  { href: "/controlled-trials", label: "受控试验中心", icon: "trial" },
   { href: "/master-data", label: "主数据中心", icon: "master" },
   { href: "/integrations", label: "集成与任务中心", icon: "integration" },
   { href: "/audit", label: "审计中心", icon: "audit" },
