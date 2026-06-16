@@ -2447,6 +2447,57 @@ button.message-banner {
   justify-content: flex-end;
 }
 
+.ai-validation-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ai-validation-grid article,
+.ai-artifact-row {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px;
+}
+
+.ai-validation-grid article {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-validation-grid strong,
+.ai-artifact-row b,
+.ai-artifact-row code {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 9px;
+}
+
+.ai-validation-grid small,
+.ai-artifact-row small {
+  color: var(--text-muted);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.ai-artifact-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ai-artifact-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-artifact-row code {
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+}
+
 .ai-governance-warning {
   background: color-mix(in srgb, var(--danger) 8%, var(--bg-elevated));
   border-left: 3px solid var(--danger);

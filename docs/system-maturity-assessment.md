@@ -1,12 +1,12 @@
 # PQ-AI System Maturity Assessment
 
-Assessment date: 2026-06-15. This is an engineering assessment against the approved domain boundary, not a production certification.
+Assessment date: 2026-06-16. This is an engineering assessment against the approved domain boundary, not a production certification.
 
 ## Executive Conclusion
 
-PQ-AI is a functional, connected demonstration and a useful foundation for factory-data onboarding. Measurement reliability, Dürr trajectory/device lineage, governed material-result gates, and a leakage-safe model-acceptance baseline now protect the AI lifecycle, but the system is not yet ready for production process recommendations because real device/material file validation, validated deposition contribution, factory-specific model acceptance/applicability, and approved recommendation constraints remain incomplete.
+PQ-AI is a functional, connected demonstration and a useful foundation for factory-data onboarding. Measurement reliability, Dürr trajectory/device lineage, governed material-result gates, leakage-safe model acceptance, multi-axis validation evidence, and model artifact registration now protect the AI lifecycle, but the system is not yet ready for production process recommendations because real device/material file validation, validated deposition contribution, factory-specific configuration, controlled-trial governance, and approved recommendation constraints remain incomplete.
 
-Estimated overall maturity: **79% - governed demonstrable prototype / factory-data onboarding preparation**.
+Estimated overall maturity: **82% - governed demonstrable prototype / factory-data onboarding preparation**.
 
 ## Scores And Evidence
 
@@ -17,7 +17,7 @@ Estimated overall maturity: **79% - governed demonstrable prototype / factory-da
 | Materials | 70% | Governed characteristic definitions, method versions, units, specifications/effective periods, stage/target applicability, batch results, reliability, integration, UI, and feature lineage | Replace demo methods/units/specifications with approved factory/TDS/COA facts; add real pigment/effect/levelling fields and file adapters |
 | Quality/instruments | 72% | Governed BYK/Fischer instruments, methods, references, calibrations, import profiles, repeats and automatic reliability gate | Real device-file validation, explicit probe master, uncertainty/MSA and measurement-plan execution remain |
 | Data lineage/flow | 85% | Production run/point backbone, verified measurement/material gates, target-family contribution, trajectory execution, material result and specification lineage | Real external-file lineage and validated contribution evidence remain |
-| AI modeling | 80% | Immutable datasets, independent validation, versioned factory acceptance policies, exact applicability, statistical OOD blocking, persisted inference evidence, prediction/diagnosis/recommendation and drift | Real factory policy configuration, multi-axis validation, governed artifacts, stronger models, and causal evidence |
+| AI modeling | 84% | Immutable datasets, independent validation, multi-axis grouped validation folds, registered model artifact hashes, versioned factory acceptance policies, exact applicability, statistical OOD blocking, persisted inference evidence, prediction/diagnosis/recommendation and drift | Real factory policy configuration, richer uncertainty, stronger models, governed external artifact storage, and causal evidence |
 | Workflow/UX | 81% | Real CRUD, measurement/material/Dürr governance, factory acceptance-policy maintenance, model acceptance/applicability/OOD governance, pre-inference checks, and closed-loop operations | Missing instrument/material import wizard, measurement-plan execution, trajectory/contribution visualization, controlled-trial workspace |
 | Integration/operations | 60% | Integration task framework plus robot actual/trajectory and governed material-result ingestion, auth, audit, local MySQL | Real device/MES/QMS/material mappings, SSO, backup/DR, observability, and factory acceptance remain |
 
@@ -46,7 +46,7 @@ Estimated overall maturity: **79% - governed demonstrable prototype / factory-da
 - Training derives exact factory/model/color applicability contexts from the governed dataset and creates a statistical OOD blocking policy. Both remain pending until human acceptance; activation requires approved scope and policy.
 - Factory acceptance policies are versioned and source-backed. Acceptance and activation require every applicable factory to have an active target-metric policy and require the model to satisfy validation RMSE, validation R², and independent-group thresholds. Demo policies can authorize only demo models.
 - Prediction and recommendation are blocked for unsupported contexts, missing model features, or excessive standardized feature shifts. Accepted predictions persist applicability and OOD evidence for diagnosis and audit.
-- Residual work: configure real factory-approved policies, add batch/program/factory/model/color grouped cross-validation, richer uncertainty, governed model artifacts, and real factory-run acceptance.
+- Residual work: configure real factory-approved policies, add richer uncertainty, governed external artifact storage, stronger model families, and real factory-run acceptance.
 
 ### Completed Baseline - Dürr Robot And Point Deposition
 
@@ -71,7 +71,7 @@ The current frontend supports real CRUD and a demonstrable closed loop, but the 
 - Extend the implemented Dürr governance workspace with path geometry, contribution heatmap, version comparison, execution-deviation review, and rollback views.
 - A quality-engineer review queue that separates measurement/data-quality failures from process failures.
 - A process-engineer controlled-trial workspace with hypothesis, coupled changes, constraints, rollback, approval, and sustained verification.
-- Extend the implemented model-acceptance-policy/applicability/OOD view with reviewer roles, scope-expansion approval detail, and richer uncertainty.
+- Extend the implemented model-acceptance-policy/applicability/OOD/validation-artifact view with reviewer roles, scope-expansion approval detail, and richer uncertainty.
 
 ### Backend Services
 
@@ -81,7 +81,7 @@ The API has generic CRUD, aggregation, modeling, audit, and integration foundati
 - Extend the implemented instrument/calibration/reference/import-profile validation service with file parsing, MSA and plant procedures.
 - Extend the implemented robot/atomizer/trajectory/contribution service with real file parsing, geometry validation, and deviation workflows.
 - Extend the implemented material-characteristic service with real TDS/COA parsing, field-profile validation, approved method/unit masters, and supplier/factory mappings.
-- Extend the implemented dataset snapshot, factory acceptance policy, applicability, and OOD services with multi-axis grouped cross-validation, artifact governance, and factory approval roles.
+- Extend the implemented dataset snapshot, validation fold, artifact, factory acceptance policy, applicability, and OOD services with richer uncertainty, external artifact storage, and factory approval roles.
 - Controlled-trial, constraint-source, rollback, and sustained-verification workflow.
 
 ### Domain Model And MySQL
@@ -92,7 +92,7 @@ Keep the current production-run and measurement-point backbone. Add versioned en
 - Extend implemented `durr_robot`, `durr_rotary_atomizer`, `durr_application_controller`, `trajectory_program`, `trajectory_path_segment`, `production_device_execution`, and target-family contribution entities with real file/import metadata, geometry, validation evidence, and factory applicability.
 - Extend the implemented `measurement_instrument`, `measurement_method`, `measurement_calibration_record`, `measurement_reference_standard`, `measurement_import_profile`, and repeated raw readings with explicit probes, MSA and device-file ingestion.
 - Extend implemented material characteristic definitions, batch results, methods, units, specifications, applicability, reliability, and source lineage with real import profiles and approved factory facts.
-- Extend implemented `dataset_snapshot`, split/group membership, target-measurement lineage, acceptance decision, model applicability scope, OOD policy, and persisted inference evidence with governed model artifacts and richer uncertainty.
+- Extend implemented `dataset_snapshot`, split/group membership, target-measurement lineage, validation fold, model artifact, acceptance decision, model applicability scope, OOD policy, and persisted inference evidence with richer uncertainty.
 - `controlled_trial`, constraint source/version, change proposal, rollback version, and sustained verification.
 
 Generic JSON columns may remain as raw ingestion payloads, but approved feature generation must use governed values.
@@ -119,6 +119,6 @@ master data + process route + device/path/material/instrument governance
 2. Completed baseline: add instrument/method, calibration/reference, repeat-reading, import-profile models, reliability gate, API and UI; next extend with explicit probes, MSA and real device-file adapters.
 3. Completed baseline: add Dürr robot/atomizer/controller, device configuration, trajectory/path/execution models, checksum gate, target-family point contribution, API, integration event, and UI; next validate real factory files and contribution evidence.
 4. Completed baseline: replace generic material COA training fields with governed material definitions, methods, specifications, applicability, batch results, reliability gate, integration, UI, and v4 feature lineage; next ingest approved factory/TDS/COA facts.
-5. Completed baseline: build immutable leakage-safe dataset snapshots, grouped temporal evaluation, independent metrics, versioned factory acceptance policies, human acceptance, exact applicability scope, OOD blocking and activation gates; next add multi-axis validation, richer uncertainty and governed artifacts.
+5. Completed baseline: build immutable leakage-safe dataset snapshots, grouped temporal evaluation, multi-axis validation folds, registered model artifacts, independent metrics, versioned factory acceptance policies, human acceptance, exact applicability scope, OOD blocking and activation gates; next add richer uncertainty, external artifact storage, and stronger model families.
 6. Add engineer-controlled trials, constraint sources, rollback, and sustained verification.
 7. Complete real integrations, SSO, backup/DR, observability, and factory acceptance.

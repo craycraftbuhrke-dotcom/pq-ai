@@ -91,6 +91,43 @@ class ModelVersionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ModelValidationFoldRead(BaseModel):
+    id: str
+    model_version_id: str
+    dataset_snapshot_id: str
+    validation_axis: str
+    fold_key: str
+    train_sample_count: int
+    validation_sample_count: int
+    train_group_count: int
+    validation_group_count: int
+    metrics: dict
+    status: str
+    evaluated_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ModelArtifactRead(BaseModel):
+    id: str
+    model_version_id: str
+    artifact_type: str
+    artifact_uri: str
+    storage_backend: str
+    payload_hash: str
+    metadata_payload: dict
+    status: str
+    created_by: str
+    registered_at: datetime
+    remark: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ModelStatusUpdate(BaseModel):
     status: Literal["ACTIVE", "RETIRED", "DRAFT"]
 

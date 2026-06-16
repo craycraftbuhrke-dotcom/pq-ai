@@ -31,6 +31,8 @@ These rules are mandatory for code, schema, APIs, UI, seed data, tests, analytic
 - Random point-row train/test splits are prohibited.
 - An approved dataset snapshot must freeze feature values, target values, source quality-measurement IDs, group membership, temporal split, and leakage-check result.
 - Models are trained only on the training split. Training metrics are never acceptance evidence; activation requires independent validation plus a recorded human acceptance decision.
+- Candidate models must generate multi-axis validation evidence: primary temporal holdout, production-group leave-one-out, and factory/model/color axes when the dataset has diversity. Single-value axes must be recorded as insufficient diversity, not treated as validated.
+- Candidate models must register a model artifact hash that covers payload, evaluation metrics, dataset reference, and training sample count. Acceptance and activation require a registered, hash-matching artifact.
 - Every model must have explicitly approved factory/model/color applicability scopes and an approved statistical OOD blocking policy. Training-data-derived scopes start pending and do not authorize inference until human acceptance.
 - Every non-demo model must satisfy an active `FACTORY_APPROVED` acceptance-policy version for every applicable factory and target metric. Demo policies are permitted only for demo models and must never be represented as factory-approved thresholds.
 - Prediction, diagnosis, and recommendation must block out-of-scope, incomplete, or out-of-distribution inputs and persist the governance evidence. OOD thresholds are statistical policies, never substitutes for device, material, or process safety limits.

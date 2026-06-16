@@ -17,7 +17,9 @@ from app.api.routes.modeling import (
     get_model_drift,
     list_applicability_scopes,
     list_feature_snapshots,
+    list_model_artifacts,
     list_ood_policies,
+    list_validation_folds,
     predict_from_snapshot,
     recommend_from_snapshot,
     train_baseline_model,
@@ -189,8 +191,29 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert trained.training_sample_count == 6
         assert trained.evaluation_metrics["training_r2"] > 0.99
         assert "validation_rmse" in trained.evaluation_metrics
+        multi_axis = trained.evaluation_metrics["multi_axis_validation"]
+        assert multi_axis["strategy"] == "TEMPORAL_HOLDOUT_PLUS_LEAVE_AXIS_OUT"
+        assert multi_axis["axes"]["TIME_HOLDOUT"]["status"] == "EVALUATED"
+        assert multi_axis["axes"]["PRODUCTION_GROUP_LOO"]["status"] == "EVALUATED"
+        assert multi_axis["axes"]["FACTORY"]["status"] == "INSUFFICIENT_AXIS_DIVERSITY"
         assert trained.model_payload["minimums"]
         assert trained.model_payload["maximums"]
+        validation_folds = list_validation_folds(trained.id, db)
+        assert {fold.validation_axis for fold in validation_folds} >= {
+            "TIME_HOLDOUT",
+            "FACTORY",
+            "VEHICLE_MODEL",
+            "COLOR",
+            "PRODUCTION_GROUP_LOO",
+        }
+        assert any(
+            fold.validation_axis == "PRODUCTION_GROUP_LOO" and fold.status == "EVALUATED"
+            for fold in validation_folds
+        )
+        artifacts = list_model_artifacts(trained.id, db)
+        assert artifacts[0].status == "REGISTERED"
+        assert artifacts[0].artifact_uri == trained.artifact_uri
+        assert len(artifacts[0].payload_hash) == 64
         scopes = list_applicability_scopes(db)
         policies = list_ood_policies(db)
         assert len(scopes) == 1
@@ -243,8 +266,14 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert acceptance.decision == "ACCEPTED"
         assert acceptance.checks["has_configured_applicability_scope"] is True
         assert acceptance.checks["has_configured_ood_policy"] is True
+        assert acceptance.checks["has_multi_axis_validation_report"] is True
+        assert acceptance.checks["has_evaluated_validation_axis"] is True
+        assert acceptance.checks["has_registered_model_artifact"] is True
+        assert acceptance.checks["model_artifact_hash_matches"] is True
         assert acceptance.checks["factory_acceptance_policies_present"] is True
         assert acceptance.checks["factory_acceptance_thresholds_passed"] is True
+        assert acceptance.criteria["model_artifact"]["hash_matches"] is True
+        assert acceptance.criteria["multi_axis_validation"]["evaluated_axis_count"] >= 2
         assert acceptance.criteria["factory_acceptance_policies"][0]["policy_code"] == (
             "F1-DOI-ACCEPTANCE:1.0"
         )

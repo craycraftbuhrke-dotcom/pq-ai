@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import UTC, datetime
 from math import ceil, sqrt
 
@@ -18,10 +20,12 @@ from app.models.domain import (
     Color,
     Factory,
     FactoryVehicleModel,
+    ModelArtifact,
     ModelAcceptancePolicy,
     ModelApplicabilityScope,
     ModelAcceptanceDecision,
     ModelOodPolicy,
+    ModelValidationFold,
     ModelVersion,
     ParameterDefinition,
     PointFeatureSnapshot,
@@ -94,18 +98,349 @@ def _target_observation(
 
 
 def _regression_metrics(predictions: list[float], targets: list[float], prefix: str) -> dict:
+    metrics = _regression_metric_values(predictions, targets)
+    return {f"{prefix}_{key}": value for key, value in metrics.items()}
+
+
+def _regression_metric_values(predictions: list[float], targets: list[float]) -> dict:
     errors = [prediction - target for prediction, target in zip(predictions, targets, strict=True)]
     mean_target = sum(targets) / len(targets)
     total_variance = sum((target - mean_target) ** 2 for target in targets)
     residual_variance = sum(error**2 for error in errors)
     return {
-        f"{prefix}_mae": round(sum(abs(error) for error in errors) / len(errors), 6),
-        f"{prefix}_rmse": round(sqrt(residual_variance / len(errors)), 6),
-        f"{prefix}_r2": round(
+        "mae": round(sum(abs(error) for error in errors) / len(errors), 6),
+        "rmse": round(sqrt(residual_variance / len(errors)), 6),
+        "r2": round(
             1 - residual_variance / total_variance
             if total_variance
             else (1.0 if residual_variance == 0 else 0.0),
             6,
+        ),
+    }
+
+
+def _model_artifact_source(model: ModelVersion) -> dict:
+    return {
+        "model_code": model.model_code,
+        "version": model.version,
+        "model_type": model.model_type,
+        "target_metric": model.target_metric,
+        "feature_set_version": model.feature_set_version,
+        "dataset_snapshot_id": model.dataset_snapshot_id,
+        "training_sample_count": model.training_sample_count,
+        "model_payload": model.model_payload,
+        "evaluation_metrics": model.evaluation_metrics,
+    }
+
+
+def _model_payload_hash(model: ModelVersion) -> str:
+    serialized = json.dumps(
+        _model_artifact_source(model),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _register_model_artifact(db: Session, model: ModelVersion) -> ModelArtifact:
+    payload_hash = _model_payload_hash(model)
+    artifact = ModelArtifact(
+        model_version_id=model.id,
+        artifact_type="RIDGE_MODEL_PAYLOAD",
+        artifact_uri=f"mysql://model-artifact/{model.id}/ridge-payload.json",
+        storage_backend="MYSQL",
+        payload_hash=payload_hash,
+        metadata_payload={
+            "hash_algorithm": "SHA256",
+            "model_code": model.model_code,
+            "version": model.version,
+            "dataset_snapshot_id": model.dataset_snapshot_id,
+            "feature_count": len(model.model_payload.get("feature_names", [])),
+            "evidence_included": [
+                "model_payload",
+                "evaluation_metrics",
+                "dataset_snapshot_id",
+                "training_sample_count",
+            ],
+        },
+        status="REGISTERED",
+        created_by="model-training-service",
+        registered_at=datetime.now(UTC),
+        remark="不可变模型载荷登记。哈希覆盖模型参数、评估指标和训练数据集引用。",
+    )
+    db.add(artifact)
+    model.artifact_uri = artifact.artifact_uri
+    db.flush()
+    return artifact
+
+
+def _model_artifact_evidence(db: Session, model: ModelVersion) -> dict:
+    artifact = db.scalar(
+        select(ModelArtifact)
+        .where(
+            ModelArtifact.model_version_id == model.id,
+            ModelArtifact.artifact_type == "RIDGE_MODEL_PAYLOAD",
+            ModelArtifact.status == "REGISTERED",
+        )
+        .order_by(ModelArtifact.registered_at.desc())
+    )
+    expected_hash = _model_payload_hash(model)
+    return {
+        "registered": artifact is not None,
+        "artifact_id": artifact.id if artifact else None,
+        "artifact_uri": artifact.artifact_uri if artifact else None,
+        "payload_hash": artifact.payload_hash if artifact else None,
+        "expected_hash": expected_hash,
+        "hash_matches": artifact is not None and artifact.payload_hash == expected_hash,
+        "status": artifact.status if artifact else "MISSING",
+    }
+
+
+def _multi_axis_validation_evidence(model: ModelVersion) -> dict:
+    summary = model.evaluation_metrics.get("multi_axis_validation") or {}
+    axes = summary.get("axes", {})
+    evaluated_axes = [
+        {"axis": axis, **axis_summary}
+        for axis, axis_summary in axes.items()
+        if axis_summary.get("status") == "EVALUATED"
+    ]
+    rmse_values = [
+        float(axis["rmse"])
+        for axis in evaluated_axes
+        if axis.get("rmse") is not None
+    ]
+    r2_values = [
+        float(axis["r2"])
+        for axis in evaluated_axes
+        if axis.get("r2") is not None
+    ]
+    return {
+        "report_present": bool(axes),
+        "axis_count": len(axes),
+        "evaluated_axis_count": len(evaluated_axes),
+        "insufficient_axes": [
+            axis
+            for axis, axis_summary in axes.items()
+            if axis_summary.get("status") == "INSUFFICIENT_AXIS_DIVERSITY"
+        ],
+        "worst_rmse": max(rmse_values) if rmse_values else None,
+        "worst_r2": min(r2_values) if r2_values else None,
+        "axes": axes,
+    }
+
+
+def _create_validation_folds(
+    db: Session,
+    model: ModelVersion,
+    dataset: DatasetSnapshot,
+    *,
+    ridge_lambda: float,
+    min_train_samples: int,
+    time_holdout_metrics: dict,
+) -> dict:
+    rows = list(
+        db.execute(
+            select(DatasetSplitMember, ProductionRun)
+            .join(ProductionRun, ProductionRun.id == DatasetSplitMember.production_run_id)
+            .where(DatasetSplitMember.dataset_snapshot_id == dataset.id)
+        )
+    )
+    now = datetime.now(UTC)
+    summaries: dict[str, dict] = {}
+
+    def add_fold(
+        axis: str,
+        fold_key: str,
+        train_items: list[tuple[DatasetSplitMember, ProductionRun]],
+        validation_items: list[tuple[DatasetSplitMember, ProductionRun]],
+        status: str,
+        metrics: dict,
+    ) -> None:
+        db.add(
+            ModelValidationFold(
+                model_version_id=model.id,
+                dataset_snapshot_id=dataset.id,
+                validation_axis=axis,
+                fold_key=fold_key[:120],
+                train_sample_count=len(train_items),
+                validation_sample_count=len(validation_items),
+                train_group_count=len({member.group_value for member, _run in train_items}),
+                validation_group_count=len(
+                    {member.group_value for member, _run in validation_items}
+                ),
+                metrics=metrics,
+                status=status,
+                evaluated_at=now,
+            )
+        )
+
+    def samples(
+        items: list[tuple[DatasetSplitMember, ProductionRun]]
+    ) -> list[tuple[dict[str, float], float]]:
+        return [(member.feature_values, member.target_value) for member, _run in items]
+
+    train_items = [(member, run) for member, run in rows if member.split == "TRAIN"]
+    validation_items = [
+        (member, run) for member, run in rows if member.split == "VALIDATION"
+    ]
+    time_metrics = {
+        "mae": time_holdout_metrics["validation_mae"],
+        "rmse": time_holdout_metrics["validation_rmse"],
+        "r2": time_holdout_metrics["validation_r2"],
+        "source": "PRIMARY_TEMPORAL_HOLDOUT",
+    }
+    add_fold(
+        "TIME_HOLDOUT",
+        "TEMPORAL_GROUPED_HOLDOUT",
+        train_items,
+        validation_items,
+        "EVALUATED",
+        time_metrics,
+    )
+    summaries["TIME_HOLDOUT"] = {
+        "status": "EVALUATED",
+        "fold_count": 1,
+        "evaluated_fold_count": 1,
+        "validation_sample_count": len(validation_items),
+        "rmse": time_metrics["rmse"],
+        "mae": time_metrics["mae"],
+        "r2": time_metrics["r2"],
+    }
+
+    axis_definitions = {
+        "FACTORY": lambda member, run: run.factory_id,
+        "VEHICLE_MODEL": lambda member, run: run.vehicle_model_id,
+        "COLOR": lambda member, run: run.color_id,
+        "PRODUCTION_GROUP_LOO": lambda member, run: member.group_value,
+    }
+    for axis, key_getter in axis_definitions.items():
+        keyed_rows = [(key_getter(member, run), member, run) for member, run in rows]
+        distinct_keys = sorted({key for key, _member, _run in keyed_rows})
+        if len(distinct_keys) < 2:
+            add_fold(
+                axis,
+                "ALL",
+                [],
+                [(member, run) for _key, member, run in keyed_rows],
+                "INSUFFICIENT_AXIS_DIVERSITY",
+                {
+                    "distinct_key_count": len(distinct_keys),
+                    "reason": "该验证轴只有一个取值，不能估计跨域泛化能力。",
+                },
+            )
+            summaries[axis] = {
+                "status": "INSUFFICIENT_AXIS_DIVERSITY",
+                "fold_count": 1,
+                "evaluated_fold_count": 0,
+                "distinct_key_count": len(distinct_keys),
+                "validation_sample_count": 0,
+                "rmse": None,
+                "mae": None,
+                "r2": None,
+            }
+            continue
+
+        aggregate_predictions: list[float] = []
+        aggregate_targets: list[float] = []
+        evaluated_fold_count = 0
+        skipped_fold_count = 0
+        for fold_key in distinct_keys:
+            fold_train_items = [
+                (member, run) for key, member, run in keyed_rows if key != fold_key
+            ]
+            fold_validation_items = [
+                (member, run) for key, member, run in keyed_rows if key == fold_key
+            ]
+            if len(fold_train_items) < min_train_samples:
+                skipped_fold_count += 1
+                add_fold(
+                    axis,
+                    fold_key,
+                    fold_train_items,
+                    fold_validation_items,
+                    "INSUFFICIENT_TRAINING_SUPPORT",
+                    {
+                        "min_train_samples": min_train_samples,
+                        "reason": "留出该折后训练样本不足，未计算指标。",
+                    },
+                )
+                continue
+            try:
+                fold_model = _fit_ridge(samples(fold_train_items), ridge_lambda)
+                predictions = _predict_samples(fold_model, samples(fold_validation_items))
+            except HTTPException as exc:
+                skipped_fold_count += 1
+                add_fold(
+                    axis,
+                    fold_key,
+                    fold_train_items,
+                    fold_validation_items,
+                    "FAILED",
+                    {"reason": str(exc.detail)},
+                )
+                continue
+            targets = [member.target_value for member, _run in fold_validation_items]
+            metrics = _regression_metric_values(predictions, targets)
+            aggregate_predictions.extend(predictions)
+            aggregate_targets.extend(targets)
+            evaluated_fold_count += 1
+            add_fold(
+                axis,
+                fold_key,
+                fold_train_items,
+                fold_validation_items,
+                "EVALUATED",
+                metrics,
+            )
+
+        if aggregate_predictions:
+            aggregate_metrics = _regression_metric_values(
+                aggregate_predictions, aggregate_targets
+            )
+            summaries[axis] = {
+                "status": "EVALUATED",
+                "fold_count": len(distinct_keys),
+                "evaluated_fold_count": evaluated_fold_count,
+                "skipped_fold_count": skipped_fold_count,
+                "distinct_key_count": len(distinct_keys),
+                "validation_sample_count": len(aggregate_targets),
+                **aggregate_metrics,
+            }
+        else:
+            summaries[axis] = {
+                "status": "NO_EVALUATED_FOLDS",
+                "fold_count": len(distinct_keys),
+                "evaluated_fold_count": 0,
+                "skipped_fold_count": skipped_fold_count,
+                "distinct_key_count": len(distinct_keys),
+                "validation_sample_count": 0,
+                "rmse": None,
+                "mae": None,
+                "r2": None,
+            }
+
+    evaluated_summaries = [
+        axis_summary
+        for axis_summary in summaries.values()
+        if axis_summary.get("status") == "EVALUATED"
+    ]
+    return {
+        "strategy": "TEMPORAL_HOLDOUT_PLUS_LEAVE_AXIS_OUT",
+        "axes": summaries,
+        "evaluated_axis_count": len(evaluated_summaries),
+        "insufficient_axis_count": sum(
+            axis_summary.get("status") == "INSUFFICIENT_AXIS_DIVERSITY"
+            for axis_summary in summaries.values()
+        ),
+        "worst_rmse": max(
+            (axis_summary["rmse"] for axis_summary in evaluated_summaries),
+            default=None,
+        ),
+        "worst_r2": min(
+            (axis_summary["r2"] for axis_summary in evaluated_summaries),
+            default=None,
         ),
     }
 
@@ -450,6 +785,7 @@ def _factory_acceptance_evidence(
             )
             continue
         metrics = model.evaluation_metrics
+        validation_evidence = _multi_axis_validation_evidence(model)
         checks = {
             "policy_present": True,
             "validation_rmse": (
@@ -467,6 +803,14 @@ def _factory_acceptance_evidence(
                 dataset is not None
                 and dataset.validation_group_count >= policy.min_validation_groups
             ),
+            "available_axis_rmse": (
+                validation_evidence["worst_rmse"] is None
+                or validation_evidence["worst_rmse"] <= policy.max_validation_rmse
+            ),
+            "available_axis_r2": (
+                validation_evidence["worst_r2"] is None
+                or validation_evidence["worst_r2"] >= policy.min_validation_r2
+            ),
         }
         details.append(
             {
@@ -480,6 +824,12 @@ def _factory_acceptance_evidence(
                     "min_validation_r2": policy.min_validation_r2,
                     "min_train_groups": policy.min_train_groups,
                     "min_validation_groups": policy.min_validation_groups,
+                },
+                "multi_axis_validation": {
+                    "evaluated_axis_count": validation_evidence["evaluated_axis_count"],
+                    "insufficient_axes": validation_evidence["insufficient_axes"],
+                    "worst_rmse": validation_evidence["worst_rmse"],
+                    "worst_r2": validation_evidence["worst_r2"],
                 },
                 "checks_passed": all(checks.values()),
                 "checks": checks,
@@ -711,13 +1061,14 @@ def train_model(db: Session, payload) -> ModelVersion:
     except ScopeViolation as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     validation_predictions = _predict_samples(fitted, validation_samples)
+    validation_metrics = _regression_metrics(
+        validation_predictions,
+        [target for _features, target in validation_samples],
+        "validation",
+    )
     evaluation_metrics = {
         **fitted["evaluation_metrics"],
-        **_regression_metrics(
-            validation_predictions,
-            [target for _features, target in validation_samples],
-            "validation",
-        ),
+        **validation_metrics,
         "train_group_count": dataset.train_group_count,
         "validation_group_count": dataset.validation_group_count,
         "leakage_check_passed": dataset.leakage_check.get("passed", False),
@@ -741,6 +1092,18 @@ def train_model(db: Session, payload) -> ModelVersion:
     )
     db.add(model)
     db.flush()
+    multi_axis_validation = _create_validation_folds(
+        db,
+        model,
+        dataset,
+        ridge_lambda=payload.ridge_lambda,
+        min_train_samples=payload.min_samples,
+        time_holdout_metrics=validation_metrics,
+    )
+    model.evaluation_metrics = {
+        **model.evaluation_metrics,
+        "multi_axis_validation": multi_axis_validation,
+    }
     ensure_model_governance(
         db,
         model,
@@ -748,6 +1111,7 @@ def train_model(db: Session, payload) -> ModelVersion:
         max_outlier_feature_ratio=payload.max_outlier_feature_ratio,
         min_feature_completeness=payload.min_feature_completeness,
     )
+    _register_model_artifact(db, model)
     db.commit()
     db.refresh(model)
     return model
@@ -767,6 +1131,8 @@ def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelA
     )
     policy = db.scalar(select(ModelOodPolicy).where(ModelOodPolicy.model_version_id == model.id))
     factory_acceptance = _factory_acceptance_evidence(db, model, scopes)
+    validation_evidence = _multi_axis_validation_evidence(model)
+    artifact_evidence = _model_artifact_evidence(db, model)
     leakage_passed = bool(dataset and dataset.leakage_check.get("passed"))
     metrics = model.evaluation_metrics
     threshold_checks = {
@@ -785,13 +1151,23 @@ def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelA
         "has_independent_validation": bool(dataset and dataset.validation_group_count > 0),
         "has_configured_applicability_scope": bool(scopes),
         "has_configured_ood_policy": policy is not None and policy.action == "BLOCK",
+        "has_multi_axis_validation_report": validation_evidence["report_present"],
+        "has_evaluated_validation_axis": validation_evidence["evaluated_axis_count"] > 0,
+        "has_registered_model_artifact": artifact_evidence["registered"],
+        "model_artifact_hash_matches": artifact_evidence["hash_matches"],
         "factory_acceptance_policies_present": factory_acceptance["policies_present"],
         "factory_acceptance_thresholds_passed": factory_acceptance["thresholds_passed"],
         **threshold_checks,
     }
     checks["all_required_checks_passed"] = all(checks.values())
     if payload.decision == "ACCEPTED" and not checks["all_required_checks_passed"]:
-        raise HTTPException(status_code=422, detail="模型未满足验收检查，不能记录为通过")
+        failed_checks = [
+            name for name, passed in checks.items() if name != "all_required_checks_passed" and not passed
+        ]
+        raise HTTPException(
+            status_code=422,
+            detail=f"模型未满足验收检查，不能记录为通过：{', '.join(failed_checks)}",
+        )
     decision = ModelAcceptanceDecision(
         model_version_id=model.id,
         dataset_snapshot_id=model.dataset_snapshot_id,
@@ -800,6 +1176,8 @@ def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelA
             "max_validation_rmse": payload.max_validation_rmse,
             "min_validation_r2": payload.min_validation_r2,
             "factory_acceptance_policies": factory_acceptance["details"],
+            "multi_axis_validation": validation_evidence,
+            "model_artifact": artifact_evidence,
         },
         checks=checks,
         decided_by=payload.decided_by,
@@ -1022,6 +1400,15 @@ def update_model_status(db: Session, model: ModelVersion, next_status: str) -> M
         )
         if not policy or policy.action != "BLOCK":
             raise HTTPException(status_code=409, detail="模型没有已批准的 OOD 阻断策略，不能激活")
+        validation_evidence = _multi_axis_validation_evidence(model)
+        if (
+            not validation_evidence["report_present"]
+            or validation_evidence["evaluated_axis_count"] <= 0
+        ):
+            raise HTTPException(status_code=409, detail="模型没有多维验证折报告，不能激活")
+        artifact_evidence = _model_artifact_evidence(db, model)
+        if not artifact_evidence["registered"] or not artifact_evidence["hash_matches"]:
+            raise HTTPException(status_code=409, detail="模型工件未登记或哈希不匹配，不能激活")
         factory_acceptance = _factory_acceptance_evidence(db, model)
         if not factory_acceptance["policies_present"]:
             raise HTTPException(status_code=409, detail="模型全部适用工厂必须配置生效验收策略")

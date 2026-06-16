@@ -29,11 +29,13 @@ Use this skill for every change that touches process stages, parameters, materia
 9. Freeze every acceptance dataset with feature values, target values, quality-measurement IDs, group/split membership, temporal cutoff, and leakage checks. Fit only on `TRAIN`; evaluate only on independent `VALIDATION`.
 10. Never activate a model from training metrics. Require recorded independent-validation metrics and a human acceptance decision before activation.
 11. Derive initial factory/model/color applicability from the governed dataset, keep it pending until human acceptance, and require an approved statistical OOD blocking policy before activation.
-12. Require an active factory-approved acceptance-policy version for every applicable factory and target metric. Allow explicitly marked demo policies only for demo models.
-13. Block prediction, diagnosis, and recommendation for unsupported contexts, incomplete model inputs, or distribution-outlier inputs; persist the scope/OOD evidence with each accepted prediction.
-14. Treat diagnosis as association unless supported by controlled DOE or other causal evidence.
-15. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require human approval and post-change measurement.
-16. Reject or quarantine out-of-scope features before snapshot creation and training.
+12. Generate multi-axis validation evidence for candidate models: primary temporal holdout, production-group leave-one-out, and factory/model/color axes where diversity exists. If an axis has only one value, record insufficiency instead of claiming cross-domain validation.
+13. Register a model artifact hash covering model payload, evaluation metrics, dataset reference, and training sample count. Acceptance and activation must reject missing or mismatched artifacts.
+14. Require an active factory-approved acceptance-policy version for every applicable factory and target metric. Allow explicitly marked demo policies only for demo models.
+15. Block prediction, diagnosis, and recommendation for unsupported contexts, incomplete model inputs, or distribution-outlier inputs; persist the scope/OOD evidence with each accepted prediction.
+16. Treat diagnosis as association unless supported by controlled DOE or other causal evidence.
+17. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require human approval and post-change measurement.
+18. Reject or quarantine out-of-scope features before snapshot creation and training.
 
 ## Reference Loading
 

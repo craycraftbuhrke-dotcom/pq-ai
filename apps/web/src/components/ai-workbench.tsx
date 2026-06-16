@@ -24,10 +24,37 @@ type ModelVersion = {
   target_metric: string;
   feature_set_version: string;
   dataset_snapshot_id?: string | null;
-  evaluation_metrics: Record<string, number>;
+  evaluation_metrics: ModelEvaluationMetrics;
   training_sample_count: number;
   trained_at?: string | null;
   status: string;
+};
+type ValidationAxisSummary = {
+  status: string;
+  fold_count?: number;
+  evaluated_fold_count?: number;
+  skipped_fold_count?: number;
+  distinct_key_count?: number;
+  validation_sample_count?: number;
+  rmse?: number | null;
+  mae?: number | null;
+  r2?: number | null;
+};
+type MultiAxisValidation = {
+  strategy: string;
+  axes: Record<string, ValidationAxisSummary>;
+  evaluated_axis_count: number;
+  insufficient_axis_count: number;
+  worst_rmse?: number | null;
+  worst_r2?: number | null;
+};
+type ModelEvaluationMetrics = {
+  training_r2?: number;
+  training_rmse?: number;
+  validation_r2?: number;
+  validation_rmse?: number;
+  multi_axis_validation?: MultiAxisValidation;
+  [key: string]: number | boolean | MultiAxisValidation | undefined | null;
 };
 type DatasetSnapshot = {
   id: string;
@@ -80,6 +107,33 @@ type AcceptancePolicy = {
   source_uri: string;
   approved_by?: string | null;
   approved_at?: string | null;
+  remark?: string | null;
+};
+type ModelValidationFold = {
+  id: string;
+  model_version_id: string;
+  dataset_snapshot_id: string;
+  validation_axis: string;
+  fold_key: string;
+  train_sample_count: number;
+  validation_sample_count: number;
+  train_group_count: number;
+  validation_group_count: number;
+  metrics: Record<string, number | string | null>;
+  status: string;
+  evaluated_at: string;
+};
+type ModelArtifact = {
+  id: string;
+  model_version_id: string;
+  artifact_type: string;
+  artifact_uri: string;
+  storage_backend: string;
+  payload_hash: string;
+  metadata_payload: Record<string, unknown>;
+  status: string;
+  created_by: string;
+  registered_at: string;
   remark?: string | null;
 };
 type Snapshot = {
@@ -307,6 +361,12 @@ function statusLabel(status: string): string {
     OUT_OF_DISTRIBUTION: "分布外",
     POLICY_NOT_APPROVED: "策略未批准",
     INACTIVE: "已停用",
+    EVALUATED: "已评估",
+    INSUFFICIENT_AXIS_DIVERSITY: "多样性不足",
+    INSUFFICIENT_TRAINING_SUPPORT: "训练支撑不足",
+    NO_EVALUATED_FOLDS: "无有效折",
+    FAILED: "失败",
+    REGISTERED: "已登记",
   }[status] ?? status;
 }
 
@@ -317,6 +377,18 @@ function driftStatusClass(status: string): string {
   return "status-info";
 }
 
+function validationStatusClass(status: string): string {
+  if (status === "EVALUATED") return "status-healthy";
+  if (status === "FAILED" || status === "NO_EVALUATED_FOLDS") return "status-risk";
+  if (status.startsWith("INSUFFICIENT")) return "status-warning";
+  return "status-info";
+}
+
+function shortHash(value?: string | null): string {
+  if (!value) return "—";
+  return value.length <= 20 ? value : `${value.slice(0, 12)}...${value.slice(-8)}`;
+}
+
 export function AiWorkbench() {
   const [tab, setTab] = useState<Tab>("models");
   const [models, setModels] = useState<ModelVersion[]>([]);
@@ -325,6 +397,8 @@ export function AiWorkbench() {
   const [acceptancePolicies, setAcceptancePolicies] = useState<AcceptancePolicy[]>([]);
   const [applicabilityScopes, setApplicabilityScopes] = useState<ApplicabilityScope[]>([]);
   const [oodPolicies, setOodPolicies] = useState<OodPolicy[]>([]);
+  const [validationFolds, setValidationFolds] = useState<ModelValidationFold[]>([]);
+  const [modelArtifacts, setModelArtifacts] = useState<ModelArtifact[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
@@ -357,7 +431,7 @@ export function AiWorkbench() {
     setLoading(true);
     setError("");
     try {
-      const [nextModels, nextDatasets, nextAcceptanceDecisions, nextAcceptancePolicies, nextApplicabilityScopes, nextOodPolicies, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextMeasurements, nextMetrics] =
+      const [nextModels, nextDatasets, nextAcceptanceDecisions, nextAcceptancePolicies, nextApplicabilityScopes, nextOodPolicies, nextValidationFolds, nextModelArtifacts, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextMeasurements, nextMetrics] =
         await Promise.all([
           request<ModelVersion[]>("/api/ai/models"),
           request<DatasetSnapshot[]>("/api/ai/models/datasets"),
@@ -365,6 +439,8 @@ export function AiWorkbench() {
           request<AcceptancePolicy[]>("/api/ai/models/acceptance-policies"),
           request<ApplicabilityScope[]>("/api/ai/models/applicability-scopes"),
           request<OodPolicy[]>("/api/ai/models/ood-policies"),
+          request<ModelValidationFold[]>("/api/ai/models/validation-folds"),
+          request<ModelArtifact[]>("/api/ai/models/artifacts"),
           request<Snapshot[]>("/api/ai/models/feature-snapshots"),
           request<Prediction[]>("/api/ai/predictions"),
           request<Diagnosis[]>("/api/ai/diagnoses"),
@@ -378,6 +454,8 @@ export function AiWorkbench() {
       setAcceptancePolicies(nextAcceptancePolicies);
       setApplicabilityScopes(nextApplicabilityScopes);
       setOodPolicies(nextOodPolicies);
+      setValidationFolds(nextValidationFolds);
+      setModelArtifacts(nextModelArtifacts);
       setSnapshots(nextSnapshots);
       setPredictions(nextPredictions);
       setDiagnoses(nextDiagnoses);
@@ -448,6 +526,16 @@ export function AiWorkbench() {
   const selectedScopes = applicabilityScopes.filter((item) => item.model_version_id === selectedModelId);
   const selectedApplicableScopes = selectedScopes.filter((scope) => scope.status !== "INACTIVE");
   const selectedOodPolicy = oodPolicies.find((item) => item.model_version_id === selectedModelId);
+  const selectedValidationFolds = validationFolds.filter((item) => item.model_version_id === selectedModelId);
+  const selectedArtifact = modelArtifacts.find(
+    (item) => item.model_version_id === selectedModelId && item.status === "REGISTERED",
+  );
+  const selectedMultiAxis = selectedModel?.evaluation_metrics.multi_axis_validation;
+  const selectedAxisEntries = selectedMultiAxis ? Object.entries(selectedMultiAxis.axes) : [];
+  const hasValidationEvidence = Boolean(
+    selectedMultiAxis?.evaluated_axis_count || selectedValidationFolds.some((item) => item.status === "EVALUATED"),
+  );
+  const hasArtifactEvidence = Boolean(selectedArtifact);
   const factoryOptions = useMemo(
     () => Array.from(
       new Map(
@@ -984,8 +1072,15 @@ export function AiWorkbench() {
               <div className="program-subheading"><div><span className="eyebrow">Model Registry</span><h3>版本状态治理</h3></div><ShieldCheck /></div>
               <div className="ai-form-stack">
                 <label className="form-field"><span>模型版本</span><select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {statusLabel(model.status)}</option>)}</select></label>
-                <div className="ai-context-box"><span>目标指标</span><strong>{selectedModel?.target_metric ?? "—"}</strong><span>当前状态</span><strong>{statusLabel(selectedModel?.status ?? "—")}</strong><span>数据集</span><strong>{modelDataset ? `${modelDataset.dataset_code}:${modelDataset.version}` : "旧模型未绑定"}</strong><span>分组切分</span><strong>{modelDataset ? `${modelDataset.train_group_count} 训练 / ${modelDataset.validation_group_count} 验证` : "—"}</strong><span>验证 R² / RMSE</span><strong>{selectedModel ? `${formatNumber(selectedModel.evaluation_metrics.validation_r2)} / ${formatNumber(selectedModel.evaluation_metrics.validation_rmse)}` : "—"}</strong><span>验收结论</span><strong>{selectedAcceptance ? statusLabel(selectedAcceptance.decision) : "待验收"}</strong><span>适用范围</span><strong>{selectedScopes.filter((item) => item.status === "ACTIVE").length} 生效 / {selectedScopes.length} 条</strong><span>OOD 策略</span><strong>{selectedOodPolicy ? statusLabel(selectedOodPolicy.status) : "未配置"}</strong><span>工厂验收策略</span><strong>{factoryPolicyCoverage ? "全部覆盖" : "覆盖不完整"}</strong></div>
+                <div className="ai-context-box"><span>目标指标</span><strong>{selectedModel?.target_metric ?? "—"}</strong><span>当前状态</span><strong>{statusLabel(selectedModel?.status ?? "—")}</strong><span>数据集</span><strong>{modelDataset ? `${modelDataset.dataset_code}:${modelDataset.version}` : "旧模型未绑定"}</strong><span>分组切分</span><strong>{modelDataset ? `${modelDataset.train_group_count} 训练 / ${modelDataset.validation_group_count} 验证` : "—"}</strong><span>验证 R² / RMSE</span><strong>{selectedModel ? `${formatNumber(selectedModel.evaluation_metrics.validation_r2)} / ${formatNumber(selectedModel.evaluation_metrics.validation_rmse)}` : "—"}</strong><span>多维验证</span><strong>{selectedMultiAxis ? `${selectedMultiAxis.evaluated_axis_count}/${selectedAxisEntries.length} 轴` : "未生成"}</strong><span>工件哈希</span><strong>{shortHash(selectedArtifact?.payload_hash)}</strong><span>验收结论</span><strong>{selectedAcceptance ? statusLabel(selectedAcceptance.decision) : "待验收"}</strong><span>适用范围</span><strong>{selectedScopes.filter((item) => item.status === "ACTIVE").length} 生效 / {selectedScopes.length} 条</strong><span>OOD 策略</span><strong>{selectedOodPolicy ? statusLabel(selectedOodPolicy.status) : "未配置"}</strong><span>工厂验收策略</span><strong>{factoryPolicyCoverage ? "全部覆盖" : "覆盖不完整"}</strong></div>
                 <p className="ai-hint">模型必须通过无泄漏独立验证，并同时验收工厂/车型/颜色适用范围与统计 OOD 阻断策略，才允许激活。</p>
+                <div className="ai-governance-block">
+                  <strong>多维验证与模型工件</strong>
+                  {selectedAxisEntries.length ? <div className="ai-validation-grid">
+                    {selectedAxisEntries.map(([axis, summary]) => <article key={axis}><span className={`status-badge ${validationStatusClass(summary.status)}`}>{statusLabel(summary.status)}</span><strong>{axis}</strong><small>{summary.evaluated_fold_count ?? 0}/{summary.fold_count ?? 0} 折 · RMSE {formatNumber(summary.rmse)} · R² {formatNumber(summary.r2)}</small></article>)}
+                  </div> : <p className="ai-hint">当前模型没有多维验证折报告，不能验收或激活。</p>}
+                  {selectedArtifact ? <div className="ai-artifact-row"><span><b>{selectedArtifact.artifact_type}</b><small>{selectedArtifact.storage_backend} · {statusLabel(selectedArtifact.status)} · {shortHash(selectedArtifact.payload_hash)}</small></span><code>{selectedArtifact.artifact_uri}</code></div> : <p className="ai-hint">当前模型没有已登记工件哈希，不能验收或激活。</p>}
+                </div>
                 <div className="ai-governance-block">
                   <strong>工厂模型验收策略</strong>
                   {selectedAcceptancePolicies.map((policy) => <div className="ai-scope-row" key={policy.id}><span><b>{policy.factory_code} · {policy.policy_code}:{policy.version}</b><small>{policy.policy_type} · {statusLabel(policy.status)} · RMSE ≤ {formatNumber(policy.max_validation_rmse)} · R² ≥ {formatNumber(policy.min_validation_r2)}</small></span><div className="ai-inline-actions">{policy.status !== "ACTIVE" ? <button type="button" className="button button-secondary" disabled={submitting === `acceptance-policy-${policy.id}-ACTIVE`} onClick={() => void changeAcceptancePolicyStatus(policy, "ACTIVE")}>批准激活</button> : null}{policy.status === "ACTIVE" ? <button type="button" className="button button-secondary danger-button" disabled={submitting === `acceptance-policy-${policy.id}-RETIRED`} onClick={() => void changeAcceptancePolicyStatus(policy, "RETIRED")}>退役</button> : null}</div></div>)}
@@ -1005,9 +1100,9 @@ export function AiWorkbench() {
                 </form>
                 <div className="ai-two-fields">
                   <button className="button button-secondary danger-button" disabled={!selectedModel || submitting === "acceptance-REJECTED"} onClick={() => void decideModelAcceptance("REJECTED")}><X /> 验收驳回</button>
-                  <button className="button button-secondary" disabled={!selectedModel || !modelDataset?.leakage_check.passed || !factoryPolicyCoverage || submitting === "acceptance-ACCEPTED"} onClick={() => void decideModelAcceptance("ACCEPTED")}><ShieldCheck /> 验收通过</button>
+                  <button className="button button-secondary" disabled={!selectedModel || !modelDataset?.leakage_check.passed || !hasValidationEvidence || !hasArtifactEvidence || !factoryPolicyCoverage || submitting === "acceptance-ACCEPTED"} onClick={() => void decideModelAcceptance("ACCEPTED")}><ShieldCheck /> 验收通过</button>
                 </div>
-                <button className="button button-primary" disabled={!selectedModel || selectedModel.status === "ACTIVE" || selectedAcceptance?.decision !== "ACCEPTED" || selectedOodPolicy?.status !== "ACTIVE" || !selectedScopes.some((item) => item.status === "ACTIVE") || !factoryPolicyCoverage || submitting === "model-status-ACTIVE"} onClick={() => void changeModelStatus("ACTIVE")}>{submitting === "model-status-ACTIVE" ? <LoaderCircle className="spin" /> : <Check />} 激活版本</button>
+                <button className="button button-primary" disabled={!selectedModel || selectedModel.status === "ACTIVE" || selectedAcceptance?.decision !== "ACCEPTED" || selectedOodPolicy?.status !== "ACTIVE" || !selectedScopes.some((item) => item.status === "ACTIVE") || !hasValidationEvidence || !hasArtifactEvidence || !factoryPolicyCoverage || submitting === "model-status-ACTIVE"} onClick={() => void changeModelStatus("ACTIVE")}>{submitting === "model-status-ACTIVE" ? <LoaderCircle className="spin" /> : <Check />} 激活版本</button>
                 <div className="ai-two-fields">
                   <button className="button button-secondary" disabled={!selectedModel || selectedModel.status === "DRAFT" || submitting === "model-status-DRAFT"} onClick={() => void changeModelStatus("DRAFT")}>转为草稿</button>
                   <button className="button button-secondary danger-button" disabled={!selectedModel || selectedModel.status === "RETIRED" || submitting === "model-status-RETIRED"} onClick={() => void changeModelStatus("RETIRED")}>退役版本</button>

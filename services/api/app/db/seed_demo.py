@@ -89,11 +89,14 @@ from app.services.modeling import (
 )
 
 
+DEMO_GOVERNED_MODEL_VERSION = "7.0-validation-artifact"
+
+
 def _ensure_demo_governed_model(db: Session) -> ModelVersion:
     dataset = db.scalar(
         select(DatasetSnapshot).where(
             DatasetSnapshot.dataset_code == "DEMO-DOI-DATASET",
-            DatasetSnapshot.version == "6.0-leakage-safe",
+            DatasetSnapshot.version == DEMO_GOVERNED_MODEL_VERSION,
         )
     )
     if not dataset:
@@ -101,7 +104,7 @@ def _ensure_demo_governed_model(db: Session) -> ModelVersion:
             db,
             DatasetBuildRequest(
                 dataset_code="DEMO-DOI-DATASET",
-                version="6.0-leakage-safe",
+                version=DEMO_GOVERNED_MODEL_VERSION,
                 target_metric="doi",
                 feature_set_version=CURRENT_FEATURE_SET_VERSION,
             ),
@@ -109,7 +112,7 @@ def _ensure_demo_governed_model(db: Session) -> ModelVersion:
     model = db.scalar(
         select(ModelVersion).where(
             ModelVersion.model_code == "DEMO-DOI-BASELINE",
-            ModelVersion.version == "6.0-leakage-safe",
+            ModelVersion.version == DEMO_GOVERNED_MODEL_VERSION,
         )
     )
     if not model:
@@ -117,7 +120,7 @@ def _ensure_demo_governed_model(db: Session) -> ModelVersion:
             db,
             ModelTrainingRequest(
                 model_code="DEMO-DOI-BASELINE",
-                version="6.0-leakage-safe",
+                version=DEMO_GOVERNED_MODEL_VERSION,
                 target_metric="doi",
                 feature_set_version=CURRENT_FEATURE_SET_VERSION,
                 dataset_snapshot_id=dataset.id,
@@ -174,6 +177,9 @@ def _ensure_demo_governed_model(db: Session) -> ModelVersion:
         or acceptance.decision != "ACCEPTED"
         or not acceptance.checks.get("has_configured_applicability_scope")
         or not acceptance.checks.get("has_configured_ood_policy")
+        or not acceptance.checks.get("has_multi_axis_validation_report")
+        or not acceptance.checks.get("has_registered_model_artifact")
+        or not acceptance.checks.get("model_artifact_hash_matches")
         or not acceptance.checks.get("factory_acceptance_policies_present")
         or not acceptance.checks.get("factory_acceptance_thresholds_passed")
     ):
@@ -1021,7 +1027,7 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
     model = db.scalar(
         select(ModelVersion).where(
             ModelVersion.model_code == "DEMO-DOI-BASELINE",
-            ModelVersion.version == "6.0-leakage-safe",
+            ModelVersion.version == DEMO_GOVERNED_MODEL_VERSION,
         )
     )
     if model:

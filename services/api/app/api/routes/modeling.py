@@ -10,10 +10,12 @@ from app.models.domain import (
     Color,
     Factory,
     MeasurementPoint,
+    ModelArtifact,
     ModelAcceptancePolicy,
     ModelApplicabilityScope,
     ModelAcceptanceDecision,
     ModelOodPolicy,
+    ModelValidationFold,
     ModelVersion,
     PointFeatureSnapshot,
     PredictionResult,
@@ -26,6 +28,7 @@ from app.schemas.modeling import (
     DatasetSplitMemberRead,
     ModelAcceptanceDecisionRead,
     ModelAcceptanceRequest,
+    ModelArtifactRead,
     ModelAcceptancePolicyCreate,
     ModelAcceptancePolicyRead,
     ModelAcceptancePolicyStatusUpdate,
@@ -44,6 +47,7 @@ from app.schemas.modeling import (
     ModelRecommendationResponse,
     ModelStatusUpdate,
     ModelTrainingRequest,
+    ModelValidationFoldRead,
     ModelVersionRead,
 )
 from app.services.modeling import (
@@ -69,6 +73,33 @@ router = APIRouter(prefix="/ai/models", tags=["ai-modeling"])
 @router.get("", response_model=list[ModelVersionRead])
 def list_models(db: Session = Depends(get_db)) -> list[ModelVersion]:
     return list(db.scalars(select(ModelVersion).order_by(ModelVersion.created_at.desc())))
+
+
+@router.get("/validation-folds", response_model=list[ModelValidationFoldRead])
+def list_validation_folds(
+    model_version_id: str | None = None, db: Session = Depends(get_db)
+) -> list[ModelValidationFold]:
+    query = select(ModelValidationFold)
+    if model_version_id:
+        query = query.where(ModelValidationFold.model_version_id == model_version_id)
+    return list(
+        db.scalars(
+            query.order_by(
+                ModelValidationFold.validation_axis,
+                ModelValidationFold.fold_key,
+            )
+        )
+    )
+
+
+@router.get("/artifacts", response_model=list[ModelArtifactRead])
+def list_model_artifacts(
+    model_version_id: str | None = None, db: Session = Depends(get_db)
+) -> list[ModelArtifact]:
+    query = select(ModelArtifact)
+    if model_version_id:
+        query = query.where(ModelArtifact.model_version_id == model_version_id)
+    return list(db.scalars(query.order_by(ModelArtifact.registered_at.desc())))
 
 
 @router.get("/datasets", response_model=list[DatasetSnapshotRead])

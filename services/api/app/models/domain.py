@@ -1094,6 +1094,56 @@ class ModelVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(24), default=VersionStatus.DRAFT, nullable=False)
 
 
+class ModelValidationFold(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "model_validation_fold"
+    __table_args__ = (
+        UniqueConstraint(
+            "model_version_id",
+            "validation_axis",
+            "fold_key",
+            name="uq_model_validation_fold",
+        ),
+        Index("ix_model_validation_axis", "model_version_id", "validation_axis", "status"),
+    )
+
+    model_version_id: Mapped[str] = mapped_column(ForeignKey("model_version.id"), nullable=False)
+    dataset_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("dataset_snapshot.id"), nullable=False
+    )
+    validation_axis: Mapped[str] = mapped_column(String(48), nullable=False)
+    fold_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    train_sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    validation_sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    train_group_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    validation_group_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ModelArtifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "model_artifact"
+    __table_args__ = (
+        UniqueConstraint(
+            "model_version_id",
+            "artifact_type",
+            name="uq_model_artifact_type",
+        ),
+        Index("ix_model_artifact_status", "model_version_id", "status"),
+    )
+
+    model_version_id: Mapped[str] = mapped_column(ForeignKey("model_version.id"), nullable=False)
+    artifact_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    artifact_uri: Mapped[str] = mapped_column(String(500), nullable=False)
+    storage_backend: Mapped[str] = mapped_column(String(32), default="MYSQL", nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="REGISTERED", nullable=False)
+    created_by: Mapped[str] = mapped_column(String(80), default="system", nullable=False)
+    registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
 class ModelAcceptanceDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "model_acceptance_decision"
     __table_args__ = (
