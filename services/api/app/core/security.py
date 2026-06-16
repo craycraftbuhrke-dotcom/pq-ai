@@ -42,6 +42,18 @@ def authenticate_password(db: Session, username: str, password: str) -> AppUser 
     return user
 
 
+@dataclass(frozen=True)
+class Actor:
+    user_id: str | None
+    username: str
+    display_name: str
+    roles: tuple[str, ...]
+    permissions: frozenset[str]
+
+    def can(self, permission: str | None) -> bool:
+        return permission is None or "*" in self.permissions or permission in self.permissions
+
+
 def build_actor_for_user(db: Session, user: AppUser) -> Actor:
     roles = tuple(
         db.scalars(
@@ -66,18 +78,6 @@ def build_actor_for_user(db: Session, user: AppUser) -> Actor:
         roles=roles,
         permissions=permissions,
     )
-
-
-@dataclass(frozen=True)
-class Actor:
-    user_id: str | None
-    username: str
-    display_name: str
-    roles: tuple[str, ...]
-    permissions: frozenset[str]
-
-    def can(self, permission: str | None) -> bool:
-        return permission is None or "*" in self.permissions or permission in self.permissions
 
 
 SYSTEM_ACTOR = Actor(
