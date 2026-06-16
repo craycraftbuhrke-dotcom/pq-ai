@@ -5,7 +5,7 @@ stages:
 variables:
   PROJECT_GIT_REPOSITORY: "git@git.n.xiaomi.com:adili/pq-ai.git"
   NODE_IMAGE: "node:22-alpine"
-  PYTHON_IMAGE: "python:3.12-slim"
+  PYTHON_IMAGE: "python:3.11-slim"
   GIT_STRATEGY: clone
   GIT_DEPTH: "0"
   SECRET_DETECTION_ENABLED: "true"

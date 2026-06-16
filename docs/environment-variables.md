@@ -34,7 +34,7 @@
 | 变量 | 必填 | 敏感 | 用途 |
 | --- | --- | --- | --- |
 | `NODE_IMAGE` | 否 | 否 | GitLab 前端扫描/构建 Job 使用的 Node.js 执行镜像，默认 `node:22-alpine`；根目录 `dockerfile.frontend` 已固定基础镜像，避免平台未传 build-arg 时失败。 |
-| `PYTHON_IMAGE` | 否 | 否 | GitLab 后端扫描/构建 Job 使用的 Python 执行镜像，默认 `python:3.12-slim`；根目录 `dockerfile.backend` / `dockerfile.backed` 已固定基础镜像，避免平台未传 build-arg 时失败。 |
+| `PYTHON_IMAGE` | 否 | 否 | GitLab 后端扫描/构建 Job 使用的 Python 执行镜像，默认 `python:3.11-slim`；根目录 `dockerfile.backend` / `dockerfile.backed` 已固定基础镜像，避免平台未传 build-arg 时失败。 |
 | `NEXT_PUBLIC_API_URL` | 是 | 否 | 前端构建时注入的浏览器可见 API 地址。 |
 
 ## 4. MySQL / Compose 本地变量
