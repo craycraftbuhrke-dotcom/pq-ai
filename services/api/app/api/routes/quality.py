@@ -1,7 +1,10 @@
 from collections import defaultdict
+from csv import DictReader
+from datetime import datetime
+from io import StringIO
 from statistics import mean, pstdev
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -794,3 +797,133 @@ def delete_quality_standard(
     db.delete(standard)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/measurements/import-csv")
+def import_quality_csv(file: UploadFile, db: Session = Depends(get_db)) -> dict:
+    content = (file.file.read()).decode("utf-8-sig")
+    reader = DictReader(StringIO(content))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="CSV 文件为空或缺少表头")
+    required = {"data_no", "production_run_no", "measurement_point_code", "quality_type", "measured_at"}
+    missing = required - set(reader.fieldnames)
+    if missing:
+        raise HTTPException(status_code=422, detail=f"缺少必填列：{', '.join(sorted(missing))}")
+
+    result = {"total_rows": 0, "created": 0, "updated": 0, "skipped": 0, "errors": []}
+    run_by_no = {
+        run.run_no: run
+        for run in db.scalars(select(ProductionRun)).all()
+    }
+    point_by_code = {
+        point.code: point
+        for point in db.scalars(select(MeasurementPoint)).all()
+    }
+
+    for row_num, row in enumerate(reader, start=2):
+        result["total_rows"] += 1
+        try:
+            data_no = (row.get("data_no") or "").strip()
+            run_no = (row.get("production_run_no") or "").strip()
+            point_code = (row.get("measurement_point_code") or "").strip()
+            quality_type = (row.get("quality_type") or "").strip().upper()
+            measured_at_str = (row.get("measured_at") or "").strip()
+            measured_by = (row.get("measured_by") or "").strip() or None
+            data_type = (row.get("data_type") or "TEST").strip()
+            metric_codes_str = (row.get("metric_codes") or "").strip()
+            metric_values_str = (row.get("metric_values") or "").strip()
+            metric_units_str = (row.get("metric_units") or "").strip()
+
+            if not all([data_no, run_no, point_code, quality_type, measured_at_str]):
+                result["errors"].append(f"第{row_num}行：必填字段缺失")
+                result["skipped"] += 1
+                continue
+
+            if quality_type not in APPROVED_QUALITY_TYPES:
+                result["errors"].append(f"第{row_num}行：质量类型 {quality_type} 不在批准范围")
+                result["skipped"] += 1
+                continue
+
+            run = run_by_no.get(run_no)
+            if not run:
+                result["errors"].append(f"第{row_num}行：生产事件 {run_no} 不存在")
+                result["skipped"] += 1
+                continue
+
+            point = point_by_code.get(point_code)
+            if not point:
+                result["errors"].append(f"第{row_num}行：测量点 {point_code} 不存在")
+                result["skipped"] += 1
+                continue
+
+            try:
+                measured_at = datetime.fromisoformat(measured_at_str)
+            except ValueError:
+                result["errors"].append(f"第{row_num}行：测量时间格式无效，需为 ISO 8601 格式")
+                result["skipped"] += 1
+                continue
+
+            existing = db.scalar(select(QualityMeasurement).where(QualityMeasurement.data_no == data_no))
+            if existing:
+                existing.quality_type = quality_type
+                existing.measured_at = measured_at
+                existing.measured_by = measured_by or existing.measured_by
+                existing.data_type = data_type
+                db.flush()
+                result["updated"] += 1
+                measurement = existing
+            else:
+                measurement = QualityMeasurement(
+                    data_no=data_no,
+                    production_run_id=run.id,
+                    measurement_point_id=point.id,
+                    quality_type=quality_type,
+                    data_type=data_type,
+                    measured_at=measured_at,
+                    measured_by=measured_by,
+                )
+                db.add(measurement)
+                db.flush()
+                result["created"] += 1
+
+            metric_codes = [c.strip() for c in metric_codes_str.split(",") if c.strip()]
+            metric_values = metric_values_str.split(",") if metric_values_str else []
+            metric_units = [u.strip() for u in metric_units_str.split(",")] if metric_units_str else []
+
+            if metric_codes:
+                for i, code in enumerate(metric_codes):
+                    if i >= len(metric_values):
+                        break
+                    try:
+                        value = float(metric_values[i].strip())
+                    except (ValueError, IndexError):
+                        result["errors"].append(f"第{row_num}行：指标 {code} 的值无效")
+                        continue
+                    unit = metric_units[i].strip() if i < len(metric_units) else None
+                    existing_metric = db.scalar(
+                        select(QualityMetricValue).where(
+                            QualityMetricValue.measurement_id == measurement.id,
+                            QualityMetricValue.metric_code == code,
+                        )
+                    )
+                    if existing_metric:
+                        existing_metric.raw_value = value
+                        if unit:
+                            existing_metric.unit = unit
+                    else:
+                        db.add(
+                            QualityMetricValue(
+                                measurement_id=measurement.id,
+                                metric_code=code,
+                                metric_name=code,
+                                raw_value=value,
+                                unit=unit or None,
+                            )
+                        )
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            result["errors"].append(f"第{row_num}行：处理异常 - {exc}")
+            result["skipped"] += 1
+
+    return result

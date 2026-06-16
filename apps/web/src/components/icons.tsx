@@ -8,6 +8,7 @@ import {
   Crosshair,
   Database,
   Factory,
+  FileSpreadsheet,
   FlaskConical,
   GitCompareArrows,
   LayoutDashboard,
@@ -24,6 +25,7 @@ export const navigationIcons: Record<string, LucideIcon> = {
   trial: Crosshair,
   master: Database,
   audit: ScrollText,
+  import: FileSpreadsheet,
   integration: PlugZap,
   production: Activity,
 };

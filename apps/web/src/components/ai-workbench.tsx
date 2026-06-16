@@ -272,7 +272,7 @@ type GovernanceCheck = {
     outlier_features: { feature: string; value: number; standardized_shift: number }[];
   };
 };
-type Tab = "models" | "governance" | "predictions" | "recommendations";
+type Tab = "models" | "governance" | "predictions" | "recommendations" | "comparison";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { cache: "no-store", ...init });
@@ -929,7 +929,7 @@ export function AiWorkbench() {
 
       <section className="panel ai-workspace">
         <div className="master-tabs">
-          {([["models", "模型训练"], ["governance", "模型治理"], ["predictions", "预测与诊断"], ["recommendations", "推荐与闭环"]] as [Tab, string][]).map(([key, label]) => (
+          {([["models", "模型训练"], ["governance", "模型治理"], ["comparison", "模型对比"], ["predictions", "预测与诊断"], ["recommendations", "推荐与闭环"]] as [Tab, string][]).map(([key, label]) => (
             <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
           ))}
           <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索当前工作区" /></label>
@@ -1116,6 +1116,68 @@ export function AiWorkbench() {
                 {selectedRecommendation.status === "EXECUTED" ? <div className="ai-verification"><label className="form-field"><span>选择执行后的同生产事件、同点位复测记录</span><select value={verificationMeasurementId} onChange={(event) => setVerificationMeasurementId(event.target.value)}><option value="">请选择复测数据</option>{verificationOptions.map((measurement) => <option key={measurement.id} value={measurement.id}>{measurement.data_no} · {new Date(measurement.measured_at).toLocaleString("zh-CN")}</option>)}</select></label>{!verificationOptions.length ? <p className="ai-hint">请先在质量数据中心录入执行后的复测数据，或通过 QMS 集成事件写入。</p> : null}<button className="button button-primary" disabled={!verificationOptions.length} onClick={() => void verifyRecommendation(selectedRecommendation)}><ShieldCheck /> 完成复测评价</button></div> : null}
                 {selectedRecommendation.evaluation ? <div className={`ai-evaluation ${selectedRecommendation.evaluation.is_effective ? "effective" : "ineffective"}`}><strong>{selectedRecommendation.evaluation.is_effective ? "闭环改善有效" : "闭环改善未达预期"}</strong><span>基准 {formatNumber(selectedRecommendation.evaluation.baseline_value)} → 复测 {formatNumber(selectedRecommendation.evaluation.verified_value)}，实际改善 {formatNumber(selectedRecommendation.evaluation.actual_improvement)}</span><small>{selectedRecommendation.evaluation.verified_by} · {selectedRecommendation.evaluation.conclusion}</small></div> : null}
               </div> : <div className="master-empty"><Sparkles /> 暂无推荐记录</div>}
+            </div>
+          </div>
+        ) : null}
+        {tab === "comparison" ? (
+          <div className="model-comparison">
+            <div className="program-subheading">
+              <div><span className="eyebrow">MODEL COMPARISON</span><h3>模型版本对比</h3></div>
+              <span>{models.length} 个模型版本</span>
+            </div>
+            <div className="comparison-grid">
+              {models.length === 0 ? (
+                <div className="master-empty"><BrainCircuit /> 暂无模型版本可供对比</div>
+              ) : (
+                <div className="model-comparison-table-wrap">
+                  <table className="master-table comparison-table">
+                    <thead>
+                      <tr>
+                        <th>模型</th>
+                        <th>目标</th>
+                        <th>训练 R²</th>
+                        <th>验证 R²</th>
+                        <th>训练 RMSE</th>
+                        <th>验证 RMSE</th>
+                        <th>样本数</th>
+                        <th>特征版本</th>
+                        <th>状态</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...models]
+                        .sort((a, b) => (b.evaluation_metrics.validation_r2 ?? 0) - (a.evaluation_metrics.validation_r2 ?? 0))
+                        .map((model) => {
+                          const trainingR2 = model.evaluation_metrics.training_r2;
+                          const validationR2 = model.evaluation_metrics.validation_r2;
+                          const r2Gap = trainingR2 != null && validationR2 != null ? trainingR2 - validationR2 : null;
+                          const isActive = model.status === "ACTIVE";
+                          return (
+                            <tr key={model.id} className={isActive ? "comparison-row-active" : ""}>
+                              <td className="mono">{model.model_code}:{model.version}</td>
+                              <td>{model.target_metric}</td>
+                              <td className={trainingR2 != null && trainingR2 >= 0.7 ? "cell-good" : trainingR2 != null ? "cell-warn" : ""}>{formatNumber(trainingR2)}</td>
+                              <td className={validationR2 != null && validationR2 >= 0.6 ? "cell-good" : validationR2 != null ? "cell-warn" : ""}>{formatNumber(validationR2)}</td>
+                              <td>{formatNumber(model.evaluation_metrics.training_rmse)}</td>
+                              <td>{formatNumber(model.evaluation_metrics.validation_rmse)}</td>
+                              <td>{model.training_sample_count}</td>
+                              <td className="mono" style={{fontSize:".7rem"}}>{model.feature_set_version.slice(-20)}</td>
+                              <td><span className={`record-status ${isActive ? "status-on" : "status-off"}`}>{statusLabel(model.status)}</span></td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                  {models.some((model) => model.evaluation_metrics.validation_r2 != null) ? (
+                    <div className="comparison-summary">
+                      <article><span>已评估模型</span><strong>{models.filter((model) => model.evaluation_metrics.validation_r2 != null).length}</strong></article>
+                      <article><span>平均验证 R²</span><strong>{formatNumber(models.reduce((sum, model) => sum + (model.evaluation_metrics.validation_r2 ?? 0), 0) / Math.max(1, models.filter((model) => model.evaluation_metrics.validation_r2 != null).length))}</strong></article>
+                      <article><span>生效模型</span><strong>{models.filter((model) => model.status === "ACTIVE").length}</strong></article>
+                      <article><span>特征集版本</span><strong>{Array.from(new Set(models.map((model) => model.feature_set_version))).length} 个</strong></article>
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
         ) : null}
