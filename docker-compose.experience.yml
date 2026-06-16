@@ -26,7 +26,7 @@ services:
       dockerfile: Dockerfile.experience
     environment:
       NODE_ENV: ${NODE_ENV:?NODE_ENV is required}
-      HOSTNAME: ${FRONTEND_HOSTNAME:?FRONTEND_HOSTNAME is required}
+      LISTEN_HOST: ${FRONTEND_HOSTNAME:?FRONTEND_HOSTNAME is required}
       PORT: ${FRONTEND_PORT:?FRONTEND_PORT is required}
       API_URL: ${API_URL:?API_URL is required}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}

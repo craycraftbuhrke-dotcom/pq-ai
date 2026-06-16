@@ -21,7 +21,7 @@
 | 变量 | 必填 | 敏感 | 用途 |
 | --- | --- | --- | --- |
 | `NODE_ENV` | 是 | 否 | Node.js 运行模式，生产镜像应注入 `production`。 |
-| `HOSTNAME` | 是 | 否 | Next.js standalone server 监听地址。Compose 中由 `FRONTEND_HOSTNAME` 映射。 |
+| `LISTEN_HOST` | 否 | 否 | 前端容器监听地址，默认 `0.0.0.0`；启动时会映射为 Next.js standalone 读取的 `HOSTNAME`，避免容器平台自动 `HOSTNAME` 被解析成 Pod/容器名。 |
 | `PORT` | 是 | 否 | Next.js standalone server 监听端口。Compose 中由 `FRONTEND_PORT` 映射。 |
 | `API_URL` | 是 | 否 | 前端服务端访问 FastAPI 的内网地址，例如容器网络内的 API 地址。 |
 | `NEXT_PUBLIC_API_URL` | 是 | 否 | 浏览器可见的 API 地址；也会作为前端构建参数注入。不得包含密钥。 |
@@ -46,7 +46,7 @@
 | `MYSQL_ROOT_PASSWORD` | 是 | 是 | MySQL root 密码。 |
 | `MYSQL_PORT` | 是 | 否 | 本机映射 MySQL 端口。 |
 | `API_PUBLISH_PORT` | 是 | 否 | 本机映射 API 端口。 |
-| `FRONTEND_HOSTNAME` | 是 | 否 | Compose 注入到前端容器的 `HOSTNAME`。 |
+| `FRONTEND_HOSTNAME` | 是 | 否 | Compose 注入到前端容器的 `LISTEN_HOST`。 |
 | `FRONTEND_PORT` | 是 | 否 | Compose 注入到前端容器的 `PORT`。 |
 | `FRONTEND_PUBLISH_PORT` | 是 | 否 | 本机映射前端端口。 |
 | `API_IMAGE` | 仅 experience | 否 | `docker-compose.experience.yml` 使用的后端镜像名。 |
