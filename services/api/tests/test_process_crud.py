@@ -12,6 +12,8 @@ from app.api.routes.process import (
     create_brush_parameter,
     create_actual_parameter,
     create_material_batch,
+    create_parameter_constraint_source,
+    create_parameter_definition,
     create_production_run,
     create_production_stage_run,
     create_program_version,
@@ -29,16 +31,19 @@ from app.api.routes.process import (
     get_brush_parameter,
     get_actual_parameter,
     get_material_batch,
+    get_parameter_constraint_source,
     get_production_run,
     get_production_stage_run,
     get_program_version,
     get_spray_program,
     list_brush_contributions,
     list_actual_parameters,
+    list_parameter_constraint_sources,
     update_brush,
     update_brush_parameter,
     update_actual_parameter,
     update_material_batch,
+    update_parameter_constraint_source,
     update_production_run,
     update_production_stage_run,
     update_program_version,
@@ -58,6 +63,9 @@ from app.schemas.process import (
     BrushUpdate,
     MaterialBatchCreate,
     MaterialBatchUpdate,
+    ParameterConstraintSourceCreate,
+    ParameterConstraintSourceUpdate,
+    ParameterDefinitionCreate,
     ProductionRunCreate,
     ProductionRunUpdate,
     ProductionStageRunCreate,
@@ -192,6 +200,68 @@ def test_program_with_version_cannot_be_deleted() -> None:
     with pytest.raises(HTTPException) as error:
         delete_spray_program(program.id, db)
     assert error.value.status_code == 409
+    db.close()
+
+
+def test_parameter_constraint_source_crud_and_activation_gate() -> None:
+    db = build_session()
+    factory = create_factory(FactoryCreate(code="F03", name="三号工厂"), db)
+    definition = create_parameter_definition(
+        ParameterDefinitionCreate(
+            code="clearcoat_2_spray_flow",
+            name="清漆二站喷涂流量",
+            category="CLEARCOAT_2",
+            unit="ml/min",
+            hard_min=250,
+            hard_max=380,
+            is_recommendable=True,
+        ),
+        db,
+    )
+    with pytest.raises(HTTPException) as error:
+        create_parameter_constraint_source(
+            ParameterConstraintSourceCreate(
+                parameter_definition_id=definition.id,
+                factory_id=factory.id,
+                process_stage="CLEARCOAT_2",
+                constraint_code="F03-CC2-FLOW-STD",
+                version="1.0",
+                source_type="FACTORY_PROCESS_STANDARD",
+                lower_limit=280,
+                upper_limit=360,
+                unit="ml/min",
+                status="ACTIVE",
+            ),
+            db,
+        )
+    assert error.value.status_code == 422
+    source = create_parameter_constraint_source(
+        ParameterConstraintSourceCreate(
+            parameter_definition_id=definition.id,
+            factory_id=factory.id,
+            process_stage="CLEARCOAT_2",
+            constraint_code="F03-CC2-FLOW-STD",
+            version="1.0",
+            source_type="FACTORY_PROCESS_STANDARD",
+            source_uri="file://factory-standard/cc2-flow",
+            lower_limit=280,
+            upper_limit=360,
+            unit="ml/min",
+            status="ACTIVE",
+            approved_by="工艺负责人",
+        ),
+        db,
+    )
+    assert source.status == "ACTIVE"
+    assert source.approved_at is not None
+    assert get_parameter_constraint_source(source.id, db).constraint_code == "F03-CC2-FLOW-STD"
+    updated = update_parameter_constraint_source(
+        source.id,
+        ParameterConstraintSourceUpdate(upper_limit=365, remark="DOE 后放宽上限"),
+        db,
+    )
+    assert updated.upper_limit == 365
+    assert len(list_parameter_constraint_sources(db)) == 1
     db.close()
 
 

@@ -30,11 +30,13 @@ from app.api.routes.ai import (
     create_controlled_trial,
     execute_recommendation,
     list_controlled_trials,
+    list_rollback_executions,
     get_recommendation,
     list_diagnoses,
     list_evaluations,
     list_predictions,
     list_recommendations,
+    record_trial_rollback,
     verify_recommendation,
 )
 from app.db.base import Base
@@ -42,8 +44,10 @@ from app.domain.scope_policy import CURRENT_FEATURE_SET_VERSION
 from app.models import domain  # noqa: F401
 from app.models.domain import (
     Color,
+    ControlledTrial,
     Factory,
     MeasurementPoint,
+    ParameterConstraintSource,
     ParameterDefinition,
     Part,
     PointFeatureSnapshot,
@@ -51,6 +55,7 @@ from app.models.domain import (
     QualityMeasurement,
     QualityMetricValue,
     Recommendation,
+    RecommendationAction,
     VehicleModel,
 )
 from app.schemas.common import (
@@ -60,6 +65,7 @@ from app.schemas.common import (
     RecommendationExecution,
     RecommendationExecutionAction,
     RecommendationVerification,
+    RollbackExecutionCreate,
 )
 from app.schemas.modeling import (
     DatasetBuildRequest,
@@ -99,25 +105,59 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         )
         db.add(point)
         db.flush()
+        spray_flow_definition = ParameterDefinition(
+            code="spray_flow",
+            name="喷涂流量",
+            category="清漆二站",
+            unit="ml/min",
+            hard_min=0,
+            hard_max=20,
+            is_recommendable=True,
+        )
+        outer_air_definition = ParameterDefinition(
+            code="outer_air",
+            name="外成型空气流量",
+            category="清漆二站",
+            unit="Nl/min",
+            hard_min=0,
+            hard_max=10,
+            is_recommendable=True,
+        )
+        db.add_all([spray_flow_definition, outer_air_definition])
+        db.flush()
         db.add_all(
             [
-                ParameterDefinition(
-                    code="spray_flow",
-                    name="喷涂流量",
-                    category="清漆二站",
+                ParameterConstraintSource(
+                    parameter_definition_id=spray_flow_definition.id,
+                    factory_id=factory.id,
+                    process_stage="CLEARCOAT_2",
+                    constraint_code="F1-CC2-SPRAY-FLOW",
+                    version="1.0",
+                    source_type="FACTORY_PROCESS_STANDARD",
+                    source_uri="file://factory-standard/spray-flow",
+                    lower_limit=0,
+                    upper_limit=20,
                     unit="ml/min",
-                    hard_min=0,
-                    hard_max=20,
-                    is_recommendable=True,
+                    status="ACTIVE",
+                    effective_from=now - timedelta(days=1),
+                    approved_by="工艺负责人",
+                    approved_at=now - timedelta(days=1),
                 ),
-                ParameterDefinition(
-                    code="outer_air",
-                    name="外成型空气流量",
-                    category="清漆二站",
+                ParameterConstraintSource(
+                    parameter_definition_id=outer_air_definition.id,
+                    factory_id=factory.id,
+                    process_stage="CLEARCOAT_2",
+                    constraint_code="F1-CC2-OUTER-AIR",
+                    version="1.0",
+                    source_type="FACTORY_PROCESS_STANDARD",
+                    source_uri="file://factory-standard/outer-air",
+                    lower_limit=0,
+                    upper_limit=10,
                     unit="Nl/min",
-                    hard_min=0,
-                    hard_max=10,
-                    is_recommendable=True,
+                    status="ACTIVE",
+                    effective_from=now - timedelta(days=1),
+                    approved_by="工艺负责人",
+                    approved_at=now - timedelta(days=1),
                 ),
             ]
         )
@@ -467,6 +507,10 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             action["hard_min"] <= action["recommended_value"] <= action["hard_max"]
             for action in recommendation["actions"]
         )
+        assert all(action["constraint_source_version"] == "1.0" for action in recommendation["actions"])
+        assert {action["constraint_source_type"] for action in recommendation["actions"]} == {
+            "FACTORY_PROCESS_STANDARD"
+        }
 
         with pytest.raises(HTTPException, match="受控试验计划"):
             approve_recommendation(
@@ -653,3 +697,113 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
                 ),
                 db,
             )
+
+
+def test_ineffective_controlled_trial_records_rollback_snapshot() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    now = datetime.now(UTC)
+    with Session(engine, expire_on_commit=False) as db:
+        factory = Factory(code="F2", name="工厂二")
+        model = VehicleModel(code="M2", name="车型二")
+        color = Color(code="C2", name="颜色二", color_type="BASECOAT")
+        part = Part(code="ROOF2", name="车顶二")
+        db.add_all([factory, model, color, part])
+        db.flush()
+        point = MeasurementPoint(
+            code="P2",
+            name="点位二",
+            vehicle_model_id=model.id,
+            part_id=part.id,
+            quality_types=["ORANGE_PEEL"],
+        )
+        run = ProductionRun(
+            run_no="RUN-RBK-1",
+            factory_id=factory.id,
+            vehicle_model_id=model.id,
+            color_id=color.id,
+            started_at=now,
+        )
+        db.add_all([point, run])
+        db.flush()
+        recommendation = Recommendation(
+            recommendation_no="REC-RBK-1",
+            production_run_id=run.id,
+            measurement_point_id=point.id,
+            target_quality_type="ORANGE_PEEL",
+            target_metric="doi",
+            diagnosis_summary="回滚测试推荐",
+            predicted_improvement=1.0,
+            confidence=0.8,
+            status="VERIFIED",
+            model_version="TEST:1.0",
+            constraints_checked=True,
+        )
+        db.add(recommendation)
+        db.flush()
+        db.add(
+            RecommendationAction(
+                recommendation_id=recommendation.id,
+                process_stage="CLEARCOAT_2",
+                parameter_code="spray_flow",
+                parameter_name="喷涂流量",
+                current_value=10,
+                recommended_value=12,
+                executed_value=12,
+                unit="ml/min",
+                hard_min=0,
+                hard_max=20,
+                constraint_source_code="F2-CC2-SPRAY-FLOW",
+                constraint_source_version="1.0",
+                constraint_source_type="FACTORY_PROCESS_STANDARD",
+                constraint_source_uri="file://factory-standard/spray-flow",
+            )
+        )
+        trial = ControlledTrial(
+            recommendation_id=recommendation.id,
+            trial_no="TRIAL-RBK-1",
+            production_run_id=run.id,
+            measurement_point_id=point.id,
+            target_metric="doi",
+            hypothesis="测试回滚前置状态",
+            evidence_type="ASSOCIATION",
+            expected_outcome="改善 DOI",
+            risk_assessment="回滚测试风险",
+            rollback_plan="恢复原程序版本",
+            sustained_observation_plan="连续跟踪 3 台",
+            constraint_evidence={},
+            status="RUNNING",
+            requested_by="陈工",
+            requested_at=now,
+        )
+        db.add(trial)
+        db.commit()
+        with pytest.raises(HTTPException) as error:
+            record_trial_rollback(
+                trial.id,
+                RollbackExecutionCreate(rollback_reason="尚未判定失败", executed_by="陈工"),
+                db,
+            )
+        assert error.value.status_code == 409
+        trial.status = "INEFFECTIVE"
+        db.commit()
+        rollback = record_trial_rollback(
+            trial.id,
+            RollbackExecutionCreate(
+                rollback_reason="复测未改善，按试验计划回滚",
+                executed_by="机器人程序员",
+                execution_note="恢复推荐前参数",
+            ),
+            db,
+        )
+        assert rollback["status"] == "EXECUTED"
+        assert rollback["action_snapshot"]["actions"][0]["constraint_source_code"] == (
+            "F2-CC2-SPRAY-FLOW"
+        )
+        assert list_rollback_executions(db)[0]["id"] == rollback["id"]
+        db.expire_all()
+        assert db.get(ControlledTrial, trial.id).status == "ROLLED_BACK"

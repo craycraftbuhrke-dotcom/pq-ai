@@ -20,6 +20,46 @@ class ParameterDefinitionRead(ParameterDefinitionCreate, ResourceRead):
     pass
 
 
+class ParameterConstraintSourceCreate(BaseModel):
+    parameter_definition_id: str
+    constraint_code: str = Field(min_length=1, max_length=96)
+    version: str = Field(min_length=1, max_length=32)
+    source_type: str = Field(min_length=1, max_length=32)
+    lower_limit: float
+    upper_limit: float
+    unit: str = Field(min_length=1, max_length=24)
+    factory_id: str | None = None
+    process_stage: str | None = Field(default=None, max_length=32)
+    source_uri: str | None = Field(default=None, max_length=500)
+    status: str = Field(default="DRAFT", max_length=24)
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
+    approved_by: str | None = Field(default=None, max_length=80)
+    remark: str | None = None
+
+
+class ParameterConstraintSourceUpdate(BaseModel):
+    parameter_definition_id: str | None = None
+    constraint_code: str | None = Field(default=None, min_length=1, max_length=96)
+    version: str | None = Field(default=None, min_length=1, max_length=32)
+    source_type: str | None = Field(default=None, min_length=1, max_length=32)
+    lower_limit: float | None = None
+    upper_limit: float | None = None
+    unit: str | None = Field(default=None, min_length=1, max_length=24)
+    factory_id: str | None = None
+    process_stage: str | None = Field(default=None, max_length=32)
+    source_uri: str | None = Field(default=None, max_length=500)
+    status: str | None = Field(default=None, max_length=24)
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
+    approved_by: str | None = Field(default=None, max_length=80)
+    remark: str | None = None
+
+
+class ParameterConstraintSourceRead(ParameterConstraintSourceCreate, ResourceRead):
+    approved_at: datetime | None = None
+
+
 class SprayProgramCreate(BaseModel):
     program_code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=160)

@@ -27,6 +27,7 @@ from app.models.domain import (
     ModelOodPolicy,
     ModelValidationFold,
     ModelVersion,
+    ParameterConstraintSource,
     ParameterDefinition,
     PointFeatureSnapshot,
     PredictionResult,
@@ -61,6 +62,48 @@ def _target_family(target_metric: str) -> str:
         return target_family_for_metric(target_metric)
     except ScopeViolation as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _utc_datetime(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _resolve_constraint_source(
+    db: Session,
+    definition: ParameterDefinition,
+    factory_id: str,
+    process_stage: str,
+    as_of: datetime,
+) -> ParameterConstraintSource | None:
+    as_of_utc = _utc_datetime(as_of)
+    sources = list(
+        db.scalars(
+            select(ParameterConstraintSource).where(
+                ParameterConstraintSource.parameter_definition_id == definition.id,
+                ParameterConstraintSource.status == "ACTIVE",
+            )
+        )
+    )
+    eligible = []
+    for source in sources:
+        if source.factory_id not in (None, factory_id):
+            continue
+        if source.process_stage not in (None, process_stage):
+            continue
+        if source.effective_from and _utc_datetime(source.effective_from) > as_of_utc:
+            continue
+        if source.effective_to and _utc_datetime(source.effective_to) <= as_of_utc:
+            continue
+        eligible.append(source)
+    eligible.sort(
+        key=lambda source: (
+            source.factory_id == factory_id,
+            source.process_stage == process_stage,
+            _utc_datetime(source.effective_from).timestamp() if source.effective_from else 0,
+        ),
+        reverse=True,
+    )
+    return eligible[0] if eligible else None
 
 
 def _target_value(
@@ -1719,6 +1762,9 @@ def recommend_with_model(
     _ensure_model_scope(model)
     if target_min is None and target_max is None:
         raise HTTPException(status_code=422, detail="必须提供目标下限或目标上限")
+    production_run = db.get(ProductionRun, production_run_id)
+    if not production_run:
+        raise HTTPException(status_code=404, detail="生产事件不存在")
     prediction = predict_with_model(
         db,
         model,
@@ -1746,34 +1792,46 @@ def recommend_with_model(
     )
     payload = model.model_payload
     candidates = []
+    missing_constraint_sources: set[str] = set()
     for feature_name, scale, coefficient in zip(
         payload["feature_names"], payload["scales"], payload["coefficients"], strict=True
     ):
         parameter_code = feature_name.split(".", 1)[-1]
+        process_stage = feature_name.split(".", 1)[0].upper()
         definition = db.scalar(
             select(ParameterDefinition).where(ParameterDefinition.code == parameter_code)
         )
         if (
             not definition
             or not definition.is_recommendable
-            or definition.hard_min is None
-            or definition.hard_max is None
             or feature_name not in snapshot.feature_values
         ):
             continue
+        constraint_source = _resolve_constraint_source(
+            db,
+            definition,
+            production_run.factory_id,
+            process_stage,
+            production_run.started_at or datetime.now(UTC),
+        )
+        if not constraint_source:
+            missing_constraint_sources.add(parameter_code)
+            continue
+        hard_min = constraint_source.lower_limit
+        hard_max = constraint_source.upper_limit
         current_value = float(snapshot.feature_values[feature_name])
         slope = coefficient / scale
         if slope == 0:
             continue
         change_direction = desired_direction if slope > 0 else -desired_direction
         available = (
-            definition.hard_max - current_value
+            hard_max - current_value
             if change_direction > 0
-            else current_value - definition.hard_min
+            else current_value - hard_min
         )
         step = min(
             max(0.0, available),
-            (definition.hard_max - definition.hard_min) * max_step_ratio,
+            (hard_max - hard_min) * max_step_ratio,
         )
         if step <= 0:
             continue
@@ -1786,12 +1844,17 @@ def recommend_with_model(
                 "feature_name": feature_name,
                 "parameter_code": parameter_code,
                 "parameter_name": definition.name,
-                "process_stage": feature_name.split(".", 1)[0].upper(),
+                "process_stage": process_stage,
                 "current_value": current_value,
                 "recommended_value": current_value + delta,
                 "unit": definition.unit,
-                "hard_min": definition.hard_min,
-                "hard_max": definition.hard_max,
+                "hard_min": hard_min,
+                "hard_max": hard_max,
+                "constraint_source_id": constraint_source.id,
+                "constraint_source_code": constraint_source.constraint_code,
+                "constraint_source_version": constraint_source.version,
+                "constraint_source_type": constraint_source.source_type,
+                "constraint_source_uri": constraint_source.source_uri,
                 "expected_impact": expected_impact,
             }
         )
@@ -1804,9 +1867,12 @@ def recommend_with_model(
         if len(selected) >= max_actions or abs(accumulated_impact) >= target_gap:
             break
     if not selected:
+        if missing_constraint_sources:
+            missing = ", ".join(sorted(missing_constraint_sources))
+            raise HTTPException(status_code=422, detail=f"缺少已批准约束来源: {missing}")
         raise HTTPException(
             status_code=422,
-            detail="没有满足硬边界且已启用推荐的可调整参数",
+            detail="没有满足已批准约束来源且已启用推荐的可调整参数",
         )
 
     metric_definition = db.scalar(
@@ -1840,6 +1906,11 @@ def recommend_with_model(
             unit=candidate["unit"],
             hard_min=candidate["hard_min"],
             hard_max=candidate["hard_max"],
+            constraint_source_id=candidate["constraint_source_id"],
+            constraint_source_code=candidate["constraint_source_code"],
+            constraint_source_version=candidate["constraint_source_version"],
+            constraint_source_type=candidate["constraint_source_type"],
+            constraint_source_uri=candidate["constraint_source_uri"],
         )
         db.add(action)
         actions.append(action)
@@ -1866,6 +1937,10 @@ def recommend_with_model(
                 "unit": action.unit,
                 "hard_min": action.hard_min,
                 "hard_max": action.hard_max,
+                "constraint_source_code": action.constraint_source_code,
+                "constraint_source_version": action.constraint_source_version,
+                "constraint_source_type": action.constraint_source_type,
+                "constraint_source_uri": action.constraint_source_uri,
             }
             for action in actions
         ],

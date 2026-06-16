@@ -21,7 +21,7 @@ Explicitly excluded: pretreatment, e-coat, sealing, booth temperature/humidity, 
 3. The database stores facts and lineage; generic JSON is an ingestion bridge, not the final governed model.
 4. AI starts with leakage-safe baselines and earns complexity through measured improvement.
 5. Diagnosis distinguishes association from verified causality.
-6. Recommendations are constrained, explainable, tied to an approved controlled-trial plan, reversible, executed as a trial, and verified with quality data.
+6. Recommendations are constrained by approved source versions, explainable, tied to an approved controlled-trial plan, reversible, executed as a trial, verified with quality data, and recorded with rollback evidence when ineffective.
 7. No model is production-ready until validated with real independent factory runs and accepted by process and quality engineers.
 8. A configured robot program is not proof of execution. Approved AI input requires the production-stage device configuration, executed trajectory checksum, and target-family point contribution lineage.
 9. Legacy material viscosity/solids and free-form COA fields are compatibility facts only. A required material result that is absent, unverified, failed, or measured after production start blocks approved feature generation.

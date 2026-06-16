@@ -12,10 +12,12 @@ from app.models.domain import (
     DiagnosisResult,
     ModelVersion,
     PredictionResult,
+    ProgramRollbackExecution,
     QualityMeasurement,
     QualityMetricValue,
     Recommendation,
     RecommendationAction,
+    SprayProgramVersion,
 )
 from app.schemas.common import (
     ControlledTrialApproval,
@@ -26,6 +28,7 @@ from app.schemas.common import (
     RecommendationExecution,
     RecommendationRequest,
     RecommendationVerification,
+    RollbackExecutionCreate,
 )
 from app.services.demo import demo_recommendation, prediction_result
 
@@ -88,6 +91,10 @@ def _serialize_recommendation(recommendation: Recommendation, db: Session) -> di
                 "unit": action.unit,
                 "hard_min": action.hard_min,
                 "hard_max": action.hard_max,
+                "constraint_source_code": action.constraint_source_code,
+                "constraint_source_version": action.constraint_source_version,
+                "constraint_source_type": action.constraint_source_type,
+                "constraint_source_uri": action.constraint_source_uri,
             }
             for action in actions
         ],
@@ -134,6 +141,27 @@ def _serialize_controlled_trial(trial: ControlledTrial) -> dict:
         "completion_summary": trial.completion_summary,
         "created_at": trial.created_at,
         "updated_at": trial.updated_at,
+    }
+
+
+def _serialize_rollback_execution(rollback: ProgramRollbackExecution) -> dict:
+    return {
+        "id": rollback.id,
+        "rollback_no": rollback.rollback_no,
+        "recommendation_id": rollback.recommendation_id,
+        "controlled_trial_id": rollback.controlled_trial_id,
+        "rollback_to_program_version_id": rollback.rollback_to_program_version_id,
+        "rollback_reason": rollback.rollback_reason,
+        "execution_note": rollback.execution_note,
+        "executed_by": rollback.executed_by,
+        "executed_at": rollback.executed_at,
+        "status": rollback.status,
+        "action_snapshot": rollback.action_snapshot,
+        "verified_by": rollback.verified_by,
+        "verified_at": rollback.verified_at,
+        "verification_comment": rollback.verification_comment,
+        "created_at": rollback.created_at,
+        "updated_at": rollback.updated_at,
     }
 
 
@@ -315,6 +343,10 @@ def create_controlled_trial(
                     "hard_min": action.hard_min,
                     "hard_max": action.hard_max,
                     "unit": action.unit,
+                    "constraint_source_code": action.constraint_source_code,
+                    "constraint_source_version": action.constraint_source_version,
+                    "constraint_source_type": action.constraint_source_type,
+                    "constraint_source_uri": action.constraint_source_uri,
                 }
                 for action in actions
             ],
@@ -347,6 +379,90 @@ def approve_controlled_trial(
     db.commit()
     db.refresh(trial)
     return _serialize_controlled_trial(trial)
+
+
+@router.get("/rollback-executions")
+def list_rollback_executions(db: Session = Depends(get_db)) -> list[dict]:
+    rollbacks = list(
+        db.scalars(
+            select(ProgramRollbackExecution)
+            .order_by(ProgramRollbackExecution.executed_at.desc())
+            .limit(200)
+        )
+    )
+    return [_serialize_rollback_execution(rollback) for rollback in rollbacks]
+
+
+@router.post("/controlled-trials/{trial_id}/rollback")
+def record_trial_rollback(
+    trial_id: str,
+    payload: RollbackExecutionCreate,
+    db: Session = Depends(get_db),
+) -> dict:
+    trial = db.get(ControlledTrial, trial_id)
+    if not trial:
+        raise HTTPException(status_code=404, detail="受控试验不存在")
+    if trial.status != "INEFFECTIVE":
+        raise HTTPException(status_code=409, detail="仅未达预期的受控试验可以记录回滚")
+    if db.scalar(
+        select(ProgramRollbackExecution).where(
+            ProgramRollbackExecution.controlled_trial_id == trial.id
+        )
+    ):
+        raise HTTPException(status_code=409, detail="该受控试验已记录回滚执行")
+    if payload.rollback_to_program_version_id and not db.get(
+        SprayProgramVersion, payload.rollback_to_program_version_id
+    ):
+        raise HTTPException(status_code=404, detail="回滚目标程序版本不存在")
+    actions = list(
+        db.scalars(
+            select(RecommendationAction).where(
+                RecommendationAction.recommendation_id == trial.recommendation_id
+            )
+        )
+    )
+    now = datetime.now(UTC)
+    rollback = ProgramRollbackExecution(
+        rollback_no=f"RBK-{now.strftime('%Y%m%d%H%M%S%f')}",
+        recommendation_id=trial.recommendation_id,
+        controlled_trial_id=trial.id,
+        rollback_to_program_version_id=payload.rollback_to_program_version_id,
+        rollback_reason=payload.rollback_reason,
+        execution_note=payload.execution_note,
+        executed_by=payload.executed_by,
+        executed_at=now,
+        status="EXECUTED",
+        action_snapshot={
+            "recommendation_id": trial.recommendation_id,
+            "trial_no": trial.trial_no,
+            "actions": [
+                {
+                    "action_id": action.id,
+                    "process_stage": action.process_stage,
+                    "parameter_code": action.parameter_code,
+                    "parameter_name": action.parameter_name,
+                    "current_value": action.current_value,
+                    "recommended_value": action.recommended_value,
+                    "executed_value": action.executed_value,
+                    "unit": action.unit,
+                    "hard_min": action.hard_min,
+                    "hard_max": action.hard_max,
+                    "constraint_source_code": action.constraint_source_code,
+                    "constraint_source_version": action.constraint_source_version,
+                    "constraint_source_type": action.constraint_source_type,
+                    "constraint_source_uri": action.constraint_source_uri,
+                }
+                for action in actions
+            ],
+        },
+    )
+    trial.status = "ROLLED_BACK"
+    trial.completed_at = now
+    trial.completion_summary = "受控试验未达预期，已记录程序/参数回滚执行。"
+    db.add(rollback)
+    db.commit()
+    db.refresh(rollback)
+    return _serialize_rollback_execution(rollback)
 
 
 @router.get("/evaluations")
@@ -422,6 +538,9 @@ def approve_recommendation(
                 "current_value": action.current_value,
                 "recommended_value": action.recommended_value,
                 "unit": action.unit,
+                "constraint_source_code": action.constraint_source_code,
+                "constraint_source_version": action.constraint_source_version,
+                "constraint_source_type": action.constraint_source_type,
             }
             for action in actions
         ],

@@ -45,5 +45,6 @@ Record per-scope metrics, uncertainty, out-of-distribution status, drift, missin
 - Feature importance/SHAP explains a model prediction, not causality.
 - Promote causal claims only after DOE, controlled change, or equivalent evidence.
 - Recommendations are constrained optimization proposals, not direct robot commands.
-- Validate device limits, TDS/COA rules, approved program boundaries, coupled-parameter rules, maximum step size, and target tradeoffs.
+- Validate device limits, TDS/COA rules, approved program boundaries, coupled-parameter rules, maximum step size, and target tradeoffs using persisted source/version/effective-period evidence.
 - Require an approved controlled-trial plan before recommendation approval. The plan must record hypothesis, evidence type, expected outcome, risk, rollback, sustained observation, actual execution values, post-change quality measurement, and outcome status.
+- If a controlled trial is ineffective, record rollback execution with the target program/version when known and preserve the recommendation-action snapshot used for rollback review.

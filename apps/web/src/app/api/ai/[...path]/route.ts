@@ -8,6 +8,7 @@ const allowedRoots = new Set([
   "diagnoses",
   "recommendations",
   "controlled-trials",
+  "rollback-executions",
   "evaluations",
 ]);
 

@@ -183,6 +183,7 @@ def dashboard_snapshot(db: Session | None = None) -> dict:
                             "current": action.current_value,
                             "recommended": action.recommended_value,
                             "unit": action.unit,
+                            "constraint_source": action.constraint_source_code,
                         }
                         for action in actions
                     ],
@@ -220,6 +221,7 @@ def demo_recommendation() -> dict:
                 "current": 410,
                 "recommended": 385,
                 "unit": "Nl/min",
+                "constraint_source": "DEMO-CLEARCOAT-OUTER-AIR",
             },
             {
                 "stage": "清漆二站",
@@ -228,6 +230,7 @@ def demo_recommendation() -> dict:
                 "current": 315,
                 "recommended": 326,
                 "unit": "ml/min",
+                "constraint_source": "DEMO-CLEARCOAT-SPRAY-FLOW",
             },
         ],
     }

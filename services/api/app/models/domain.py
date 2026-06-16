@@ -309,6 +309,39 @@ class ParameterDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_recommendable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
+class ParameterConstraintSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "parameter_constraint_source"
+    __table_args__ = (
+        UniqueConstraint("constraint_code", name="uq_parameter_constraint_source_code"),
+        Index(
+            "ix_parameter_constraint_lookup",
+            "parameter_definition_id",
+            "factory_id",
+            "process_stage",
+            "status",
+        ),
+    )
+
+    parameter_definition_id: Mapped[str] = mapped_column(
+        ForeignKey("parameter_definition.id"), nullable=False
+    )
+    factory_id: Mapped[str | None] = mapped_column(ForeignKey("factory.id"))
+    process_stage: Mapped[str | None] = mapped_column(String(32))
+    constraint_code: Mapped[str] = mapped_column(String(96), nullable=False)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_uri: Mapped[str | None] = mapped_column(String(500))
+    lower_limit: Mapped[float] = mapped_column(Float, nullable=False)
+    upper_limit: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str] = mapped_column(String(24), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
 class Brush(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "brush"
     __table_args__ = (
@@ -1313,6 +1346,13 @@ class RecommendationAction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     unit: Mapped[str] = mapped_column(String(24), nullable=False)
     hard_min: Mapped[float | None] = mapped_column(Float)
     hard_max: Mapped[float | None] = mapped_column(Float)
+    constraint_source_id: Mapped[str | None] = mapped_column(
+        ForeignKey("parameter_constraint_source.id")
+    )
+    constraint_source_code: Mapped[str | None] = mapped_column(String(96))
+    constraint_source_version: Mapped[str | None] = mapped_column(String(32))
+    constraint_source_type: Mapped[str | None] = mapped_column(String(32))
+    constraint_source_uri: Mapped[str | None] = mapped_column(String(500))
 
 
 class ControlledTrial(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -1346,6 +1386,33 @@ class ControlledTrial(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completion_summary: Mapped[str | None] = mapped_column(Text)
+
+
+class ProgramRollbackExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "program_rollback_execution"
+    __table_args__ = (
+        UniqueConstraint("controlled_trial_id", name="uq_rollback_controlled_trial"),
+        UniqueConstraint("rollback_no", name="uq_program_rollback_no"),
+        Index("ix_program_rollback_status", "status", "executed_at"),
+    )
+
+    rollback_no: Mapped[str] = mapped_column(String(64), nullable=False)
+    recommendation_id: Mapped[str] = mapped_column(ForeignKey("recommendation.id"), nullable=False)
+    controlled_trial_id: Mapped[str] = mapped_column(
+        ForeignKey("controlled_trial.id"), nullable=False
+    )
+    rollback_to_program_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("spray_program_version.id")
+    )
+    rollback_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    execution_note: Mapped[str | None] = mapped_column(Text)
+    executed_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="EXECUTED", nullable=False)
+    action_snapshot: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    verified_by: Mapped[str | None] = mapped_column(String(80))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    verification_comment: Mapped[str | None] = mapped_column(Text)
 
 
 class ClosedLoopEvaluation(UUIDPrimaryKeyMixin, TimestampMixin, Base):

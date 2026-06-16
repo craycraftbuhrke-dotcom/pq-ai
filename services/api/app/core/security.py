@@ -127,6 +127,8 @@ def required_permission(method: str, path: str) -> str | None:
             return "audit.read"
         if path.startswith("/api/v1/security"):
             return "security.manage"
+        if path.startswith("/api/v1/ai/rollback-executions"):
+            return "ai.execute"
         return None
     if path.startswith("/api/v1/security"):
         return "security.manage"
@@ -156,6 +158,10 @@ def required_permission(method: str, path: str) -> str | None:
         return "ai.approve"
     if path.endswith("/approval") and "/api/v1/ai/controlled-trials/" in path:
         return "ai.approve"
+    if path.endswith("/rollback") and "/api/v1/ai/controlled-trials/" in path:
+        return "ai.execute"
+    if path.startswith("/api/v1/ai/rollback-executions"):
+        return "ai.execute"
     if path.startswith("/api/v1/ai/controlled-trials"):
         return "ai.approve"
     if path.endswith("/approval") and "/api/v1/ai/recommendations/" in path:

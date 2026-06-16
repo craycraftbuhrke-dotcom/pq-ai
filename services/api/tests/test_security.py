@@ -91,6 +91,11 @@ def test_endpoint_permissions_cover_security_and_closed_loop_actions() -> None:
         == "ai.execute"
     )
     assert (
+        required_permission("POST", "/api/v1/ai/controlled-trials/trial-1/rollback")
+        == "ai.execute"
+    )
+    assert required_permission("GET", "/api/v1/ai/rollback-executions") == "ai.execute"
+    assert (
         required_permission("POST", "/api/v1/ai/recommendations/rec-1/verification")
         == "ai.verify"
     )

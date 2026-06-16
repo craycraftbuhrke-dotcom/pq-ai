@@ -46,6 +46,7 @@ from app.models.domain import (
     ModelApplicabilityScope,
     ModelVersion,
     ModelAcceptanceDecision,
+    ParameterConstraintSource,
     ParameterDefinition,
     Part,
     PointContributionEntry,
@@ -1053,18 +1054,68 @@ def _upgrade_existing_demo_scope_data(db: Session) -> ModelVersion | None:
     return _ensure_demo_governed_model(db)
 
 
+DEMO_RECOMMENDATION_BOUNDARIES = {
+    "clearcoat_2_spray_flow": (280.0, 360.0, "ml/min"),
+    "clearcoat_2_outer_air": (360.0, 440.0, "Nl/min"),
+    "clearcoat_2_bell_speed": (40000.0, 52000.0, "rpm"),
+}
+
+
+def _seed_demo_constraint_sources(db: Session, factory: Factory, now: datetime) -> None:
+    for code, (lower_limit, upper_limit, unit) in DEMO_RECOMMENDATION_BOUNDARIES.items():
+        definition = db.scalar(
+            select(ParameterDefinition).where(ParameterDefinition.code == code)
+        )
+        if not definition:
+            continue
+        constraint_code = f"M9-CLEARCOAT_2-{code}-STD"
+        source = db.scalar(
+            select(ParameterConstraintSource).where(
+                ParameterConstraintSource.constraint_code == constraint_code
+            )
+        )
+        if not source:
+            source = ParameterConstraintSource(
+                parameter_definition_id=definition.id,
+                factory_id=factory.id,
+                process_stage="CLEARCOAT_2",
+                constraint_code=constraint_code,
+                version="2026.1",
+                source_type="FACTORY_PROCESS_STANDARD",
+                source_uri=f"demo://m9/process-standard/{code}/2026.1",
+                lower_limit=lower_limit,
+                upper_limit=upper_limit,
+                unit=unit,
+                status="ACTIVE",
+                effective_from=now - timedelta(days=30),
+                approved_by="工艺负责人",
+                approved_at=now - timedelta(days=30),
+                remark="演示用已批准工艺硬边界，现场需替换为工厂正式来源。",
+            )
+            db.add(source)
+        else:
+            source.parameter_definition_id = definition.id
+            source.factory_id = factory.id
+            source.process_stage = "CLEARCOAT_2"
+            source.version = "2026.1"
+            source.source_type = "FACTORY_PROCESS_STANDARD"
+            source.source_uri = f"demo://m9/process-standard/{code}/2026.1"
+            source.lower_limit = lower_limit
+            source.upper_limit = upper_limit
+            source.unit = unit
+            source.status = "ACTIVE"
+            source.effective_from = source.effective_from or now - timedelta(days=30)
+            source.approved_by = source.approved_by or "工艺负责人"
+            source.approved_at = source.approved_at or now - timedelta(days=30)
+
+
 def seed_demo(db: Session) -> dict:
     _seed_catalogs(db)
     admin = _seed_security(db)
     _seed_integration_endpoints(db)
     now = datetime.now(UTC)
     measurement_governance = _seed_measurement_governance(db, now)
-    demo_boundaries = {
-        "clearcoat_2_spray_flow": (280.0, 360.0),
-        "clearcoat_2_outer_air": (360.0, 440.0),
-        "clearcoat_2_bell_speed": (40000.0, 52000.0),
-    }
-    for code, (hard_min, hard_max) in demo_boundaries.items():
+    for code, (hard_min, hard_max, _unit) in DEMO_RECOMMENDATION_BOUNDARIES.items():
         definition = db.scalar(
             select(ParameterDefinition).where(ParameterDefinition.code == code)
         )
@@ -1073,6 +1124,7 @@ def seed_demo(db: Session) -> dict:
         definition.is_recommendable = True
     existing_factory = db.scalar(select(Factory).where(Factory.code == "M9"))
     if existing_factory:
+        _seed_demo_constraint_sources(db, existing_factory, now)
         _govern_demo_measurements(db, measurement_governance)
         _seed_durr_governance(db, existing_factory, now)
         _seed_material_governance(db, now)
@@ -1124,6 +1176,7 @@ def seed_demo(db: Session) -> dict:
     }
     db.add_all([factory, vehicle_model, basecoat_color, midcoat_color, *parts.values()])
     db.flush()
+    _seed_demo_constraint_sources(db, factory, now)
     db.add_all(
         [
             FactoryVehicleModel(factory_id=factory.id, vehicle_model_id=vehicle_model.id),

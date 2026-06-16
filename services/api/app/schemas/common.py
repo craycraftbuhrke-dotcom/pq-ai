@@ -52,6 +52,13 @@ class ControlledTrialApproval(BaseModel):
     comment: str | None = Field(default=None, max_length=1000)
 
 
+class RollbackExecutionCreate(BaseModel):
+    rollback_reason: str = Field(min_length=4, max_length=1000)
+    executed_by: str = Field(min_length=2, max_length=80)
+    rollback_to_program_version_id: str | None = None
+    execution_note: str | None = Field(default=None, max_length=1000)
+
+
 class RecommendationExecutionAction(BaseModel):
     action_id: str
     executed_value: float

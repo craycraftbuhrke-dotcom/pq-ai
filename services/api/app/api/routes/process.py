@@ -17,6 +17,7 @@ from app.models.domain import (
     Factory,
     MaterialBatch,
     MeasurementPoint,
+    ParameterConstraintSource,
     ParameterDefinition,
     Part,
     ProcessStage,
@@ -45,6 +46,9 @@ from app.schemas.process import (
     MaterialBatchUpdate,
     ParameterDefinitionCreate,
     ParameterDefinitionRead,
+    ParameterConstraintSourceCreate,
+    ParameterConstraintSourceRead,
+    ParameterConstraintSourceUpdate,
     ProductionRunCreate,
     ProductionRunRead,
     ProductionRunUpdate,
@@ -82,6 +86,35 @@ def _validate_process_stage(process_stage: str) -> None:
             status_code=422,
             detail=f"工艺阶段 {process_stage} 不属于中涂外喷、色漆一/二遍或清漆一/二遍",
         ) from exc
+
+
+def _validate_constraint_source(
+    db: Session,
+    values: dict,
+    current: ParameterConstraintSource | None = None,
+) -> dict:
+    lower_limit = values.get("lower_limit", current.lower_limit if current else None)
+    upper_limit = values.get("upper_limit", current.upper_limit if current else None)
+    if lower_limit is not None and upper_limit is not None and upper_limit <= lower_limit:
+        raise HTTPException(status_code=422, detail="约束上限必须大于下限")
+    parameter_definition_id = values.get(
+        "parameter_definition_id", current.parameter_definition_id if current else None
+    )
+    if parameter_definition_id:
+        _required(db, ParameterDefinition, parameter_definition_id, "参数定义")
+    factory_id = values.get("factory_id", current.factory_id if current else None)
+    if factory_id:
+        _required(db, Factory, factory_id, "工厂")
+    process_stage = values.get("process_stage", current.process_stage if current else None)
+    if process_stage:
+        _validate_process_stage(process_stage)
+    status_value = values.get("status")
+    if status_value == "ACTIVE":
+        approved_by = values.get("approved_by", current.approved_by if current else None)
+        if not approved_by:
+            raise HTTPException(status_code=422, detail="激活约束来源必须填写审批人")
+        values.setdefault("approved_at", datetime.now(UTC))
+    return values
 
 
 def _required(db: Session, model: type, resource_id: str, label: str):
@@ -145,6 +178,84 @@ def seed_parameter_catalog(db: Session = Depends(get_db)) -> dict:
         "created": len(resources),
         "existing": len(PARAMETER_CATALOG) - len(resources),
     }
+
+
+@router.get(
+    "/parameter-constraint-sources",
+    response_model=list[ParameterConstraintSourceRead],
+)
+def list_parameter_constraint_sources(
+    db: Session = Depends(get_db),
+) -> list[ParameterConstraintSource]:
+    return list(
+        db.scalars(
+            select(ParameterConstraintSource).order_by(
+                ParameterConstraintSource.parameter_definition_id,
+                ParameterConstraintSource.process_stage,
+                ParameterConstraintSource.version,
+            )
+        )
+    )
+
+
+@router.post(
+    "/parameter-constraint-sources",
+    response_model=ParameterConstraintSourceRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_parameter_constraint_source(
+    payload: ParameterConstraintSourceCreate,
+    db: Session = Depends(get_db),
+) -> ParameterConstraintSource:
+    values = _validate_constraint_source(db, payload.model_dump())
+    if db.scalar(
+        select(ParameterConstraintSource).where(
+            ParameterConstraintSource.constraint_code == payload.constraint_code
+        )
+    ):
+        raise HTTPException(status_code=409, detail="约束来源代码已存在")
+    return _save(db, ParameterConstraintSource(**values))
+
+
+@router.get(
+    "/parameter-constraint-sources/{constraint_source_id}",
+    response_model=ParameterConstraintSourceRead,
+)
+def get_parameter_constraint_source(
+    constraint_source_id: str,
+    db: Session = Depends(get_db),
+) -> ParameterConstraintSource:
+    return _required(db, ParameterConstraintSource, constraint_source_id, "参数约束来源")
+
+
+@router.patch(
+    "/parameter-constraint-sources/{constraint_source_id}",
+    response_model=ParameterConstraintSourceRead,
+)
+def update_parameter_constraint_source(
+    constraint_source_id: str,
+    payload: ParameterConstraintSourceUpdate,
+    db: Session = Depends(get_db),
+) -> ParameterConstraintSource:
+    source = _required(db, ParameterConstraintSource, constraint_source_id, "参数约束来源")
+    changes = _validate_constraint_source(
+        db,
+        payload.model_dump(exclude_unset=True),
+        current=source,
+    )
+    if (
+        "constraint_code" in changes
+        and changes["constraint_code"] != source.constraint_code
+        and db.scalar(
+            select(ParameterConstraintSource).where(
+                ParameterConstraintSource.constraint_code == changes["constraint_code"]
+            )
+        )
+    ):
+        raise HTTPException(status_code=409, detail="约束来源代码已存在")
+    for key, value in changes.items():
+        setattr(source, key, value)
+    return _save(db, source)
 
 
 @router.get("/spray-programs", response_model=list[SprayProgramRead])

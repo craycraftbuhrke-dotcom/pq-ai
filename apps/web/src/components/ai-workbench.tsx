@@ -8,6 +8,7 @@ import {
   LoaderCircle,
   Play,
   RefreshCw,
+  RotateCcw,
   Search,
   ShieldCheck,
   Sparkles,
@@ -205,6 +206,10 @@ type RecommendationAction = {
   unit: string;
   hard_min?: number | null;
   hard_max?: number | null;
+  constraint_source_code?: string | null;
+  constraint_source_version?: string | null;
+  constraint_source_type?: string | null;
+  constraint_source_uri?: string | null;
 };
 type Evaluation = {
   id: string;
@@ -239,6 +244,19 @@ type ControlledTrial = {
   started_at?: string | null;
   completed_at?: string | null;
   completion_summary?: string | null;
+};
+type RollbackExecution = {
+  id: string;
+  rollback_no: string;
+  recommendation_id: string;
+  controlled_trial_id: string;
+  rollback_to_program_version_id?: string | null;
+  rollback_reason: string;
+  execution_note?: string | null;
+  executed_by: string;
+  executed_at: string;
+  status: string;
+  action_snapshot: { actions?: RecommendationAction[] };
 };
 type Recommendation = {
   id: string;
@@ -380,6 +398,7 @@ function statusLabel(status: string): string {
     PLANNED: "已计划",
     RUNNING: "试验中",
     INEFFECTIVE: "未达预期",
+    ROLLED_BACK: "已回滚",
     ACCEPTED: "验收通过",
     BUILT: "已构建",
     IN_SCOPE: "适用范围内",
@@ -399,6 +418,10 @@ function statusLabel(status: string): string {
     SIMULATION: "仿真证据",
     DOE: "DOE 证据",
     CONTROLLED_CHANGE: "受控变更证据",
+    FACTORY_PROCESS_STANDARD: "工厂工艺标准",
+    DURR_DEVICE_LIMIT: "Dürr 设备极限",
+    MATERIAL_TDS: "材料 TDS",
+    ENGINEERING_TRIAL: "工程试验",
   }[status] ?? status;
 }
 
@@ -436,6 +459,7 @@ export function AiWorkbench() {
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [controlledTrials, setControlledTrials] = useState<ControlledTrial[]>([]);
+  const [rollbackExecutions, setRollbackExecutions] = useState<RollbackExecution[]>([]);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [driftReport, setDriftReport] = useState<DriftReport | null>(null);
@@ -464,7 +488,7 @@ export function AiWorkbench() {
     setLoading(true);
     setError("");
     try {
-      const [nextModels, nextDatasets, nextAcceptanceDecisions, nextAcceptancePolicies, nextApplicabilityScopes, nextOodPolicies, nextValidationFolds, nextModelArtifacts, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextControlledTrials, nextMeasurements, nextMetrics] =
+      const [nextModels, nextDatasets, nextAcceptanceDecisions, nextAcceptancePolicies, nextApplicabilityScopes, nextOodPolicies, nextValidationFolds, nextModelArtifacts, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextControlledTrials, nextRollbacks, nextMeasurements, nextMetrics] =
         await Promise.all([
           request<ModelVersion[]>("/api/ai/models"),
           request<DatasetSnapshot[]>("/api/ai/models/datasets"),
@@ -479,6 +503,7 @@ export function AiWorkbench() {
           request<Diagnosis[]>("/api/ai/diagnoses"),
           request<Recommendation[]>("/api/ai/recommendations"),
           request<ControlledTrial[]>("/api/ai/controlled-trials"),
+          request<RollbackExecution[]>("/api/ai/rollback-executions"),
           request<Measurement[]>("/api/quality/measurements?limit=500"),
           request<MetricDefinition[]>("/api/quality/metric-definitions"),
         ]);
@@ -495,6 +520,7 @@ export function AiWorkbench() {
       setDiagnoses(nextDiagnoses);
       setRecommendations(nextRecommendations);
       setControlledTrials(nextControlledTrials);
+      setRollbackExecutions(nextRollbacks);
       setMeasurements(nextMeasurements);
       setMetrics(nextMetrics);
       setSelectedModelId((current) => current || nextModels[0]?.id || "");
@@ -611,6 +637,7 @@ export function AiWorkbench() {
   const selectedRecommendation = recommendations.find((item) => item.id === selectedRecommendationId);
   const selectedTrial = controlledTrials.find((item) => item.recommendation_id === selectedRecommendationId);
   const selectedTrialApproved = selectedTrial?.status === "APPROVED";
+  const selectedRollback = rollbackExecutions.find((item) => item.controlled_trial_id === selectedTrial?.id);
   const verificationOptions = useMemo(() => {
     if (!selectedRecommendation) return [];
     return measurements.filter(
@@ -1009,6 +1036,27 @@ export function AiWorkbench() {
     }
   }
 
+  async function recordRollback(trial: ControlledTrial) {
+    setSubmitting(`rollback-${trial.id}`);
+    try {
+      await request<RollbackExecution>(`/api/ai/controlled-trials/${trial.id}/rollback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rollback_reason: trial.completion_summary ?? "复测未达预期，按受控试验回滚方案执行。",
+          executed_by: "机器人程序员",
+          execution_note: trial.rollback_plan,
+        }),
+      });
+      showSuccess("回滚执行已记录，推荐动作快照已归档");
+      await reload();
+    } catch (operationError) {
+      showError(operationError);
+    } finally {
+      setSubmitting("");
+    }
+  }
+
   async function approveRecommendation(recommendation: Recommendation, approved: boolean) {
     setSubmitting(`approval-${recommendation.id}`);
     try {
@@ -1288,15 +1336,17 @@ export function AiWorkbench() {
                 <div className="ai-trial-panel">
                   <div className="ai-trial-heading">
                     <span><b>受控试验计划</b><small>推荐审批前必须具备假设、风险、回滚和持续观察方案。</small></span>
-                    <span className={`status-badge ${selectedTrial?.status === "APPROVED" || selectedTrial?.status === "VERIFIED" ? "status-healthy" : selectedTrial?.status === "REJECTED" || selectedTrial?.status === "INEFFECTIVE" ? "status-risk" : "status-warning"}`}>{selectedTrial ? statusLabel(selectedTrial.status) : "未创建"}</span>
+                    <span className={`status-badge ${selectedTrial?.status === "APPROVED" || selectedTrial?.status === "VERIFIED" || selectedTrial?.status === "ROLLED_BACK" ? "status-healthy" : selectedTrial?.status === "REJECTED" || selectedTrial?.status === "INEFFECTIVE" ? "status-risk" : "status-warning"}`}>{selectedTrial ? statusLabel(selectedTrial.status) : "未创建"}</span>
                   </div>
                   {selectedTrial ? <div className="ai-trial-details"><p><b>假设</b>{selectedTrial.hypothesis}</p><p><b>证据</b>{statusLabel(selectedTrial.evidence_type)}</p><p><b>预期</b>{selectedTrial.expected_outcome}</p><p><b>风险</b>{selectedTrial.risk_assessment}</p><p><b>回滚</b>{selectedTrial.rollback_plan}</p><p><b>持续观察</b>{selectedTrial.sustained_observation_plan}</p>{selectedTrial.completion_summary ? <p><b>结论</b>{selectedTrial.completion_summary}</p> : null}</div> : <p className="ai-hint">当前推荐尚未纳入受控试验，不能直接批准执行。</p>}
+                  {selectedRollback ? <div className="ai-rollback-panel"><strong>{selectedRollback.rollback_no}</strong><span>{selectedRollback.executed_by} · {new Date(selectedRollback.executed_at).toLocaleString("zh-CN")}</span><small>{selectedRollback.rollback_reason}</small></div> : null}
                   {selectedRecommendation.status === "PENDING" && !selectedTrial ? <button className="button button-secondary" type="button" disabled={submitting === `trial-create-${selectedRecommendation.id}`} onClick={() => void createControlledTrial(selectedRecommendation)}>{submitting === `trial-create-${selectedRecommendation.id}` ? <LoaderCircle className="spin" /> : <ShieldCheck />} 创建受控试验计划</button> : null}
                   {selectedRecommendation.status === "PENDING" && selectedTrial?.status === "PLANNED" ? <div className="ai-workflow-actions compact-actions"><button className="button button-secondary danger-button" type="button" disabled={submitting === `trial-approval-${selectedTrial.id}`} onClick={() => void approveControlledTrial(selectedTrial, false)}><X /> 驳回试验</button><button className="button button-secondary" type="button" disabled={submitting === `trial-approval-${selectedTrial.id}`} onClick={() => void approveControlledTrial(selectedTrial, true)}>{submitting === `trial-approval-${selectedTrial.id}` ? <LoaderCircle className="spin" /> : <Check />} 批准试验计划</button></div> : null}
+                  {selectedTrial?.status === "INEFFECTIVE" && !selectedRollback ? <button className="button button-secondary danger-button" type="button" disabled={submitting === `rollback-${selectedTrial.id}`} onClick={() => void recordRollback(selectedTrial)}>{submitting === `rollback-${selectedTrial.id}` ? <LoaderCircle className="spin" /> : <RotateCcw />} 记录回滚执行</button> : null}
                 </div>
                 <div className="ai-action-table">
                   <div className="ai-action-row ai-action-head"><span>参数</span><span>当前值</span><span>推荐值</span><span>实际执行值</span><span>硬边界</span></div>
-                  {selectedRecommendation.actions.map((action) => <div className="ai-action-row" key={action.id}><span><strong>{action.parameter_name}</strong><small>{action.process_stage} · {action.parameter_code}</small></span><span>{formatNumber(action.current_value)} {action.unit}</span><span>{formatNumber(action.recommended_value)} {action.unit}</span><span>{selectedRecommendation.status === "APPROVED" ? <input type="number" step="any" value={executedValues[action.id] ?? ""} onChange={(event) => setExecutedValues((current) => ({ ...current, [action.id]: event.target.value }))} /> : `${formatNumber(action.executed_value)} ${action.unit}`}</span><span>{formatNumber(action.hard_min)} - {formatNumber(action.hard_max)}</span></div>)}
+                  {selectedRecommendation.actions.map((action) => <div className="ai-action-row" key={action.id}><span><strong>{action.parameter_name}</strong><small>{action.process_stage} · {action.parameter_code}</small></span><span>{formatNumber(action.current_value)} {action.unit}</span><span>{formatNumber(action.recommended_value)} {action.unit}</span><span>{selectedRecommendation.status === "APPROVED" ? <input type="number" step="any" value={executedValues[action.id] ?? ""} onChange={(event) => setExecutedValues((current) => ({ ...current, [action.id]: event.target.value }))} /> : `${formatNumber(action.executed_value)} ${action.unit}`}</span><span>{formatNumber(action.hard_min)} - {formatNumber(action.hard_max)}<small>{action.constraint_source_code ? `${statusLabel(action.constraint_source_type ?? "")} · ${action.constraint_source_code} / ${action.constraint_source_version ?? "—"}` : "约束来源未固化"}</small></span></div>)}
                 </div>
                 {selectedRecommendation.status === "PENDING" ? <div className="ai-workflow-actions"><button className="button button-secondary danger-button" onClick={() => void approveRecommendation(selectedRecommendation, false)}><X /> 驳回推荐</button><button className="button button-primary" disabled={!selectedTrialApproved || submitting === `approval-${selectedRecommendation.id}`} onClick={() => void approveRecommendation(selectedRecommendation, true)}><Check /> 批准推荐执行</button></div> : null}
                 {selectedRecommendation.status === "APPROVED" ? <div className="ai-workflow-actions"><button className="button button-primary" onClick={() => void executeRecommendation(selectedRecommendation)}><Play /> 记录实际执行</button></div> : null}
