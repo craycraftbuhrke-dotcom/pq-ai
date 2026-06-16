@@ -1,11 +1,12 @@
 "use client";
 
-import { LogOut, Menu, Search, ShieldCheck, User, X } from "lucide-react";
+import { LogOut, Menu, Search, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
 import { navigationIcons } from "@/components/icons";
+import { ContextSelector } from "@/components/context-selector";
 import { useAuth } from "@/lib/auth-context";
 import { navItems } from "@/lib/demo-data";
 
@@ -131,6 +132,7 @@ export function AppShell({ children }: AppShellProps) {
             <strong>2026-06-10 · 白班</strong>
           </div>
         </header>
+        <ContextSelector />
         <main>{children}</main>
       </div>
     </div>

@@ -4714,3 +4714,121 @@ button.message-banner {
   font-family: monospace;
   word-break: break-all;
 }
+
+/* ── 3C2B Context Selector ── */
+.context-selector {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem 1.25rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+  font-size: .8125rem;
+}
+
+.context-coating-stages {
+  display: flex;
+  gap: .25rem;
+}
+
+.context-chip {
+  display: flex;
+  align-items: center;
+  gap: .375rem;
+  padding: .25rem .625rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  cursor: pointer;
+  transition: all .15s;
+  font-size: .75rem;
+}
+
+.context-chip:hover {
+  border-color: var(--teal-400);
+}
+
+.context-chip.active {
+  background: var(--teal-500);
+  border-color: var(--teal-500);
+  color: #fff;
+}
+
+.context-chip-shortcut {
+  font-weight: 800;
+  font-size: .6875rem;
+  background: rgba(0,0,0,.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.context-chip.active .context-chip-shortcut {
+  background: rgba(255,255,255,.2);
+}
+
+.context-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+.context-select {
+  border: none;
+  background: transparent;
+  font-size: .8125rem;
+  color: var(--color-text);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  outline: none;
+}
+
+.context-select:hover,
+.context-select:focus {
+  background: var(--color-bg);
+}
+
+.context-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--color-muted);
+  flex-shrink: 0;
+}
+
+.context-stage-selector,
+.context-factory,
+.context-model-color {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+}
+
+.context-dot {
+  color: var(--color-muted);
+  font-weight: 700;
+}
+
+.context-summary {
+  margin-left: auto;
+}
+
+.context-summary-text {
+  font-size: .75rem;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .context-selector {
+    gap: .25rem;
+    padding: .375rem .75rem;
+  }
+  .context-chip-label {
+    display: none;
+  }
+  .context-summary {
+    display: none;
+  }
+}
