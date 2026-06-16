@@ -12,6 +12,7 @@ async function proxy(request: Request, context: Context) {
       "summary",
       "analytics",
       "measurements",
+      "monitoring",
       "standards",
       "metric-definitions",
       "governance",

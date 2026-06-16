@@ -110,6 +110,7 @@ export const navItems = [
   { href: "/programs", label: "喷涂程序中心", icon: "program" },
   { href: "/production", label: "生产实绩中心", icon: "production" },
   { href: "/quality", label: "质量数据中心", icon: "quality" },
+  { href: "/quality-monitor", label: "数据质量监控", icon: "monitor" },
   { href: "/import-wizard", label: "数据导入向导", icon: "import" },
   { href: "/ai-workbench", label: "AI 闭环工作台", icon: "ai" },
   { href: "/controlled-trials", label: "受控试验中心", icon: "trial" },

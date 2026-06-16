@@ -38,6 +38,7 @@ from app.models.domain import (
     QualityStandard,
     VehicleModel,
 )
+from app.services.measurement_reliability import measurement_is_eligible
 from app.schemas.quality import (
     QualityMeasurementCreate,
     QualityAnalytics,
@@ -797,6 +798,91 @@ def delete_quality_standard(
     db.delete(standard)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/monitoring/quality-summary")
+def data_quality_monitoring(db: Session = Depends(get_db)) -> dict:
+    total_measurements = int(db.scalar(select(func.count()).select_from(QualityMeasurement)) or 0)
+    valid_measurements = int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.is_valid.is_(True))) or 0)
+    verified_measurements = int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.reliability_status == "VERIFIED")) or 0)
+    unverified_measurements = int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.reliability_status == "UNVERIFIED")) or 0)
+    failed_measurements = int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.reliability_status == "FAILED")) or 0)
+
+    total_instruments = int(db.scalar(select(func.count()).select_from(MeasurementInstrument)) or 0)
+    active_instruments = int(db.scalar(select(func.count()).select_from(MeasurementInstrument).where(MeasurementInstrument.status == "ACTIVE")) or 0)
+
+    now = datetime.now()
+    valid_calibrations = int(db.scalar(select(func.count()).select_from(MeasurementCalibrationRecord).where(MeasurementCalibrationRecord.result == "PASS", MeasurementCalibrationRecord.valid_until > now)) or 0)
+    expired_calibrations = int(db.scalar(select(func.count()).select_from(MeasurementCalibrationRecord).where(MeasurementCalibrationRecord.valid_until <= now)) or 0)
+    total_calibrations = int(db.scalar(select(func.count()).select_from(MeasurementCalibrationRecord)) or 0)
+
+    total_standards = int(db.scalar(select(func.count()).select_from(QualityStandard).where(QualityStandard.is_active.is_(True))) or 0)
+
+    metric_completeness = round(valid_measurements / max(total_measurements, 1) * 100, 1)
+    verification_rate = round(verified_measurements / max(valid_measurements, 1) * 100, 1)
+    calibration_health = round(valid_calibrations / max(total_calibrations, 1) * 100, 1) if total_calibrations else 0
+
+    reliability_by_type = [
+        {
+            "quality_type": quality_type,
+            "total": int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.quality_type == quality_type)) or 0),
+            "verified": int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.quality_type == quality_type, QualityMeasurement.reliability_status == "VERIFIED")) or 0),
+            "failed": int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.quality_type == quality_type, QualityMeasurement.reliability_status == "FAILED")) or 0),
+        }
+        for quality_type in ("ORANGE_PEEL", "COLOR_DIFFERENCE", "THICKNESS")
+    ]
+
+    instruments_requiring_calibration = [
+        {
+            "id": instrument.id,
+            "code": instrument.code,
+            "name": instrument.name,
+            "instrument_type": instrument.instrument_type,
+            "status": instrument.status,
+        }
+        for instrument in db.scalars(
+            select(MeasurementInstrument).where(
+                MeasurementInstrument.calibration_required.is_(True),
+                MeasurementInstrument.status == "ACTIVE",
+            )
+        ).all()
+        if not db.scalar(
+            select(MeasurementCalibrationRecord).where(
+                MeasurementCalibrationRecord.instrument_id == instrument.id,
+                MeasurementCalibrationRecord.result == "PASS",
+                MeasurementCalibrationRecord.valid_until > now,
+            )
+        )
+    ]
+
+    return {
+        "overview": {
+            "total_measurements": total_measurements,
+            "valid_measurements": valid_measurements,
+            "verified_measurements": verified_measurements,
+            "unverified_measurements": unverified_measurements,
+            "failed_measurements": failed_measurements,
+            "metric_completeness": metric_completeness,
+            "verification_rate": verification_rate,
+        },
+        "instruments": {
+            "total": total_instruments,
+            "active": active_instruments,
+            "total_calibrations": total_calibrations,
+            "valid_calibrations": valid_calibrations,
+            "expired_calibrations": expired_calibrations,
+            "calibration_health": calibration_health,
+            "needs_calibration": instruments_requiring_calibration,
+        },
+        "standards": {
+            "active_standards": total_standards,
+        },
+        "reliability_by_type": reliability_by_type,
+        "health_score": round(
+            (metric_completeness * 0.3 + verification_rate * 0.3 + calibration_health * 0.4),
+            1,
+        ),
+    }
 
 
 @router.post("/measurements/import-csv")

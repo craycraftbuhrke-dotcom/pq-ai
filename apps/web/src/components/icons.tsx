@@ -24,6 +24,7 @@ export const navigationIcons: Record<string, LucideIcon> = {
   ai: Bot,
   trial: Crosshair,
   master: Database,
+  monitor: CircleGauge,
   audit: ScrollText,
   import: FileSpreadsheet,
   integration: PlugZap,
