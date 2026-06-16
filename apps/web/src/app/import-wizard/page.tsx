@@ -20,6 +20,7 @@ type ImportResource = {
   id: string;
   code: string;
   name: string;
+  run_no?: string;
 };
 
 type ImportResult = {
