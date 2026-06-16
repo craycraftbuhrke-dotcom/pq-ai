@@ -5,6 +5,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.referential_integrity import check_fk, check_delete_safe
 from app.db.session import get_db
 from app.domain.parameter_catalog import PARAMETER_CATALOG
 from app.domain.scope_policy import ScopeViolation, is_out_of_scope_name, require_approved_mapping
@@ -19,7 +20,9 @@ from app.models.domain import (
     MeasurementPoint,
     ParameterDefinition,
     Part,
+    PointFeatureSnapshot,
     ProcessStage,
+    ProductionDeviceExecution,
     ProductionRun,
     ProductionStageRun,
     ProgramColor,
@@ -160,7 +163,7 @@ def get_spray_program(program_id: str, db: Session = Depends(get_db)) -> SprayPr
 @router.post("/spray-programs", response_model=SprayProgramRead, status_code=status.HTTP_201_CREATED)
 def create_spray_program(payload: SprayProgramCreate, db: Session = Depends(get_db)) -> SprayProgram:
     _validate_process_stage(payload.process_stage)
-    _required(db, Factory, payload.factory_id, "工厂")
+    check_fk(db, Factory, payload.factory_id, label="工厂")
     if db.scalar(
         select(SprayProgram).where(
             SprayProgram.factory_id == payload.factory_id,
@@ -197,7 +200,10 @@ def update_spray_program(
 
 @router.delete("/spray-programs/{program_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_spray_program(program_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete_resource(db, _required(db, SprayProgram, program_id, "喷涂程序"), "喷涂程序")
+    program = _required(db, SprayProgram, program_id, "喷涂程序")
+    check_delete_safe(db, SprayProgramVersion, SprayProgramVersion.spray_program_id, program_id, label="喷涂程序")
+    check_delete_safe(db, ProductionStageRun, ProductionStageRun.program_version_id, program_id, label="喷涂程序")
+    return _delete_resource(db, program, "喷涂程序")
 
 
 @router.post(
@@ -208,7 +214,7 @@ def delete_spray_program(program_id: str, db: Session = Depends(get_db)) -> Resp
 def create_program_version(
     program_id: str, payload: SprayProgramVersionCreate, db: Session = Depends(get_db)
 ) -> SprayProgramVersion:
-    _required(db, SprayProgram, program_id, "喷涂程序")
+    check_fk(db, SprayProgram, program_id, label="喷涂程序")
     if db.scalar(
         select(SprayProgramVersion).where(
             SprayProgramVersion.spray_program_id == program_id,
@@ -338,6 +344,10 @@ def update_program_version(
 @router.delete("/program-versions/{version_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_program_version(version_id: str, db: Session = Depends(get_db)) -> Response:
     version = _required(db, SprayProgramVersion, version_id, "程序版本")
+    check_delete_safe(db, Brush, Brush.program_version_id, version_id, label="程序版本")
+    check_delete_safe(db, ProductionStageRun, ProductionStageRun.program_version_id, version_id, label="程序版本")
+    check_delete_safe(db, ProgramVehicleModel, ProgramVehicleModel.program_version_id, version_id, label="程序版本")
+    check_delete_safe(db, ProgramColor, ProgramColor.program_version_id, version_id, label="程序版本")
     db.execute(delete(ProgramVehicleModel).where(ProgramVehicleModel.program_version_id == version_id))
     db.execute(delete(ProgramColor).where(ProgramColor.program_version_id == version_id))
     try:
@@ -358,9 +368,9 @@ def delete_program_version(version_id: str, db: Session = Depends(get_db)) -> Re
     status_code=status.HTTP_201_CREATED,
 )
 def create_brush(version_id: str, payload: BrushCreate, db: Session = Depends(get_db)) -> Brush:
-    _required(db, SprayProgramVersion, version_id, "程序版本")
+    check_fk(db, SprayProgramVersion, version_id, label="程序版本")
     if payload.part_id:
-        _required(db, Part, payload.part_id, "零件")
+        check_fk(db, Part, payload.part_id, label="零件")
     if db.scalar(
         select(Brush).where(Brush.program_version_id == version_id, Brush.brush_no == payload.brush_no)
     ):
@@ -407,7 +417,10 @@ def update_brush(
 
 @router.delete("/brushes/{brush_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_brush(brush_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete_resource(db, _required(db, Brush, brush_id, "刷子"), "刷子")
+    brush = _required(db, Brush, brush_id, "刷子")
+    check_delete_safe(db, BrushParameter, BrushParameter.brush_id, brush_id, label="刷子")
+    check_delete_safe(db, BrushPointContribution, BrushPointContribution.brush_id, brush_id, label="刷子")
+    return _delete_resource(db, brush, "刷子")
 
 
 @router.post(
@@ -419,9 +432,9 @@ def create_brush_parameter(
     brush_id: str, payload: BrushParameterCreate, db: Session = Depends(get_db)
 ) -> BrushParameter:
     _validate_parameter_scope(payload.parameter_code, payload.parameter_name)
-    _required(db, Brush, brush_id, "刷子")
+    check_fk(db, Brush, brush_id, label="刷子")
     if payload.parameter_definition_id:
-        _required(db, ParameterDefinition, payload.parameter_definition_id, "参数定义")
+        check_fk(db, ParameterDefinition, payload.parameter_definition_id, label="参数定义")
     if db.scalar(
         select(BrushParameter).where(
             BrushParameter.brush_id == brush_id,
@@ -614,9 +627,9 @@ def delete_material_batch(batch_id: str, db: Session = Depends(get_db)) -> Respo
 @router.post("/production-runs", response_model=ProductionRunRead, status_code=status.HTTP_201_CREATED)
 def create_production_run(payload: ProductionRunCreate, db: Session = Depends(get_db)) -> ProductionRun:
     _validate_mapping_scope(payload.context_values, "生产事件上下文")
-    _required(db, Factory, payload.factory_id, "工厂")
-    _required(db, VehicleModel, payload.vehicle_model_id, "车型")
-    _required(db, Color, payload.color_id, "颜色")
+    check_fk(db, Factory, payload.factory_id, label="工厂")
+    check_fk(db, VehicleModel, payload.vehicle_model_id, label="车型")
+    check_fk(db, Color, payload.color_id, label="颜色")
     if db.scalar(select(ProductionRun).where(ProductionRun.run_no == payload.run_no)):
         raise HTTPException(status_code=409, detail="生产事件编号已存在")
     return _save(db, ProductionRun(**payload.model_dump()))
@@ -668,11 +681,10 @@ def update_production_run(
 
 @router.delete("/production-runs/{production_run_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_production_run(production_run_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete_resource(
-        db,
-        _required(db, ProductionRun, production_run_id, "生产事件"),
-        "生产事件",
-    )
+    production_run = _required(db, ProductionRun, production_run_id, "生产事件")
+    check_delete_safe(db, ProductionStageRun, ProductionStageRun.production_run_id, production_run_id, label="生产事件")
+    check_delete_safe(db, PointFeatureSnapshot, PointFeatureSnapshot.production_run_id, production_run_id, label="生产事件")
+    return _delete_resource(db, production_run, "生产事件")
 
 
 @router.post(
@@ -685,10 +697,10 @@ def create_production_stage_run(
 ) -> ProductionStageRun:
     _validate_process_stage(payload.process_stage)
     _validate_mapping_scope(payload.actual_parameters, "工序汇总参数")
-    _required(db, ProductionRun, production_run_id, "生产事件")
-    _required(db, SprayProgramVersion, payload.program_version_id, "程序版本")
+    check_fk(db, ProductionRun, production_run_id, label="生产事件")
+    check_fk(db, SprayProgramVersion, payload.program_version_id, label="程序版本")
     if payload.material_batch_id:
-        _required(db, MaterialBatch, payload.material_batch_id, "材料批次")
+        check_fk(db, MaterialBatch, payload.material_batch_id, label="材料批次")
     if db.scalar(
         select(ProductionStageRun).where(
             ProductionStageRun.production_run_id == production_run_id,
@@ -752,11 +764,10 @@ def update_production_stage_run(
 
 @router.delete("/production-stage-runs/{stage_run_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_production_stage_run(stage_run_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete_resource(
-        db,
-        _required(db, ProductionStageRun, stage_run_id, "工艺阶段实绩"),
-        "工艺阶段实绩",
-    )
+    stage_run = _required(db, ProductionStageRun, stage_run_id, "工艺阶段实绩")
+    check_delete_safe(db, ActualParameter, ActualParameter.production_stage_run_id, stage_run_id, label="工艺阶段实绩")
+    check_delete_safe(db, ProductionDeviceExecution, ProductionDeviceExecution.production_stage_run_id, stage_run_id, label="工艺阶段实绩")
+    return _delete_resource(db, stage_run, "工艺阶段实绩")
 
 
 @router.post(
@@ -768,11 +779,11 @@ def create_actual_parameter(
     stage_run_id: str, payload: ActualParameterCreate, db: Session = Depends(get_db)
 ) -> ActualParameter:
     _validate_parameter_scope(payload.parameter_code)
-    _required(db, ProductionStageRun, stage_run_id, "工艺阶段实绩")
+    check_fk(db, ProductionStageRun, stage_run_id, label="工艺阶段实绩")
     if payload.brush_id:
-        _required(db, Brush, payload.brush_id, "刷子")
+        check_fk(db, Brush, payload.brush_id, label="刷子")
     if payload.parameter_definition_id:
-        _required(db, ParameterDefinition, payload.parameter_definition_id, "参数定义")
+        check_fk(db, ParameterDefinition, payload.parameter_definition_id, label="参数定义")
     return _save(db, ActualParameter(production_stage_run_id=stage_run_id, **payload.model_dump()))
 
 

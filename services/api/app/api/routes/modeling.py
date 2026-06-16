@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.referential_integrity import check_fk, check_delete_safe
 from app.db.session import get_db
 from app.domain.scope_policy import CURRENT_FEATURE_SET_VERSION
 from app.models.domain import (
@@ -159,6 +160,7 @@ def list_feature_snapshots(db: Session = Depends(get_db)) -> list[dict]:
 def train_baseline_model(
     payload: ModelTrainingRequest, db: Session = Depends(get_db)
 ) -> ModelVersion:
+    check_fk(db, DatasetSnapshot, payload.dataset_snapshot_id, label="数据集快照")
     return train_model(db, payload)
 
 
@@ -204,6 +206,7 @@ def add_acceptance_policy(
     payload: ModelAcceptancePolicyCreate,
     db: Session = Depends(get_db),
 ) -> ModelAcceptancePolicy:
+    check_fk(db, Factory, payload.factory_id, label="工厂")
     return create_model_acceptance_policy(db, payload)
 
 
@@ -367,6 +370,9 @@ def predict_from_snapshot(
     payload: ModelPredictionRequest,
     db: Session = Depends(get_db),
 ) -> dict:
+    check_fk(db, ModelVersion, model_version_id, label="模型版本")
+    check_fk(db, ProductionRun, payload.production_run_id, label="生产事件")
+    check_fk(db, MeasurementPoint, payload.measurement_point_id, label="测量点")
     model = db.get(ModelVersion, model_version_id)
     if not model:
         raise HTTPException(status_code=404, detail="模型版本不存在")

@@ -5,6 +5,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.referential_integrity import check_fk, check_delete_safe
 from app.db.session import get_db
 from app.domain.scope_policy import (
     ScopeViolation,
@@ -219,11 +220,10 @@ def update_instrument(
 
 @router.delete("/instruments/{instrument_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_instrument(instrument_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(
-        db,
-        _required(db, MeasurementInstrument, instrument_id, "测量仪器"),
-        "测量仪器",
-    )
+    instrument = _required(db, MeasurementInstrument, instrument_id, "测量仪器")
+    check_delete_safe(db, MeasurementCalibrationRecord, MeasurementCalibrationRecord.instrument_id, instrument_id, "测量仪器")
+    check_delete_safe(db, QualityMeasurement, QualityMeasurement.instrument_id, instrument_id, "测量仪器")
+    return _delete(db, instrument, "测量仪器")
 
 
 @router.get("/methods", response_model=list[MeasurementMethodRead])
@@ -271,7 +271,10 @@ def update_method(
 
 @router.delete("/methods/{method_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_method(method_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(db, _required(db, MeasurementMethod, method_id, "测量方法"), "测量方法")
+    method = _required(db, MeasurementMethod, method_id, "测量方法")
+    check_delete_safe(db, MeasurementCalibrationRecord, MeasurementCalibrationRecord.method_id, method_id, "测量方法")
+    check_delete_safe(db, QualityMeasurement, QualityMeasurement.measurement_method_id, method_id, "测量方法")
+    return _delete(db, method, "测量方法")
 
 
 @router.get("/references", response_model=list[MeasurementReferenceStandardRead])
@@ -333,11 +336,10 @@ def update_reference(
 
 @router.delete("/references/{reference_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_reference(reference_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(
-        db,
-        _required(db, MeasurementReferenceStandard, reference_id, "参考件"),
-        "参考件",
-    )
+    reference = _required(db, MeasurementReferenceStandard, reference_id, "参考件")
+    check_delete_safe(db, MeasurementCalibrationRecord, MeasurementCalibrationRecord.reference_standard_id, reference_id, "参考件")
+    check_delete_safe(db, QualityMeasurement, QualityMeasurement.reference_standard_id, reference_id, "参考件")
+    return _delete(db, reference, "参考件")
 
 
 @router.get("/import-profiles", response_model=list[MeasurementImportProfileRead])
@@ -399,11 +401,9 @@ def update_import_profile(
 
 @router.delete("/import-profiles/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_import_profile(profile_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(
-        db,
-        _required(db, MeasurementImportProfile, profile_id, "导入模板"),
-        "导入模板",
-    )
+    profile = _required(db, MeasurementImportProfile, profile_id, "导入模板")
+    check_delete_safe(db, QualityMeasurement, QualityMeasurement.import_profile_id, profile_id, "导入模板")
+    return _delete(db, profile, "导入模板")
 
 
 @router.get("/calibrations", response_model=list[MeasurementCalibrationRead])
@@ -425,6 +425,11 @@ def list_calibrations(db: Session = Depends(get_db)) -> list[MeasurementCalibrat
 def create_calibration(
     payload: MeasurementCalibrationCreate, db: Session = Depends(get_db)
 ) -> MeasurementCalibrationRecord:
+    check_fk(db, MeasurementInstrument, payload.instrument_id, label="测量仪器")
+    if payload.method_id:
+        check_fk(db, MeasurementMethod, payload.method_id, label="测量方法")
+    if payload.reference_standard_id:
+        check_fk(db, MeasurementReferenceStandard, payload.reference_standard_id, label="参考件")
     if db.scalar(
         select(MeasurementCalibrationRecord).where(
             MeasurementCalibrationRecord.calibration_no == payload.calibration_no
@@ -470,8 +475,6 @@ def update_calibration(
 
 @router.delete("/calibrations/{calibration_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_calibration(calibration_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(
-        db,
-        _required(db, MeasurementCalibrationRecord, calibration_id, "校准/检查记录"),
-        "校准/检查记录",
-    )
+    calibration = _required(db, MeasurementCalibrationRecord, calibration_id, "校准/检查记录")
+    check_delete_safe(db, QualityMeasurement, QualityMeasurement.calibration_record_id, calibration_id, "校准/检查记录")
+    return _delete(db, calibration, "校准/检查记录")

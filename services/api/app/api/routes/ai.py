@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.referential_integrity import check_fk
 from app.db.session import get_db
 from app.domain.scope_policy import ScopeViolation, require_approved_target_metric
 from app.models.domain import (
@@ -252,6 +253,7 @@ def approve_recommendation(
         result["approval_comment"] = payload.comment
         return result
 
+    check_fk(db, Recommendation, recommendation_id, label="推荐任务")
     recommendation = db.get(Recommendation, recommendation_id)
     if not recommendation:
         raise HTTPException(status_code=404, detail="推荐任务不存在")
@@ -296,6 +298,7 @@ def execute_recommendation(
     payload: RecommendationExecution,
     db: Session = Depends(get_db),
 ) -> dict:
+    check_fk(db, Recommendation, recommendation_id, label="推荐任务")
     recommendation = db.get(Recommendation, recommendation_id)
     if not recommendation:
         raise HTTPException(status_code=404, detail="推荐任务不存在")
@@ -349,6 +352,7 @@ def verify_recommendation(
     payload: RecommendationVerification,
     db: Session = Depends(get_db),
 ) -> dict:
+    check_fk(db, Recommendation, recommendation_id, label="推荐任务")
     recommendation = db.get(Recommendation, recommendation_id)
     if not recommendation:
         raise HTTPException(status_code=404, detail="推荐任务不存在")

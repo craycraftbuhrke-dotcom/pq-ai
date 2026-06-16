@@ -6,6 +6,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.referential_integrity import check_fk, check_delete_safe
 from app.db.session import get_db
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
 from app.domain.scope_policy import (
@@ -569,6 +570,8 @@ def create_quality_measurement(
         [reading.model_dump() for reading in payload.repeat_readings],
     )
     _validate_measurement_governance_relations(db, payload.model_dump())
+    check_fk(db, ProductionRun, payload.production_run_id, "生产事件")
+    check_fk(db, MeasurementPoint, payload.measurement_point_id, "测量点")
     if db.scalar(select(QualityMeasurement).where(QualityMeasurement.data_no == payload.data_no)):
         raise HTTPException(status_code=409, detail="质量数据编号已存在")
     if not db.get(ProductionRun, payload.production_run_id):
@@ -682,6 +685,8 @@ def delete_quality_measurement(
     measurement_id: str, db: Session = Depends(get_db)
 ) -> Response:
     measurement = _required(db, QualityMeasurement, measurement_id, "质量数据")
+    check_delete_safe(db, QualityMetricValue, QualityMetricValue.measurement_id, measurement_id, "质量数据")
+    check_delete_safe(db, MeasurementRepeatReading, MeasurementRepeatReading.measurement_id, measurement_id, "质量数据")
     try:
         db.execute(
             delete(MeasurementRepeatReading).where(
@@ -736,6 +741,10 @@ def create_quality_standard(
 
 def _validate_standard_relations(db: Session, values: dict) -> None:
     _validate_quality_scope(values["quality_type"], [values["metric_code"]])
+    check_fk(db, VehicleModel, values.get("vehicle_model_id"), "车型")
+    check_fk(db, Color, values.get("color_id"), "颜色")
+    check_fk(db, Part, values.get("part_id"), "零件")
+    check_fk(db, MeasurementPoint, values.get("measurement_point_id"), "测量点")
     for field, model, label in (
         ("vehicle_model_id", VehicleModel, "车型"),
         ("color_id", Color, "颜色"),

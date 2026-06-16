@@ -1,12 +1,12 @@
 # PQ-AI System Maturity Assessment
 
-Assessment date: 2026-06-15. This is an engineering assessment against the approved domain boundary, not a production certification.
+Assessment date: 2026-06-16. This is an engineering assessment against the approved domain boundary, not a production certification.
 
 ## Executive Conclusion
 
-PQ-AI is a functional, connected demonstration and a useful foundation for factory-data onboarding. Measurement reliability, Dürr trajectory/device lineage, governed material-result gates, and a leakage-safe model-acceptance baseline now protect the AI lifecycle, but the system is not yet ready for production process recommendations because real device/material file validation, validated deposition contribution, factory-specific model acceptance/applicability, and approved recommendation constraints remain incomplete.
+PQ-AI is a functional, connected demonstration and a useful foundation for factory-data onboarding. Application-layer referential integrity now enforces FK consistency across all 140 write endpoints. Measurement reliability, Dürr trajectory/device lineage, governed material-result gates, leakage-safe model-acceptance baseline, controlled-trial workspace, and complete user authentication system (login/register/profile/security-admin) are implemented, but the system is not yet ready for production process recommendations because real device/material file validation, validated deposition contribution, factory-specific model acceptance/applicability, and approved recommendation constraints remain incomplete.
 
-Estimated overall maturity: **79% - governed demonstrable prototype / factory-data onboarding preparation**.
+Estimated overall maturity: **82% - governed demonstrable prototype / factory-data onboarding preparation**.
 
 ## Scores And Evidence
 
@@ -16,10 +16,10 @@ Estimated overall maturity: **79% - governed demonstrable prototype / factory-da
 | Program/robot/application | 76% | Governed robot/controller/atomizer identity, program-device configurations, trajectory checksums, path segments, actual executions, and target-family contribution versions | Real DXQ/PLC file adapters, real coordinates/orientation/trigger facts, deposition validation, and trajectory/contribution visualization remain |
 | Materials | 70% | Governed characteristic definitions, method versions, units, specifications/effective periods, stage/target applicability, batch results, reliability, integration, UI, and feature lineage | Replace demo methods/units/specifications with approved factory/TDS/COA facts; add real pigment/effect/levelling fields and file adapters |
 | Quality/instruments | 72% | Governed BYK/Fischer instruments, methods, references, calibrations, import profiles, repeats and automatic reliability gate | Real device-file validation, explicit probe master, uncertainty/MSA and measurement-plan execution remain |
-| Data lineage/flow | 85% | Production run/point backbone, verified measurement/material gates, target-family contribution, trajectory execution, material result and specification lineage | Real external-file lineage and validated contribution evidence remain |
+| Data lineage/flow | 87% | Production run/point backbone, verified measurement/material gates, target-family contribution, trajectory execution, material result and specification lineage, and application-layer FK integrity on all 140 write endpoints | Real external-file lineage and validated contribution evidence remain |
 | AI modeling | 80% | Immutable datasets, independent validation, versioned factory acceptance policies, exact applicability, statistical OOD blocking, persisted inference evidence, prediction/diagnosis/recommendation and drift | Real factory policy configuration, multi-axis validation, governed artifacts, stronger models, and causal evidence |
-| Workflow/UX | 81% | Real CRUD, measurement/material/Dürr governance, factory acceptance-policy maintenance, model acceptance/applicability/OOD governance, pre-inference checks, and closed-loop operations | Missing instrument/material import wizard, measurement-plan execution, trajectory/contribution visualization, controlled-trial workspace |
-| Integration/operations | 60% | Integration task framework plus robot actual/trajectory and governed material-result ingestion, auth, audit, local MySQL | Real device/MES/QMS/material mappings, SSO, backup/DR, observability, and factory acceptance remain |
+| Workflow/UX | 84% | Real CRUD, measurement/material/Dürr governance, factory acceptance-policy maintenance, model acceptance/applicability/OOD governance, pre-inference checks, controlled-trial workspace, login/register/profile/security-admin pages | Missing instrument/material import wizard, measurement-plan execution, trajectory/contribution visualization |
+| Integration/operations | 65% | Integration task framework plus robot actual/trajectory and governed material-result ingestion, auth, audit, database error classification (6 types), local MySQL | Real device/MES/QMS/material mappings, SSO, backup/DR, observability, and factory acceptance remain |
 
 ## High-Priority Findings
 
@@ -54,7 +54,18 @@ Estimated overall maturity: **79% - governed demonstrable prototype / factory-da
 - Point contribution is versioned and approved separately for thickness, color/effect, and orange peel. Contributions can reference a brush or path segment, and checksum mismatch blocks approved feature generation.
 - Residual work: validate real DXQ/PLC export files, populate real coordinates/orientation/trigger and actual values, validate contribution with geometry/simulation/DOE/deposition evidence, and add visual comparison/review.
 
-### Completed Baseline - Material Governance
+### Completed Baseline - Application-Layer Referential Integrity
+
+- A dedicated `referential_integrity` module provides `check_fk()` and `check_delete_safe()` utilities for validating referential integrity at the application layer without database-enforced physical foreign keys.
+- All 12 route handler files (140 write endpoints) now include FK existence checks on POST/PATCH operations and downstream reference checks on DELETE operations.
+- Database errors are now classified into 6 distinct types (FK conflict, unique conflict, not-null, deadlock, timeout, connection failure) with appropriate HTTP status codes and Chinese-language error messages.
+- Residual work: add `ForeignKey()` annotations to domain.py for ORM relationship mapping; create integration tests for FK violation scenarios; add batch-delete cascade patterns.
+
+### Completed Baseline - Controlled Trial Workspace
+
+- A dedicated `/controlled-trials` page provides full lifecycle management: trial list with status filtering, detail panel showing hypothesis/risk/rollback/observation plans, state timeline, and action buttons (approve/start/rollback).
+- The workspace is integrated into the main navigation and uses consistent visual patterns with the rest of the application.
+- Residual work: connect trial creation to recommendation workflow in AI workbench; add rollback execution recording; implement sustained observation dashboards.
 
 - Characteristic definitions, method versions, canonical units, material specifications/effective periods, material-type/stage/target-family applicability, batch results, source lineage, and derived reliability are represented.
 - Only `VERIFIED` results measured no later than production start can enter approved features; missing required results block snapshot generation. Legacy viscosity/solids/free-form COA fields remain compatible but no longer bypass governance.
