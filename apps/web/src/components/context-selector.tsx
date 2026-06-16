@@ -1,7 +1,7 @@
 "use client";
 
-import { ChevronDown, Cog, Factory, Layers, PaintBucket } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Cog, Factory, Layers, PaintBucket } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { useAuth } from "@/lib/auth-context";
 

@@ -1056,20 +1056,24 @@ export function AiWorkbench() {
               </> : null}
               {!driftLoading && !driftReport ? <div className="master-empty"><Activity /> 请选择模型版本查看治理报告</div> : null}
               {selectedModel?.evaluation_metrics?.multi_axis_validation ? (() => {
-                const multiAxis = selectedModel.evaluation_metrics.multi_axis_validation as { axes: Record<string, { rmse: number | null; r2: number | null; status: string; validation_sample_count?: number }> };
-                const entries = Object.entries(multiAxis.axes || {});
+                const raw = selectedModel.evaluation_metrics.multi_axis_validation as unknown as Record<string, unknown>;
+                const axes = raw && typeof raw === "object" && "axes" in raw ? (raw.axes as Record<string, Record<string, unknown>>) : null;
+                const entries = axes ? Object.entries(axes) : [];
                 if (entries.length === 0) return null;
                 return (
                   <div className="validation-chart-panel">
                     <div className="program-subheading"><div><span className="eyebrow">Multi-Axis Validation</span><h3>多轴验证证据</h3></div></div>
                     <ValidationChart
-                      axes={entries.map(([axis, summary]) => ({
-                        axis,
-                        rmse: summary.rmse ?? null,
-                        r2: summary.r2 ?? null,
-                        status: summary.status ?? "UNKNOWN",
-                        sampleCount: summary.validation_sample_count ?? 0,
-                      }))}
+                      axes={entries.map(([axis, summary]) => {
+                        const s = summary as Record<string, unknown>;
+                        return {
+                          axis,
+                          rmse: (s.rmse as number | null) ?? null,
+                          r2: (s.r2 as number | null) ?? null,
+                          status: (s.status as string) ?? "UNKNOWN",
+                          sampleCount: (s.validation_sample_count as number) ?? 0,
+                        };
+                      })}
                     />
                   </div>
                 );
