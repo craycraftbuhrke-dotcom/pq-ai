@@ -81,7 +81,7 @@ backend:image:
     - test -n "${PYTHON_IMAGE}"
     - echo "${CI_REGISTRY_PASSWORD}" | docker login -u "${CI_REGISTRY_USER}" --password-stdin "${CI_REGISTRY}"
   script:
-    - echo "Building backend image from ${PROJECT_GIT_REPOSITORY} with dockerfile.backed"
-    - docker build --pull --build-arg PYTHON_IMAGE="${PYTHON_IMAGE}" -f dockerfile.backed -t "${BACKEND_IMAGE}" -t "${BACKEND_LATEST_IMAGE}" .
+    - echo "Building backend image from ${PROJECT_GIT_REPOSITORY} with dockerfile.backend"
+    - docker build --pull --build-arg PYTHON_IMAGE="${PYTHON_IMAGE}" -f dockerfile.backend -t "${BACKEND_IMAGE}" -t "${BACKEND_LATEST_IMAGE}" .
     - docker push "${BACKEND_IMAGE}"
     - docker push "${BACKEND_LATEST_IMAGE}"

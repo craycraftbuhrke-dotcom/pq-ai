@@ -31,8 +31,8 @@
 
 | 变量 | 必填 | 敏感 | 用途 |
 | --- | --- | --- | --- |
-| `NODE_IMAGE` | 是 | 否 | 前端 Docker 构建基础镜像。 |
-| `PYTHON_IMAGE` | 是 | 否 | 后端 Docker 构建基础镜像。 |
+| `NODE_IMAGE` | 否 | 否 | GitLab 前端扫描/构建 Job 使用的 Node.js 执行镜像，默认 `node:22-alpine`；根目录 `dockerfile.frontend` 已固定基础镜像，避免平台未传 build-arg 时失败。 |
+| `PYTHON_IMAGE` | 否 | 否 | GitLab 后端扫描/构建 Job 使用的 Python 执行镜像，默认 `python:3.12-slim`；根目录 `dockerfile.backend` / `dockerfile.backed` 已固定基础镜像，避免平台未传 build-arg 时失败。 |
 | `NEXT_PUBLIC_API_URL` | 是 | 否 | 前端构建时注入的浏览器可见 API 地址。 |
 
 ## 4. MySQL / Compose 本地变量
@@ -72,7 +72,7 @@
 ## 6. 注入规则
 
 - 本地开发：复制 `.env.example` 为 `.env`，把所有 `<replace-with-...>` 占位符替换为本地值。
-- GitLab CI：在 CI/CD Variables 中配置 `NODE_IMAGE`、`PYTHON_IMAGE`、`NEXT_PUBLIC_API_URL` 和镜像仓库登录变量；密钥类变量必须 masked/protected。
+- GitLab CI：在 CI/CD Variables 中配置 `NEXT_PUBLIC_API_URL` 和镜像仓库登录变量；如需替换 CI 执行镜像，可覆盖 `NODE_IMAGE`、`PYTHON_IMAGE`，密钥类变量必须 masked/protected。
 - 容器运行：用容器平台环境变量或 Secret 注入 `DATABASE_URL`、`BOOTSTRAP_API_KEY`、`API_KEY`、数据库密码等敏感信息。
 - 前端安全：只有 `NEXT_PUBLIC_` 前缀变量会暴露给浏览器；`API_KEY` 必须只存在于 Next.js 服务端运行环境。
 - 生产安全：`API_AUTH_ENABLED` 必须为 `true`，`SEED_DEMO_DATA` 通常为 `false`，不得使用示例或测试密钥。
