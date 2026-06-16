@@ -109,6 +109,7 @@ export const navItems = [
   { href: "/", label: "工艺质量驾驶舱", icon: "dashboard" },
   { href: "/programs", label: "喷涂程序中心", icon: "program" },
   { href: "/production", label: "生产实绩中心", icon: "production" },
+  { href: "/material-trends", label: "材料批次趋势", icon: "material" },
   { href: "/quality", label: "质量数据中心", icon: "quality" },
   { href: "/quality-monitor", label: "数据质量监控", icon: "monitor" },
   { href: "/import-wizard", label: "数据导入向导", icon: "import" },

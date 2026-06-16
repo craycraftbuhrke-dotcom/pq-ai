@@ -28,6 +28,7 @@ export const navigationIcons: Record<string, LucideIcon> = {
   audit: ScrollText,
   import: FileSpreadsheet,
   integration: PlugZap,
+  material: Boxes,
   production: Activity,
 };
 

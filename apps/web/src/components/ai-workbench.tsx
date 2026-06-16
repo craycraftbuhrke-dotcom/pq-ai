@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { ValidationChart } from "@/components/validation-chart";
+
 type ModelVersion = {
   id: string;
   model_code: string;
@@ -1053,6 +1055,20 @@ export function AiWorkbench() {
                 </div>
               </> : null}
               {!driftLoading && !driftReport ? <div className="master-empty"><Activity /> 请选择模型版本查看治理报告</div> : null}
+              {selectedMultiAxis && selectedAxisEntries.length > 0 ? (
+                <div className="validation-chart-panel">
+                  <div className="program-subheading"><div><span className="eyebrow">Multi-Axis Validation</span><h3>多轴验证证据</h3></div></div>
+                  <ValidationChart
+                    axes={selectedAxisEntries.map(([axis, summary]) => ({
+                      axis,
+                      rmse: (summary as Record<string, unknown>).rmse as number | null ?? null,
+                      r2: (summary as Record<string, unknown>).r2 as number | null ?? null,
+                      status: (summary as Record<string, unknown>).status as string ?? "UNKNOWN",
+                      sampleCount: (summary as Record<string, unknown>).validation_sample_count as number ?? 0,
+                    }))}
+                  />
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}
