@@ -14,6 +14,14 @@ const resourcePaths: Record<string, string> = {
   "measurement-group-points": "/measurement-group-points",
 };
 
+function stringifyApiError(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) || (value && typeof value === "object")) {
+    return JSON.stringify(value);
+  }
+  return undefined;
+}
+
 export async function proxyMasterDataRequest(
   request: Request,
   resource: string,
@@ -47,7 +55,7 @@ export async function proxyMasterDataRequest(
     const result = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     if (!response.ok) {
       return NextResponse.json(
-        { error: result.detail ?? "后端服务返回错误" },
+        { error: stringifyApiError(result.detail) ?? stringifyApiError(result.error) ?? "后端服务返回错误" },
         { status: response.status },
       );
     }

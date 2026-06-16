@@ -5,6 +5,7 @@ export type CurrentActor = {
   roles: string[];
   permissions: string[];
   authEnabled: boolean;
+  connectionError?: string;
 };
 
 type ApiActor = {
@@ -25,6 +26,25 @@ export const fallbackActor: CurrentActor = {
   authEnabled: false,
 };
 
+type ApiErrorPayload = {
+  detail?: unknown;
+  error?: unknown;
+};
+
+
+function stringifyApiError(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) || (value && typeof value === "object")) {
+    return JSON.stringify(value);
+  }
+  return undefined;
+}
+
+
+function withConnectionError(message: string): CurrentActor {
+  return { ...fallbackActor, connectionError: message };
+}
+
 export function apiRequestHeaders(): HeadersInit {
   const apiKey = process.env.API_KEY;
   return apiKey ? { "x-api-key": apiKey } : {};
@@ -33,7 +53,7 @@ export function apiRequestHeaders(): HeadersInit {
 export async function getCurrentActor(): Promise<CurrentActor> {
   const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
   if (!apiUrl) {
-    return fallbackActor;
+    return withConnectionError("后端 API 地址未配置");
   }
   try {
     const response = await fetch(`${apiUrl}/auth/me`, {
@@ -42,7 +62,12 @@ export async function getCurrentActor(): Promise<CurrentActor> {
       signal: AbortSignal.timeout(2500),
     });
     if (!response.ok) {
-      return fallbackActor;
+      const payload = (await response.json().catch(() => ({}))) as ApiErrorPayload;
+      return withConnectionError(
+        stringifyApiError(payload.detail) ??
+          stringifyApiError(payload.error) ??
+          `后端认证接口返回错误（HTTP ${response.status}）`,
+      );
     }
     const actor = (await response.json()) as ApiActor;
     return {
@@ -53,7 +78,8 @@ export async function getCurrentActor(): Promise<CurrentActor> {
       permissions: actor.permissions,
       authEnabled: actor.auth_enabled,
     };
-  } catch {
-    return fallbackActor;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "无法连接后端认证接口";
+    return withConnectionError(`无法连接后端认证接口：${message}`);
   }
 }

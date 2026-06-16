@@ -16,6 +16,8 @@
 | `API_HOST` | 是 | 否 | Uvicorn 监听地址，由容器运行时注入。 |
 | `API_PORT` | 是 | 否 | Uvicorn 监听端口，由容器运行时注入。 |
 
+说明：生产镜像启动时不会执行 `alembic upgrade head`，也不会自动创建数据库或数据表。所有 DDL、建库、建表和表结构变更必须按公司工单审批流程手动执行；如果数据库不可连接、权限不足或表结构不匹配，后端会继续启动，并在对应 API 返回明确的数据库错误，前端会展示告警。
+
 ## 2. 前端运行时变量
 
 | 变量 | 必填 | 敏感 | 用途 |
@@ -75,4 +77,4 @@
 - GitLab CI：在 CI/CD Variables 中配置 `NEXT_PUBLIC_API_URL` 和镜像仓库登录变量；如需替换 CI 执行镜像，可覆盖 `NODE_IMAGE`、`PYTHON_IMAGE`，密钥类变量必须 masked/protected。
 - 容器运行：用容器平台环境变量或 Secret 注入 `DATABASE_URL`、`BOOTSTRAP_API_KEY`、`API_KEY`、数据库密码等敏感信息。
 - 前端安全：只有 `NEXT_PUBLIC_` 前缀变量会暴露给浏览器；`API_KEY` 必须只存在于 Next.js 服务端运行环境。
-- 生产安全：`API_AUTH_ENABLED` 必须为 `true`，`SEED_DEMO_DATA` 通常为 `false`，不得使用示例或测试密钥。
+- 生产安全：`API_AUTH_ENABLED` 必须为 `true`，`SEED_DEMO_DATA` 通常为 `false`，不得使用示例或测试密钥；生产环境不得在服务启动时自动执行 Alembic 或任何 DDL。

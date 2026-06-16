@@ -17,6 +17,7 @@ type AppShellProps = {
 export function AppShell({ actor, children }: AppShellProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const hasConnectionError = Boolean(actor.connectionError);
 
   return (
     <div className="app-shell">
@@ -56,11 +57,11 @@ export function AppShell({ actor, children }: AppShellProps) {
           })}
         </nav>
         <div className="sidebar-foot">
-          <div className="system-state">
-            <span className="live-dot" />
+          <div className={`system-state ${hasConnectionError ? "system-state-warning" : ""}`}>
+            <span className={hasConnectionError ? "warning-dot" : "live-dot"} />
             <div>
-              <strong>数据链路正常</strong>
-              <span>最后同步 08:42:16</span>
+              <strong>{hasConnectionError ? "数据链路异常" : "数据链路正常"}</strong>
+              <span>{actor.connectionError ?? "最后同步 08:42:16"}</span>
             </div>
           </div>
           <div className="identity">

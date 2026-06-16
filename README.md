@@ -66,11 +66,10 @@ uvicorn app.main:app --reload
 
 API 默认要求 MySQL。单元测试使用 SQLite 内存库验证模型和服务行为。
 
-数据库结构由 Alembic 管理。手工初始化与演示数据命令：
+数据库结构变更必须按公司 DDL 工单审批流程手动执行，服务启动不会自动运行 Alembic 或创建数据表。Alembic 迁移文件仅作为整理审批 SQL 的结构来源。表结构审批执行完成后，如需写入演示数据，可单独运行：
 
 ```bash
 cd services/api
-alembic upgrade head
 python -m app.db.seed_demo
 ```
 

@@ -1,8 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.router import api_router
 from app.core.config import settings
+from app.core.database_errors import database_error_response
 from app.middleware.security import security_and_audit_middleware
 
 app = FastAPI(
@@ -19,6 +21,12 @@ app.add_middleware(
 )
 app.middleware("http")(security_and_audit_middleware)
 app.include_router(api_router, prefix=settings.api_prefix)
+
+
+@app.exception_handler(SQLAlchemyError)
+async def handle_database_error(request: Request, exc: SQLAlchemyError):
+    request_id = getattr(request.state, "request_id", None)
+    return database_error_response(exc, request_id)
 
 
 @app.get("/")

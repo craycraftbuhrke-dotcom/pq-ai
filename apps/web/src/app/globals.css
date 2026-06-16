@@ -200,6 +200,11 @@ textarea {
   padding: 10px;
 }
 
+.system-state-warning {
+  background: var(--red-soft);
+  border-color: rgb(214 74 67 / 25%);
+}
+
 .system-state strong,
 .identity strong {
   font-size: 12px;
@@ -229,6 +234,15 @@ textarea {
   background: var(--teal);
   border-radius: 50%;
   box-shadow: 0 0 0 4px rgb(50 211 176 / 8%);
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+}
+
+.warning-dot {
+  background: var(--red);
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgb(214 74 67 / 10%);
   display: inline-block;
   height: 7px;
   width: 7px;
