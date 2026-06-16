@@ -79,6 +79,14 @@ def test_endpoint_permissions_cover_security_and_closed_loop_actions() -> None:
         == "ai.approve"
     )
     assert (
+        required_permission("POST", "/api/v1/ai/recommendations/rec-1/controlled-trial")
+        == "ai.approve"
+    )
+    assert (
+        required_permission("POST", "/api/v1/ai/controlled-trials/trial-1/approval")
+        == "ai.approve"
+    )
+    assert (
         required_permission("POST", "/api/v1/ai/recommendations/rec-1/execution")
         == "ai.execute"
     )

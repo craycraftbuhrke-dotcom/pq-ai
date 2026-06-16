@@ -152,6 +152,12 @@ def required_permission(method: str, path: str) -> str | None:
         "/api/v1/ai/diagnoses"
     ):
         return "ai.predict"
+    if path.endswith("/controlled-trial") and "/api/v1/ai/recommendations/" in path:
+        return "ai.approve"
+    if path.endswith("/approval") and "/api/v1/ai/controlled-trials/" in path:
+        return "ai.approve"
+    if path.startswith("/api/v1/ai/controlled-trials"):
+        return "ai.approve"
     if path.endswith("/approval") and "/api/v1/ai/recommendations/" in path:
         return "ai.approve"
     if path.endswith("/execution") and "/api/v1/ai/recommendations/" in path:

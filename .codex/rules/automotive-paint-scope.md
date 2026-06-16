@@ -37,5 +37,5 @@ These rules are mandatory for code, schema, APIs, UI, seed data, tests, analytic
 - Every non-demo model must satisfy an active `FACTORY_APPROVED` acceptance-policy version for every applicable factory and target metric. Demo policies are permitted only for demo models and must never be represented as factory-approved thresholds.
 - Prediction, diagnosis, and recommendation must block out-of-scope, incomplete, or out-of-distribution inputs and persist the governance evidence. OOD thresholds are statistical policies, never substitutes for device, material, or process safety limits.
 - Model explanations are associations unless supported by controlled causal evidence.
-- Recommendations require approved constraints, human approval, execution capture, verification, and rollback.
+- Recommendations require approved constraints, an approved controlled-trial plan, human approval, execution capture, verification, rollback plan, and sustained observation.
 - Never invent factory limits, TDS values, device semantics, instrument fields, or standards.

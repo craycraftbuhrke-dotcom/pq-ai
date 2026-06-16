@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.domain.scope_policy import ScopeViolation, require_approved_target_metric
 from app.models.domain import (
     ClosedLoopEvaluation,
+    ControlledTrial,
     DiagnosisResult,
     ModelVersion,
     PredictionResult,
@@ -17,6 +18,8 @@ from app.models.domain import (
     RecommendationAction,
 )
 from app.schemas.common import (
+    ControlledTrialApproval,
+    ControlledTrialCreate,
     DiagnosisRequest,
     PredictionRequest,
     RecommendationApproval,
@@ -102,6 +105,35 @@ def _serialize_recommendation(recommendation: Recommendation, db: Session) -> di
             if evaluation
             else None
         ),
+    }
+
+
+def _serialize_controlled_trial(trial: ControlledTrial) -> dict:
+    return {
+        "id": trial.id,
+        "trial_no": trial.trial_no,
+        "recommendation_id": trial.recommendation_id,
+        "production_run_id": trial.production_run_id,
+        "measurement_point_id": trial.measurement_point_id,
+        "target_metric": trial.target_metric,
+        "hypothesis": trial.hypothesis,
+        "evidence_type": trial.evidence_type,
+        "expected_outcome": trial.expected_outcome,
+        "risk_assessment": trial.risk_assessment,
+        "rollback_plan": trial.rollback_plan,
+        "sustained_observation_plan": trial.sustained_observation_plan,
+        "constraint_evidence": trial.constraint_evidence,
+        "status": trial.status,
+        "requested_by": trial.requested_by,
+        "requested_at": trial.requested_at,
+        "approved_by": trial.approved_by,
+        "approved_at": trial.approved_at,
+        "approval_comment": trial.approval_comment,
+        "started_at": trial.started_at,
+        "completed_at": trial.completed_at,
+        "completion_summary": trial.completion_summary,
+        "created_at": trial.created_at,
+        "updated_at": trial.updated_at,
     }
 
 
@@ -216,6 +248,107 @@ def get_recommendation(recommendation_id: str, db: Session = Depends(get_db)) ->
     return _serialize_recommendation(recommendation, db)
 
 
+@router.get("/controlled-trials")
+def list_controlled_trials(db: Session = Depends(get_db)) -> list[dict]:
+    trials = list(
+        db.scalars(select(ControlledTrial).order_by(ControlledTrial.created_at.desc()).limit(200))
+    )
+    return [_serialize_controlled_trial(trial) for trial in trials]
+
+
+@router.get("/controlled-trials/{trial_id}")
+def get_controlled_trial(trial_id: str, db: Session = Depends(get_db)) -> dict:
+    trial = db.get(ControlledTrial, trial_id)
+    if not trial:
+        raise HTTPException(status_code=404, detail="受控试验不存在")
+    return _serialize_controlled_trial(trial)
+
+
+@router.post("/recommendations/{recommendation_id}/controlled-trial")
+def create_controlled_trial(
+    recommendation_id: str,
+    payload: ControlledTrialCreate,
+    db: Session = Depends(get_db),
+) -> dict:
+    recommendation = db.get(Recommendation, recommendation_id)
+    if not recommendation:
+        raise HTTPException(status_code=404, detail="推荐任务不存在")
+    if recommendation.status != "PENDING":
+        raise HTTPException(status_code=409, detail="仅待审批推荐可以创建受控试验计划")
+    if not recommendation.constraints_checked:
+        raise HTTPException(status_code=422, detail="推荐尚未通过约束校验，不能创建试验计划")
+    existing = db.scalar(
+        select(ControlledTrial).where(ControlledTrial.recommendation_id == recommendation.id)
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="该推荐已存在受控试验计划")
+    actions = list(
+        db.scalars(
+            select(RecommendationAction).where(
+                RecommendationAction.recommendation_id == recommendation.id
+            )
+        )
+    )
+    now = datetime.now(UTC)
+    trial = ControlledTrial(
+        recommendation_id=recommendation.id,
+        trial_no=f"TRIAL-{now.strftime('%Y%m%d%H%M%S%f')}",
+        production_run_id=recommendation.production_run_id,
+        measurement_point_id=recommendation.measurement_point_id,
+        target_metric=recommendation.target_metric,
+        hypothesis=payload.hypothesis,
+        evidence_type=payload.evidence_type,
+        expected_outcome=payload.expected_outcome,
+        risk_assessment=payload.risk_assessment,
+        rollback_plan=payload.rollback_plan,
+        sustained_observation_plan=payload.sustained_observation_plan,
+        constraint_evidence={
+            "constraints_checked": recommendation.constraints_checked,
+            "model_version": recommendation.model_version,
+            "predicted_improvement": recommendation.predicted_improvement,
+            "actions": [
+                {
+                    "action_id": action.id,
+                    "parameter_code": action.parameter_code,
+                    "current_value": action.current_value,
+                    "recommended_value": action.recommended_value,
+                    "hard_min": action.hard_min,
+                    "hard_max": action.hard_max,
+                    "unit": action.unit,
+                }
+                for action in actions
+            ],
+        },
+        status="PLANNED",
+        requested_by=payload.requested_by,
+        requested_at=now,
+    )
+    db.add(trial)
+    db.commit()
+    db.refresh(trial)
+    return _serialize_controlled_trial(trial)
+
+
+@router.post("/controlled-trials/{trial_id}/approval")
+def approve_controlled_trial(
+    trial_id: str,
+    payload: ControlledTrialApproval,
+    db: Session = Depends(get_db),
+) -> dict:
+    trial = db.get(ControlledTrial, trial_id)
+    if not trial:
+        raise HTTPException(status_code=404, detail="受控试验不存在")
+    if trial.status != "PLANNED":
+        raise HTTPException(status_code=409, detail="仅已计划试验可以审批")
+    trial.status = "APPROVED" if payload.approved else "REJECTED"
+    trial.approved_by = payload.approved_by
+    trial.approved_at = datetime.now(UTC)
+    trial.approval_comment = payload.comment
+    db.commit()
+    db.refresh(trial)
+    return _serialize_controlled_trial(trial)
+
+
 @router.get("/evaluations")
 def list_evaluations(db: Session = Depends(get_db)) -> list[dict]:
     evaluations = list(
@@ -259,6 +392,11 @@ def approve_recommendation(
         raise HTTPException(status_code=409, detail="仅待审批推荐可以执行审批")
     if payload.approved and not recommendation.constraints_checked:
         raise HTTPException(status_code=422, detail="推荐尚未通过安全约束校验")
+    trial = db.scalar(
+        select(ControlledTrial).where(ControlledTrial.recommendation_id == recommendation.id)
+    )
+    if payload.approved and (not trial or trial.status != "APPROVED"):
+        raise HTTPException(status_code=422, detail="推荐必须先具备已批准的受控试验计划")
     recommendation.status = "APPROVED" if payload.approved else "REJECTED"
     recommendation.approved_by = payload.approved_by
     recommendation.approved_at = datetime.now(UTC)
@@ -324,6 +462,12 @@ def execute_recommendation(
     recommendation.status = "EXECUTED"
     recommendation.executed_by = payload.executed_by
     recommendation.executed_at = datetime.now(UTC)
+    trial = db.scalar(
+        select(ControlledTrial).where(ControlledTrial.recommendation_id == recommendation.id)
+    )
+    if trial and trial.status == "APPROVED":
+        trial.status = "RUNNING"
+        trial.started_at = recommendation.executed_at
     db.commit()
     return {
         "id": recommendation.id,
@@ -424,6 +568,17 @@ def verify_recommendation(
     )
     db.add(evaluation)
     recommendation.status = "VERIFIED"
+    trial = db.scalar(
+        select(ControlledTrial).where(ControlledTrial.recommendation_id == recommendation.id)
+    )
+    if trial and trial.status in {"APPROVED", "RUNNING"}:
+        trial.status = "VERIFIED" if evaluation.is_effective else "INEFFECTIVE"
+        trial.completed_at = datetime.now(UTC)
+        trial.completion_summary = (
+            "受控试验复测有效，推荐可进入持续观察。"
+            if evaluation.is_effective
+            else "受控试验复测未达预期，需执行回滚或重新制定假设。"
+        )
     db.commit()
     db.refresh(evaluation)
     return {

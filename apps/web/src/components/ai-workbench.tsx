@@ -216,6 +216,30 @@ type Evaluation = {
   verified_by: string;
   conclusion?: string | null;
 };
+type ControlledTrial = {
+  id: string;
+  trial_no: string;
+  recommendation_id: string;
+  production_run_id: string;
+  measurement_point_id: string;
+  target_metric: string;
+  hypothesis: string;
+  evidence_type: string;
+  expected_outcome: string;
+  risk_assessment: string;
+  rollback_plan: string;
+  sustained_observation_plan: string;
+  constraint_evidence: Record<string, unknown>;
+  status: string;
+  requested_by: string;
+  requested_at: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  approval_comment?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  completion_summary?: string | null;
+};
 type Recommendation = {
   id: string;
   recommendation_no: string;
@@ -353,6 +377,9 @@ function statusLabel(status: string): string {
     REJECTED: "已驳回",
     EXECUTED: "已执行",
     VERIFIED: "已复测",
+    PLANNED: "已计划",
+    RUNNING: "试验中",
+    INEFFECTIVE: "未达预期",
     ACCEPTED: "验收通过",
     BUILT: "已构建",
     IN_SCOPE: "适用范围内",
@@ -367,6 +394,11 @@ function statusLabel(status: string): string {
     NO_EVALUATED_FOLDS: "无有效折",
     FAILED: "失败",
     REGISTERED: "已登记",
+    ASSOCIATION: "关联证据",
+    RULE: "规则证据",
+    SIMULATION: "仿真证据",
+    DOE: "DOE 证据",
+    CONTROLLED_CHANGE: "受控变更证据",
   }[status] ?? status;
 }
 
@@ -403,6 +435,7 @@ export function AiWorkbench() {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [controlledTrials, setControlledTrials] = useState<ControlledTrial[]>([]);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [driftReport, setDriftReport] = useState<DriftReport | null>(null);
@@ -431,7 +464,7 @@ export function AiWorkbench() {
     setLoading(true);
     setError("");
     try {
-      const [nextModels, nextDatasets, nextAcceptanceDecisions, nextAcceptancePolicies, nextApplicabilityScopes, nextOodPolicies, nextValidationFolds, nextModelArtifacts, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextMeasurements, nextMetrics] =
+      const [nextModels, nextDatasets, nextAcceptanceDecisions, nextAcceptancePolicies, nextApplicabilityScopes, nextOodPolicies, nextValidationFolds, nextModelArtifacts, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextControlledTrials, nextMeasurements, nextMetrics] =
         await Promise.all([
           request<ModelVersion[]>("/api/ai/models"),
           request<DatasetSnapshot[]>("/api/ai/models/datasets"),
@@ -445,6 +478,7 @@ export function AiWorkbench() {
           request<Prediction[]>("/api/ai/predictions"),
           request<Diagnosis[]>("/api/ai/diagnoses"),
           request<Recommendation[]>("/api/ai/recommendations"),
+          request<ControlledTrial[]>("/api/ai/controlled-trials"),
           request<Measurement[]>("/api/quality/measurements?limit=500"),
           request<MetricDefinition[]>("/api/quality/metric-definitions"),
         ]);
@@ -460,6 +494,7 @@ export function AiWorkbench() {
       setPredictions(nextPredictions);
       setDiagnoses(nextDiagnoses);
       setRecommendations(nextRecommendations);
+      setControlledTrials(nextControlledTrials);
       setMeasurements(nextMeasurements);
       setMetrics(nextMetrics);
       setSelectedModelId((current) => current || nextModels[0]?.id || "");
@@ -574,6 +609,8 @@ export function AiWorkbench() {
   const selectedPrediction = predictions.find((item) => item.id === selectedPredictionId);
   const selectedDiagnosis = diagnoses.find((item) => item.prediction_result_id === selectedPredictionId);
   const selectedRecommendation = recommendations.find((item) => item.id === selectedRecommendationId);
+  const selectedTrial = controlledTrials.find((item) => item.recommendation_id === selectedRecommendationId);
+  const selectedTrialApproved = selectedTrial?.status === "APPROVED";
   const verificationOptions = useMemo(() => {
     if (!selectedRecommendation) return [];
     return measurements.filter(
@@ -926,6 +963,52 @@ export function AiWorkbench() {
     }
   }
 
+  async function createControlledTrial(recommendation: Recommendation) {
+    setSubmitting(`trial-create-${recommendation.id}`);
+    try {
+      await request<ControlledTrial>(`/api/ai/recommendations/${recommendation.id}/controlled-trial`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hypothesis: `${recommendation.diagnosis_summary} 执行受约束推荐后，${recommendation.target_metric} 应沿预测改善方向变化。`,
+          evidence_type: "ASSOCIATION",
+          expected_outcome: `目标指标改善方向与模型预测一致，预期改善 ${formatNumber(recommendation.predicted_improvement)}。`,
+          risk_assessment: "单次调整值保持在参数硬边界内；执行后必须由质量工程师复测确认。",
+          rollback_plan: "若复测未改善或出现副作用，恢复推荐前刷子/程序参数版本并记录原因。",
+          sustained_observation_plan: "至少跟踪后续 3 台同车型同色同点位质量结果，确认改善稳定。",
+          requested_by: "陈工",
+        }),
+      });
+      showSuccess("受控试验计划已创建，需工艺负责人批准后才能批准推荐");
+      await reload();
+    } catch (operationError) {
+      showError(operationError);
+    } finally {
+      setSubmitting("");
+    }
+  }
+
+  async function approveControlledTrial(trial: ControlledTrial, approved: boolean) {
+    setSubmitting(`trial-approval-${trial.id}`);
+    try {
+      await request<ControlledTrial>(`/api/ai/controlled-trials/${trial.id}/approval`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          approved,
+          approved_by: "工艺负责人",
+          comment: approved ? "假设、风险和回滚方案完整，同意进入推荐审批。" : "试验方案不满足现场执行要求。",
+        }),
+      });
+      showSuccess(approved ? "受控试验计划已批准，可以批准推荐" : "受控试验计划已驳回");
+      await reload();
+    } catch (operationError) {
+      showError(operationError);
+    } finally {
+      setSubmitting("");
+    }
+  }
+
   async function approveRecommendation(recommendation: Recommendation, approved: boolean) {
     setSubmitting(`approval-${recommendation.id}`);
     try {
@@ -1202,11 +1285,20 @@ export function AiWorkbench() {
               {selectedRecommendation ? <div className="ai-evidence-panel">
                 <div className="program-subheading"><div><span className="eyebrow">Closed Loop</span><h3>{selectedRecommendation.recommendation_no}</h3></div><span className="record-status status-on">{statusLabel(selectedRecommendation.status)}</span></div>
                 <p className="ai-summary">{selectedRecommendation.diagnosis_summary}</p>
+                <div className="ai-trial-panel">
+                  <div className="ai-trial-heading">
+                    <span><b>受控试验计划</b><small>推荐审批前必须具备假设、风险、回滚和持续观察方案。</small></span>
+                    <span className={`status-badge ${selectedTrial?.status === "APPROVED" || selectedTrial?.status === "VERIFIED" ? "status-healthy" : selectedTrial?.status === "REJECTED" || selectedTrial?.status === "INEFFECTIVE" ? "status-risk" : "status-warning"}`}>{selectedTrial ? statusLabel(selectedTrial.status) : "未创建"}</span>
+                  </div>
+                  {selectedTrial ? <div className="ai-trial-details"><p><b>假设</b>{selectedTrial.hypothesis}</p><p><b>证据</b>{statusLabel(selectedTrial.evidence_type)}</p><p><b>预期</b>{selectedTrial.expected_outcome}</p><p><b>风险</b>{selectedTrial.risk_assessment}</p><p><b>回滚</b>{selectedTrial.rollback_plan}</p><p><b>持续观察</b>{selectedTrial.sustained_observation_plan}</p>{selectedTrial.completion_summary ? <p><b>结论</b>{selectedTrial.completion_summary}</p> : null}</div> : <p className="ai-hint">当前推荐尚未纳入受控试验，不能直接批准执行。</p>}
+                  {selectedRecommendation.status === "PENDING" && !selectedTrial ? <button className="button button-secondary" type="button" disabled={submitting === `trial-create-${selectedRecommendation.id}`} onClick={() => void createControlledTrial(selectedRecommendation)}>{submitting === `trial-create-${selectedRecommendation.id}` ? <LoaderCircle className="spin" /> : <ShieldCheck />} 创建受控试验计划</button> : null}
+                  {selectedRecommendation.status === "PENDING" && selectedTrial?.status === "PLANNED" ? <div className="ai-workflow-actions compact-actions"><button className="button button-secondary danger-button" type="button" disabled={submitting === `trial-approval-${selectedTrial.id}`} onClick={() => void approveControlledTrial(selectedTrial, false)}><X /> 驳回试验</button><button className="button button-secondary" type="button" disabled={submitting === `trial-approval-${selectedTrial.id}`} onClick={() => void approveControlledTrial(selectedTrial, true)}>{submitting === `trial-approval-${selectedTrial.id}` ? <LoaderCircle className="spin" /> : <Check />} 批准试验计划</button></div> : null}
+                </div>
                 <div className="ai-action-table">
                   <div className="ai-action-row ai-action-head"><span>参数</span><span>当前值</span><span>推荐值</span><span>实际执行值</span><span>硬边界</span></div>
                   {selectedRecommendation.actions.map((action) => <div className="ai-action-row" key={action.id}><span><strong>{action.parameter_name}</strong><small>{action.process_stage} · {action.parameter_code}</small></span><span>{formatNumber(action.current_value)} {action.unit}</span><span>{formatNumber(action.recommended_value)} {action.unit}</span><span>{selectedRecommendation.status === "APPROVED" ? <input type="number" step="any" value={executedValues[action.id] ?? ""} onChange={(event) => setExecutedValues((current) => ({ ...current, [action.id]: event.target.value }))} /> : `${formatNumber(action.executed_value)} ${action.unit}`}</span><span>{formatNumber(action.hard_min)} - {formatNumber(action.hard_max)}</span></div>)}
                 </div>
-                {selectedRecommendation.status === "PENDING" ? <div className="ai-workflow-actions"><button className="button button-secondary danger-button" onClick={() => void approveRecommendation(selectedRecommendation, false)}><X /> 驳回</button><button className="button button-primary" onClick={() => void approveRecommendation(selectedRecommendation, true)}><Check /> 批准受控试验</button></div> : null}
+                {selectedRecommendation.status === "PENDING" ? <div className="ai-workflow-actions"><button className="button button-secondary danger-button" onClick={() => void approveRecommendation(selectedRecommendation, false)}><X /> 驳回推荐</button><button className="button button-primary" disabled={!selectedTrialApproved || submitting === `approval-${selectedRecommendation.id}`} onClick={() => void approveRecommendation(selectedRecommendation, true)}><Check /> 批准推荐执行</button></div> : null}
                 {selectedRecommendation.status === "APPROVED" ? <div className="ai-workflow-actions"><button className="button button-primary" onClick={() => void executeRecommendation(selectedRecommendation)}><Play /> 记录实际执行</button></div> : null}
                 {selectedRecommendation.status === "EXECUTED" ? <div className="ai-verification"><label className="form-field"><span>选择执行后的同生产事件、同点位复测记录</span><select value={verificationMeasurementId} onChange={(event) => setVerificationMeasurementId(event.target.value)}><option value="">请选择复测数据</option>{verificationOptions.map((measurement) => <option key={measurement.id} value={measurement.id}>{measurement.data_no} · {new Date(measurement.measured_at).toLocaleString("zh-CN")}</option>)}</select></label>{!verificationOptions.length ? <p className="ai-hint">请先在质量数据中心录入执行后的复测数据，或通过 QMS 集成事件写入。</p> : null}<button className="button button-primary" disabled={!verificationOptions.length} onClick={() => void verifyRecommendation(selectedRecommendation)}><ShieldCheck /> 完成复测评价</button></div> : null}
                 {selectedRecommendation.evaluation ? <div className={`ai-evaluation ${selectedRecommendation.evaluation.is_effective ? "effective" : "ineffective"}`}><strong>{selectedRecommendation.evaluation.is_effective ? "闭环改善有效" : "闭环改善未达预期"}</strong><span>基准 {formatNumber(selectedRecommendation.evaluation.baseline_value)} → 复测 {formatNumber(selectedRecommendation.evaluation.verified_value)}，实际改善 {formatNumber(selectedRecommendation.evaluation.actual_improvement)}</span><small>{selectedRecommendation.evaluation.verified_by} · {selectedRecommendation.evaluation.conclusion}</small></div> : null}

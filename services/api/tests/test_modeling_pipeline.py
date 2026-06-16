@@ -26,7 +26,10 @@ from app.api.routes.modeling import (
 )
 from app.api.routes.ai import (
     approve_recommendation,
+    approve_controlled_trial,
+    create_controlled_trial,
     execute_recommendation,
+    list_controlled_trials,
     get_recommendation,
     list_diagnoses,
     list_evaluations,
@@ -52,6 +55,8 @@ from app.models.domain import (
 )
 from app.schemas.common import (
     RecommendationApproval,
+    ControlledTrialApproval,
+    ControlledTrialCreate,
     RecommendationExecution,
     RecommendationExecutionAction,
     RecommendationVerification,
@@ -463,6 +468,38 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             for action in recommendation["actions"]
         )
 
+        with pytest.raises(HTTPException, match="受控试验计划"):
+            approve_recommendation(
+                recommendation["recommendation_id"],
+                RecommendationApproval(approved=True, approved_by="陈工", comment="缺少试验计划"),
+                db,
+            )
+        trial = create_controlled_trial(
+            recommendation["recommendation_id"],
+            ControlledTrialCreate(
+                hypothesis="提高清漆二站喷涂流量会改善当前点位 DOI 风险。",
+                evidence_type="ASSOCIATION",
+                expected_outcome="目标 DOI 至少提升 1.0，且不触发硬边界。",
+                risk_assessment="调整幅度受单步比例和参数硬边界约束，需关注橘皮副作用。",
+                rollback_plan="若复测未改善，恢复推荐前刷子参数版本并复测确认。",
+                sustained_observation_plan="连续跟踪后续 3 台同车型同色点位质量结果。",
+                requested_by="陈工",
+            ),
+            db,
+        )
+        assert trial["status"] == "PLANNED"
+        trial = approve_controlled_trial(
+            trial["id"],
+            ControlledTrialApproval(
+                approved=True,
+                approved_by="工艺负责人",
+                comment="假设、风险和回滚方案完整。",
+            ),
+            db,
+        )
+        assert trial["status"] == "APPROVED"
+        assert list_controlled_trials(db)[0]["id"] == trial["id"]
+
         approval = approve_recommendation(
             recommendation["recommendation_id"],
             RecommendationApproval(approved=True, approved_by="陈工", comment="受控试验"),
@@ -483,6 +520,7 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             db,
         )
         assert execution["status"] == "EXECUTED"
+        assert list_controlled_trials(db)[0]["status"] == "RUNNING"
         db.expire_all()
         persisted_recommendation = db.get(Recommendation, recommendation["recommendation_id"])
         assert persisted_recommendation.executed_by == "机器人程序员"
@@ -547,6 +585,7 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert verification["status"] == "VERIFIED"
         assert verification["actual_improvement"] == pytest.approx(1.2)
         assert verification["is_effective"] is True
+        assert list_controlled_trials(db)[0]["status"] == "VERIFIED"
         recommendation_detail = get_recommendation(recommendation["recommendation_id"], db)
         assert recommendation_detail["status"] == "VERIFIED"
         assert recommendation_detail["actions"][0]["executed_value"] is not None

@@ -34,8 +34,9 @@ Use this skill for every change that touches process stages, parameters, materia
 14. Require an active factory-approved acceptance-policy version for every applicable factory and target metric. Allow explicitly marked demo policies only for demo models.
 15. Block prediction, diagnosis, and recommendation for unsupported contexts, incomplete model inputs, or distribution-outlier inputs; persist the scope/OOD evidence with each accepted prediction.
 16. Treat diagnosis as association unless supported by controlled DOE or other causal evidence.
-17. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require human approval and post-change measurement.
-18. Reject or quarantine out-of-scope features before snapshot creation and training.
+17. Constrain recommendations by approved device, TDS, program, step-size, and interaction rules; require an approved controlled-trial plan before recommendation approval.
+18. Controlled-trial plans must record hypothesis, evidence type, expected outcome, risk, rollback plan, sustained observation plan, execution linkage, and post-change measurement outcome.
+19. Reject or quarantine out-of-scope features before snapshot creation and training.
 
 ## Reference Loading
 

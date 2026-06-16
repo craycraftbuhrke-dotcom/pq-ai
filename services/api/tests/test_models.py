@@ -56,6 +56,7 @@ def test_core_closed_loop_tables_are_registered() -> None:
         "diagnosis_result",
         "recommendation",
         "recommendation_action",
+        "controlled_trial",
         "closed_loop_evaluation",
         "app_user",
         "role",

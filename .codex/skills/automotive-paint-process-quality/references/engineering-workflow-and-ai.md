@@ -46,4 +46,4 @@ Record per-scope metrics, uncertainty, out-of-distribution status, drift, missin
 - Promote causal claims only after DOE, controlled change, or equivalent evidence.
 - Recommendations are constrained optimization proposals, not direct robot commands.
 - Validate device limits, TDS/COA rules, approved program boundaries, coupled-parameter rules, maximum step size, and target tradeoffs.
-- Require human approval, rollback plan, actual execution values, post-change quality measurement, and sustained-effect monitoring.
+- Require an approved controlled-trial plan before recommendation approval. The plan must record hypothesis, evidence type, expected outcome, risk, rollback, sustained observation, actual execution values, post-change quality measurement, and outcome status.

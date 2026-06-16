@@ -1315,6 +1315,39 @@ class RecommendationAction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     hard_max: Mapped[float | None] = mapped_column(Float)
 
 
+class ControlledTrial(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "controlled_trial"
+    __table_args__ = (
+        UniqueConstraint("trial_no", name="uq_controlled_trial_no"),
+        UniqueConstraint("recommendation_id", name="uq_controlled_trial_recommendation"),
+        Index("ix_controlled_trial_status", "status", "created_at"),
+    )
+
+    recommendation_id: Mapped[str] = mapped_column(ForeignKey("recommendation.id"), nullable=False)
+    trial_no: Mapped[str] = mapped_column(String(64), nullable=False)
+    production_run_id: Mapped[str] = mapped_column(ForeignKey("production_run.id"), nullable=False)
+    measurement_point_id: Mapped[str] = mapped_column(
+        ForeignKey("measurement_point.id"), nullable=False
+    )
+    target_metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    hypothesis: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    expected_outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    risk_assessment: Mapped[str] = mapped_column(Text, nullable=False)
+    rollback_plan: Mapped[str] = mapped_column(Text, nullable=False)
+    sustained_observation_plan: Mapped[str] = mapped_column(Text, nullable=False)
+    constraint_evidence: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="PLANNED", nullable=False)
+    requested_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approval_comment: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completion_summary: Mapped[str | None] = mapped_column(Text)
+
+
 class ClosedLoopEvaluation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "closed_loop_evaluation"
     __table_args__ = (

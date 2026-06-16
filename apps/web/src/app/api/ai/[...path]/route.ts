@@ -2,7 +2,14 @@ import { NextResponse } from "next/server";
 
 import { apiRequestHeaders } from "@/lib/auth-data";
 
-const allowedRoots = new Set(["models", "predictions", "diagnoses", "recommendations", "evaluations"]);
+const allowedRoots = new Set([
+  "models",
+  "predictions",
+  "diagnoses",
+  "recommendations",
+  "controlled-trials",
+  "evaluations",
+]);
 
 type Context = { params: Promise<{ path: string[] }> };
 

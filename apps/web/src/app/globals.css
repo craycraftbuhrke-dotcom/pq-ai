@@ -2797,6 +2797,55 @@ button.message-banner {
   font-size: 11px;
 }
 
+.ai-trial-panel {
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px 16px;
+}
+
+.ai-trial-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-trial-heading span:first-child,
+.ai-trial-details p {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-trial-heading b,
+.ai-trial-details b {
+  font-size: 9px;
+}
+
+.ai-trial-heading small,
+.ai-trial-details p {
+  color: var(--text-muted);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.ai-trial-details {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ai-trial-details p {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  margin: 0;
+  padding: 9px;
+}
+
 .ai-action-table {
   border-top: 1px solid var(--line);
   overflow-x: auto;
@@ -2856,6 +2905,11 @@ button.message-banner {
   gap: 8px;
   justify-content: flex-end;
   padding: 13px 16px;
+}
+
+.compact-actions {
+  justify-content: flex-start;
+  padding: 0;
 }
 
 .ai-verification {

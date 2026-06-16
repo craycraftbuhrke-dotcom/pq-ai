@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,6 +32,24 @@ class RecommendationApproval(BaseModel):
     approved: bool
     approved_by: str = Field(min_length=2, max_length=80)
     comment: str | None = Field(default=None, max_length=500)
+
+
+class ControlledTrialCreate(BaseModel):
+    hypothesis: str = Field(min_length=8, max_length=2000)
+    evidence_type: Literal["ASSOCIATION", "RULE", "SIMULATION", "DOE", "CONTROLLED_CHANGE"] = (
+        "ASSOCIATION"
+    )
+    expected_outcome: str = Field(min_length=4, max_length=1000)
+    risk_assessment: str = Field(min_length=4, max_length=1000)
+    rollback_plan: str = Field(min_length=4, max_length=1000)
+    sustained_observation_plan: str = Field(min_length=4, max_length=1000)
+    requested_by: str = Field(min_length=2, max_length=80)
+
+
+class ControlledTrialApproval(BaseModel):
+    approved: bool
+    approved_by: str = Field(min_length=2, max_length=80)
+    comment: str | None = Field(default=None, max_length=1000)
 
 
 class RecommendationExecutionAction(BaseModel):
