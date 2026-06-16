@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.referential_integrity import check_delete_safety
+from app.core.referential_integrity import check_delete_safe
 from app.db.session import get_db
 from app.models.domain import Factory, FactoryVehicleModel, SprayProgram
 from app.schemas.common import FactoryCreate, FactoryRead, FactoryUpdate
@@ -58,6 +58,8 @@ def update_factory(
 @router.delete("/{factory_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_factory(factory_id: str, db: Session = Depends(get_db)) -> Response:
     factory = get_factory(factory_id, db)
+    check_delete_safe(db, FactoryVehicleModel, FactoryVehicleModel.factory_id, factory_id, label="工厂（被工厂-车型关系引用）")
+    check_delete_safe(db, SprayProgram, SprayProgram.factory_id, factory_id, label="工厂（被喷涂程序引用）")
     try:
         db.delete(factory)
         db.commit()
