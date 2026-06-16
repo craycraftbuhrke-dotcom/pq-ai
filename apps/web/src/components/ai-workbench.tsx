@@ -1055,20 +1055,25 @@ export function AiWorkbench() {
                 </div>
               </> : null}
               {!driftLoading && !driftReport ? <div className="master-empty"><Activity /> 请选择模型版本查看治理报告</div> : null}
-              {selectedMultiAxis && selectedAxisEntries.length > 0 ? (
-                <div className="validation-chart-panel">
-                  <div className="program-subheading"><div><span className="eyebrow">Multi-Axis Validation</span><h3>多轴验证证据</h3></div></div>
-                  <ValidationChart
-                    axes={selectedAxisEntries.map(([axis, summary]) => ({
-                      axis,
-                      rmse: (summary as Record<string, unknown>).rmse as number | null ?? null,
-                      r2: (summary as Record<string, unknown>).r2 as number | null ?? null,
-                      status: (summary as Record<string, unknown>).status as string ?? "UNKNOWN",
-                      sampleCount: (summary as Record<string, unknown>).validation_sample_count as number ?? 0,
-                    }))}
-                  />
-                </div>
-              ) : null}
+              {selectedModel?.evaluation_metrics?.multi_axis_validation ? (() => {
+                const multiAxis = selectedModel.evaluation_metrics.multi_axis_validation as { axes: Record<string, { rmse: number | null; r2: number | null; status: string; validation_sample_count?: number }> };
+                const entries = Object.entries(multiAxis.axes || {});
+                if (entries.length === 0) return null;
+                return (
+                  <div className="validation-chart-panel">
+                    <div className="program-subheading"><div><span className="eyebrow">Multi-Axis Validation</span><h3>多轴验证证据</h3></div></div>
+                    <ValidationChart
+                      axes={entries.map(([axis, summary]) => ({
+                        axis,
+                        rmse: summary.rmse ?? null,
+                        r2: summary.r2 ?? null,
+                        status: summary.status ?? "UNKNOWN",
+                        sampleCount: summary.validation_sample_count ?? 0,
+                      }))}
+                    />
+                  </div>
+                );
+              })() : null}
             </div>
           </div>
         ) : null}

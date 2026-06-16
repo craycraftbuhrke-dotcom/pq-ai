@@ -37,3 +37,14 @@ These rules are mandatory for code, schema, APIs, UI, seed data, tests, analytic
 - Model explanations are associations unless supported by controlled causal evidence.
 - Recommendations require approved constraints, human approval, execution capture, verification, and rollback.
 - Never invent factory limits, TDS values, device semantics, instrument fields, or standards.
+
+## Mandatory Pre-Commit Verification
+
+Every code change must pass ALL of the following before commit. Code that fails any check must NOT be committed:
+
+1. **Self-Check**: Python AST syntax pass, TypeScript type-check clean, imports resolve correctly, no debug/dead code left behind.
+2. **Test**: `pytest tests/` all pass (backend); `npm run build:web` succeeds (frontend TypeScript + Next.js production build).
+3. **Build**: Docker build succeeds for both `dockerfile.backend` and `dockerfile.frontend`; all COPY source paths exist.
+4. **UX Simulation**: New pages render in local dev; new API endpoints respond correctly via curl/docs; form submissions, button clicks, empty/loading/error states all verified.
+
+Violations of this rule require immediate rollback and repair.
