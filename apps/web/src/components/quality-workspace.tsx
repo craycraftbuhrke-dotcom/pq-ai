@@ -15,6 +15,7 @@ import {
 import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
+import { SpcChart } from "@/components/spc-chart";
 
 type Resource = { id: string; code: string; name: string };
 type ProductionRun = { id: string; run_no: string; body_no?: string | null; started_at: string };

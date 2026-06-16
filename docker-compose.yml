@@ -21,7 +21,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: dockerfile.backed
+      dockerfile: dockerfile.backend
       args:
         PYTHON_IMAGE: ${PYTHON_IMAGE:?PYTHON_IMAGE is required}
     environment:

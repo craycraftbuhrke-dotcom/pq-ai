@@ -117,6 +117,7 @@ export const navItems = [
   { href: "/controlled-trials", label: "受控试验中心", icon: "trial" },
   { href: "/master-data", label: "主数据中心", icon: "master" },
   { href: "/integrations", label: "集成与任务中心", icon: "integration" },
+  { href: "/integration-monitor", label: "集成监控", icon: "monitor" },
   { href: "/audit", label: "审计中心", icon: "audit" },
 ] as const;
 
