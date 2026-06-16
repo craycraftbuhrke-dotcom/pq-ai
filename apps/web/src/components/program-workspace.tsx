@@ -16,6 +16,7 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { DurrTrajectoryPanel } from "@/components/durr-trajectory-panel";
+import { VersionDiffPanel } from "@/components/version-diff-panel";
 
 type Resource = { id: string; code: string; name: string };
 type Factory = Resource;
@@ -122,7 +123,7 @@ function relationName(resources: Resource[], id?: string | null): string {
 }
 
 export function ProgramWorkspace() {
-  const [workspaceTab, setWorkspaceTab] = useState<"programs" | "durr">("programs");
+  const [workspaceTab, setWorkspaceTab] = useState<"programs" | "durr" | "diff">("programs");
   const [programs, setPrograms] = useState<Program[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
   const [brushes, setBrushes] = useState<Brush[]>([]);
@@ -463,6 +464,7 @@ export function ProgramWorkspace() {
       <div className="master-tabs program-workspace-tabs">
         <button className={workspaceTab === "programs" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("programs")}>程序、刷子与参数</button>
         <button className={workspaceTab === "durr" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("durr")}>Dürr 设备、轨迹与贡献治理</button>
+        <button className={workspaceTab === "diff" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("diff")}>版本对比</button>
       </div>
 
       {workspaceTab === "programs" ? <section className="program-config-grid">
@@ -579,7 +581,7 @@ export function ProgramWorkspace() {
             </>
           ) : <div className="program-empty large-empty"><Settings2 />请选择或新增刷子以维护参数和点位贡献。</div>}
         </article>
-      </section> : <section className="panel"><DurrTrajectoryPanel /></section>}
+      </section> : workspaceTab === "durr" ? <section className="panel"><DurrTrajectoryPanel /></section> : <section className="panel"><VersionDiffPanel versions={versions} programId={selectedProgramId} /></section>}
 
       {modal ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => !submitting && setModal(null)}>

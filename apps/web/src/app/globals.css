@@ -4223,3 +4223,125 @@ button.message-banner {
   font-weight: 700;
   color: var(--color-text);
 }
+
+/* ── Version Diff ── */
+.version-diff-panel {
+  padding: 1.25rem;
+}
+
+.diff-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: .75rem;
+  margin-bottom: 1.25rem;
+}
+
+.diff-controls .form-field {
+  flex: 1;
+}
+
+.diff-arrow-icon {
+  color: var(--color-muted);
+  margin-bottom: .75rem;
+  flex-shrink: 0;
+}
+
+.diff-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: .75rem;
+  margin-bottom: 1.25rem;
+}
+
+.diff-stat {
+  text-align: center;
+  padding: .75rem;
+  border-radius: 8px;
+}
+
+.diff-stat strong {
+  display: block;
+  font-size: 1.375rem;
+  font-weight: 700;
+}
+
+.diff-stat span {
+  font-size: .75rem;
+}
+
+.diff-stat.changed {
+  background: color-mix(in srgb, var(--amber-500) 10%, var(--color-bg));
+  color: var(--amber-700);
+}
+
+.diff-stat.added {
+  background: color-mix(in srgb, var(--teal-500) 10%, var(--color-bg));
+  color: var(--teal-700);
+}
+
+.diff-stat.removed {
+  background: color-mix(in srgb, var(--red-500) 10%, var(--color-bg));
+  color: var(--red-700);
+}
+
+.diff-stat.same {
+  background: var(--color-bg);
+}
+
+.diff-table-wrap {
+  overflow-x: auto;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.diff-table {
+  font-size: .8125rem;
+}
+
+.diff-table th,
+.diff-table td {
+  padding: .5rem .75rem;
+}
+
+.diff-row-changed {
+  background: color-mix(in srgb, var(--amber-500) 4%, var(--color-surface));
+}
+
+.diff-row-added {
+  background: color-mix(in srgb, var(--teal-500) 4%, var(--color-surface));
+}
+
+.diff-row-removed {
+  background: color-mix(in srgb, var(--red-500) 4%, var(--color-surface));
+  opacity: .7;
+}
+
+.diff-up {
+  color: var(--red-500);
+}
+
+.diff-down {
+  color: var(--teal-500);
+}
+
+.diff-same {
+  color: var(--color-muted);
+  width: 16px;
+}
+
+.diff-tag {
+  font-size: .6875rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.diff-tag-added {
+  background: color-mix(in srgb, var(--teal-500) 15%, var(--color-bg));
+  color: var(--teal-700);
+}
+
+.diff-tag-removed {
+  background: color-mix(in srgb, var(--red-500) 15%, var(--color-bg));
+  color: var(--red-700);
+}
