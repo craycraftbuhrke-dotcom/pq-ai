@@ -3,6 +3,42 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class LoginResponse(BaseModel):
+    user_id: str
+    username: str
+    display_name: str
+    roles: list[str]
+    permissions: list[str]
+    api_key: str
+    api_key_name: str
+    expires_at: datetime | None
+    warning: str = "API Key 仅在本次响应中显示，请安全保存。浏览器会话已通过 Cookie 保存认证状态。"
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=2, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(min_length=6, max_length=128)
+    display_name: str = Field(min_length=1, max_length=120)
+    email: str | None = Field(default=None, max_length=255)
+    department: str | None = Field(default=None, max_length=120)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
+
+
+class ProfileUpdateRequest(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    email: str | None = Field(default=None, max_length=255)
+    department: str | None = Field(default=None, max_length=120)
+
+
 class ActorRead(BaseModel):
     user_id: str | None
     username: str

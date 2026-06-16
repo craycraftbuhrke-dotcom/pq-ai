@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.security import PERMISSION_CATALOG, ROLE_CATALOG, hash_api_key
+from app.core.security import PERMISSION_CATALOG, ROLE_CATALOG, hash_api_key, hash_password
 from app.db.session import SessionLocal
 from app.domain.parameter_catalog import PARAMETER_CATALOG
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
@@ -254,6 +254,7 @@ def _seed_security(db: Session) -> AppUser:
             display_name="陈工",
             email="chen.gong@pq-ai.local",
             department="涂装工艺",
+            password_hash=hash_password("admin123"),
         )
         db.add(admin)
         db.flush()

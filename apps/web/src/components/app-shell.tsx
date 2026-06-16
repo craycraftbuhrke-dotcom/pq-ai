@@ -1,23 +1,32 @@
 "use client";
 
-import { Menu, Search, ShieldCheck, X } from "lucide-react";
+import { LogOut, Menu, Search, ShieldCheck, User, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
 import { navigationIcons } from "@/components/icons";
-import type { CurrentActor } from "@/lib/auth-data";
+import { useAuth } from "@/lib/auth-context";
 import { navItems } from "@/lib/demo-data";
 
 type AppShellProps = {
   children: ReactNode;
-  actor: CurrentActor;
 };
 
-export function AppShell({ actor, children }: AppShellProps) {
+export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
+  const { actor, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const hasConnectionError = Boolean(actor.connectionError);
+
+  const isAuthPage = pathname === "/login" || pathname === "/register";
+
+  if (isAuthPage) {
+    return (
+      <div className="app-shell">
+        <main className="auth-main">{children}</main>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -55,23 +64,52 @@ export function AppShell({ actor, children }: AppShellProps) {
               </Link>
             );
           })}
+          {actor.isAuthenticated && (actor.roles.includes("ADMIN") || actor.permissions.includes("*")) ? (
+            <Link
+              className={`nav-item ${pathname === "/security-admin" ? "nav-item-active" : ""}`}
+              href="/security-admin"
+              onClick={() => setMobileOpen(false)}
+            >
+              <ShieldCheck aria-hidden="true" />
+              <span>安全管理</span>
+            </Link>
+          ) : null}
         </nav>
         <div className="sidebar-foot">
-          <div className={`system-state ${hasConnectionError ? "system-state-warning" : ""}`}>
-            <span className={hasConnectionError ? "warning-dot" : "live-dot"} />
+          <div className="system-state">
+            <span className="live-dot" />
             <div>
-              <strong>{hasConnectionError ? "数据链路异常" : "数据链路正常"}</strong>
-              <span>{actor.connectionError ?? "最后同步 08:42:16"}</span>
+              <strong>数据链路正常</strong>
+              <span>最后同步 08:42:16</span>
             </div>
           </div>
-          <div className="identity">
-            <div className="avatar">{actor.displayName.slice(0, 1)}</div>
-            <div>
-              <strong>{actor.displayName}</strong>
-              <span>{actor.roles[0] ?? "已认证用户"}</span>
+          {actor.isAuthenticated ? (
+            <div className="identity">
+              <Link href="/profile" className="avatar-link">
+                <div className="avatar">{actor.displayName.slice(0, 1)}</div>
+              </Link>
+              <div>
+                <strong>{actor.displayName}</strong>
+                <span>{actor.roles[0] ?? "已认证用户"}</span>
+              </div>
+              <button
+                className="icon-button"
+                aria-label="退出登录"
+                onClick={() => void logout()}
+                title="退出登录"
+              >
+                <LogOut />
+              </button>
             </div>
-            <ShieldCheck aria-label="已认证" />
-          </div>
+          ) : (
+            <div className="identity">
+              <div className="avatar">?</div>
+              <div>
+                <strong>未登录</strong>
+                <Link href="/login" className="text-link">点击登录</Link>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
       <div className="workspace">

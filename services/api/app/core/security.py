@@ -1,12 +1,71 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from hashlib import sha256
+from hashlib import pbkdf2_hmac, sha256
 from hmac import compare_digest
+from os import urandom
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.domain import ApiKey, AppUser, Permission, Role, RolePermission, UserRole
+
+
+_HASH_ITERATIONS = 600_000
+_SALT_LENGTH = 32
+_HASH_LENGTH = 64
+
+
+def hash_password(password: str) -> str:
+    salt = urandom(_SALT_LENGTH)
+    derived = pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _HASH_ITERATIONS, _HASH_LENGTH)
+    return f"{salt.hex()}:{derived.hex()}"
+
+
+def verify_password(password: str, stored: str | None) -> bool:
+    if not stored or ":" not in stored:
+        return False
+    try:
+        salt_hex, hash_hex = stored.split(":", 1)
+        salt = bytes.fromhex(salt_hex)
+        derived = pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _HASH_ITERATIONS, _HASH_LENGTH)
+        return compare_digest(derived.hex(), hash_hex)
+    except (ValueError, TypeError):
+        return False
+
+
+def authenticate_password(db: Session, username: str, password: str) -> AppUser | None:
+    user = db.scalar(select(AppUser).where(AppUser.username == username))
+    if not user or not user.is_active:
+        return None
+    if not verify_password(password, user.password_hash):
+        return None
+    return user
+
+
+def build_actor_for_user(db: Session, user: AppUser) -> Actor:
+    roles = tuple(
+        db.scalars(
+            select(Role.code)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user.id)
+            .order_by(Role.code)
+        )
+    )
+    permissions = frozenset(
+        db.scalars(
+            select(Permission.code)
+            .join(RolePermission, RolePermission.permission_id == Permission.id)
+            .join(UserRole, UserRole.role_id == RolePermission.role_id)
+            .where(UserRole.user_id == user.id)
+        )
+    )
+    return Actor(
+        user_id=user.id,
+        username=user.username,
+        display_name=user.display_name,
+        roles=roles,
+        permissions=permissions,
+    )
 
 
 @dataclass(frozen=True)
@@ -123,10 +182,14 @@ def authenticate_api_key(db: Session, raw_key: str) -> Actor | None:
 
 def required_permission(method: str, path: str) -> str | None:
     if method in {"GET", "HEAD", "OPTIONS"}:
+        if path.startswith("/api/v1/auth"):
+            return None
         if path.startswith("/api/v1/audit"):
             return "audit.read"
         if path.startswith("/api/v1/security"):
             return "security.manage"
+        return None
+    if path.startswith("/api/v1/auth"):
         return None
     if path.startswith("/api/v1/security"):
         return "security.manage"

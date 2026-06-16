@@ -3,10 +3,8 @@ from enum import StrEnum
 
 from sqlalchemy import (
     Boolean,
-    CheckConstraint,
     DateTime,
     Float,
-    ForeignKey,
     Index,
     Integer,
     JSON,
@@ -56,11 +54,12 @@ class AppUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     email: Mapped[str | None] = mapped_column(String(200), unique=True)
     department: Mapped[str | None] = mapped_column(String(120))
+    password_hash: Mapped[str | None] = mapped_column(String(128))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
 class Role(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    __tablename__ = "role"
+    __tablename__ = "app_role"
 
     code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -77,27 +76,27 @@ class Permission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class UserRole(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "user_role"
-    __table_args__ = (UniqueConstraint("user_id", "role_id", name="uq_user_role"),)
+    __table_args__ = (UniqueConstraint("user_id", "role_id", name="uk_user_role"),)
 
-    user_id: Mapped[str] = mapped_column(ForeignKey("app_user.id"), nullable=False)
-    role_id: Mapped[str] = mapped_column(ForeignKey("role.id"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    role_id: Mapped[str] = mapped_column(String(36), nullable=False)
 
 
 class RolePermission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "role_permission"
     __table_args__ = (
-        UniqueConstraint("role_id", "permission_id", name="uq_role_permission"),
+        UniqueConstraint("role_id", "permission_id", name="uk_role_permission"),
     )
 
-    role_id: Mapped[str] = mapped_column(ForeignKey("role.id"), nullable=False)
-    permission_id: Mapped[str] = mapped_column(ForeignKey("permission.id"), nullable=False)
+    role_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    permission_id: Mapped[str] = mapped_column(String(36), nullable=False)
 
 
 class ApiKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "api_key"
     __table_args__ = (Index("ix_api_key_prefix", "key_prefix"),)
 
-    user_id: Mapped[str] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     key_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
@@ -114,7 +113,7 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
     )
 
     request_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    actor_user_id: Mapped[str | None] = mapped_column(ForeignKey("app_user.id"))
+    actor_user_id: Mapped[str | None] = mapped_column(String(36))
     actor_username: Mapped[str] = mapped_column(String(80), nullable=False)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     http_method: Mapped[str] = mapped_column(String(12), nullable=False)
@@ -150,11 +149,11 @@ class VehicleModel(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class FactoryVehicleModel(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "factory_vehicle_model"
     __table_args__ = (
-        UniqueConstraint("factory_id", "vehicle_model_id", name="uq_factory_vehicle_model"),
+        UniqueConstraint("factory_id", "vehicle_model_id", name="uk_factory_vehicle_model"),
     )
 
-    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
-    vehicle_model_id: Mapped[str] = mapped_column(ForeignKey("vehicle_model.id"), nullable=False)
+    factory_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    vehicle_model_id: Mapped[str] = mapped_column(String(36), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
@@ -177,11 +176,11 @@ class Color(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class VehicleModelColor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "vehicle_model_color"
     __table_args__ = (
-        UniqueConstraint("vehicle_model_id", "color_id", name="uq_vehicle_model_color"),
+        UniqueConstraint("vehicle_model_id", "color_id", name="uk_vehicle_model_color"),
     )
 
-    vehicle_model_id: Mapped[str] = mapped_column(ForeignKey("vehicle_model.id"), nullable=False)
-    color_id: Mapped[str] = mapped_column(ForeignKey("color.id"), nullable=False)
+    vehicle_model_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    color_id: Mapped[str] = mapped_column(String(36), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
@@ -197,12 +196,12 @@ class Part(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class MeasurementPoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "measurement_point"
-    __table_args__ = (UniqueConstraint("vehicle_model_id", "code", name="uq_point_model_code"),)
+    __table_args__ = (UniqueConstraint("vehicle_model_id", "code", name="uk_point_model_code"),)
 
     code: Mapped[str] = mapped_column(String(48), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    vehicle_model_id: Mapped[str] = mapped_column(ForeignKey("vehicle_model.id"), nullable=False)
-    part_id: Mapped[str] = mapped_column(ForeignKey("part.id"), nullable=False)
+    vehicle_model_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    part_id: Mapped[str] = mapped_column(String(36), nullable=False)
     point_type: Mapped[str] = mapped_column(String(32), default="QUALITY", nullable=False)
     region: Mapped[str | None] = mapped_column(String(80))
     quality_types: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
@@ -212,12 +211,12 @@ class MeasurementPoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class MeasurementGroup(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "measurement_group"
     __table_args__ = (
-        UniqueConstraint("vehicle_model_id", "code", name="uq_group_model_code"),
+        UniqueConstraint("vehicle_model_id", "code", name="uk_group_model_code"),
     )
 
     code: Mapped[str] = mapped_column(String(48), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    vehicle_model_id: Mapped[str] = mapped_column(ForeignKey("vehicle_model.id"), nullable=False)
+    vehicle_model_id: Mapped[str] = mapped_column(String(36), nullable=False)
     quality_type: Mapped[str] = mapped_column(String(32), nullable=False)
     expected_point_count: Mapped[int | None] = mapped_column()
     remark: Mapped[str | None] = mapped_column(Text)
@@ -226,14 +225,12 @@ class MeasurementGroup(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class MeasurementGroupPoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "measurement_group_point"
     __table_args__ = (
-        UniqueConstraint("measurement_group_id", "measurement_point_id", name="uq_group_point"),
+        UniqueConstraint("measurement_group_id", "measurement_point_id", name="uk_group_point"),
     )
 
-    measurement_group_id: Mapped[str] = mapped_column(
-        ForeignKey("measurement_group.id"), nullable=False
+    measurement_group_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    measurement_point_id: Mapped[str] = mapped_column(
-        ForeignKey("measurement_point.id"), nullable=False
+    measurement_point_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     sequence_no: Mapped[int] = mapped_column(default=0, nullable=False)
 
@@ -241,12 +238,12 @@ class MeasurementGroupPoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class SprayProgram(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "spray_program"
     __table_args__ = (
-        UniqueConstraint("factory_id", "program_code", name="uq_factory_program_code"),
+        UniqueConstraint("factory_id", "program_code", name="uk_factory_program_code"),
     )
 
     program_code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
-    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
+    factory_id: Mapped[str] = mapped_column(String(36), nullable=False)
     process_stage: Mapped[str] = mapped_column(String(32), nullable=False)
     station_code: Mapped[str] = mapped_column(String(32), nullable=False)
     station_name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -257,11 +254,11 @@ class SprayProgram(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class SprayProgramVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "spray_program_version"
     __table_args__ = (
-        UniqueConstraint("spray_program_id", "version", name="uq_program_version"),
+        UniqueConstraint("spray_program_id", "version", name="uk_program_version"),
     )
 
-    spray_program_id: Mapped[str] = mapped_column(ForeignKey("spray_program.id"), nullable=False)
-    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    spray_program_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", nullable=False)
     status: Mapped[str] = mapped_column(String(24), default=VersionStatus.DRAFT, nullable=False)
     source_type: Mapped[str] = mapped_column(String(24), default="MANUAL", nullable=False)
     is_master_sample: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -273,25 +270,23 @@ class SprayProgramVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class ProgramVehicleModel(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "program_vehicle_model"
     __table_args__ = (
-        UniqueConstraint("program_version_id", "vehicle_model_id", name="uq_program_model"),
+        UniqueConstraint("program_version_id", "vehicle_model_id", name="uk_program_model"),
     )
 
-    program_version_id: Mapped[str] = mapped_column(
-        ForeignKey("spray_program_version.id"), nullable=False
+    program_version_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    vehicle_model_id: Mapped[str] = mapped_column(ForeignKey("vehicle_model.id"), nullable=False)
+    vehicle_model_id: Mapped[str] = mapped_column(String(36), nullable=False)
 
 
 class ProgramColor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "program_color"
     __table_args__ = (
-        UniqueConstraint("program_version_id", "color_id", name="uq_program_color"),
+        UniqueConstraint("program_version_id", "color_id", name="uk_program_color"),
     )
 
-    program_version_id: Mapped[str] = mapped_column(
-        ForeignKey("spray_program_version.id"), nullable=False
+    program_version_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    color_id: Mapped[str] = mapped_column(ForeignKey("color.id"), nullable=False)
+    color_id: Mapped[str] = mapped_column(String(36), nullable=False)
 
 
 class ParameterDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -312,29 +307,26 @@ class ParameterDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class Brush(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "brush"
     __table_args__ = (
-        UniqueConstraint("program_version_id", "brush_no", name="uq_program_brush_no"),
+        UniqueConstraint("program_version_id", "brush_no", name="uk_program_brush_no"),
     )
 
-    program_version_id: Mapped[str] = mapped_column(
-        ForeignKey("spray_program_version.id"), nullable=False
+    program_version_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     brush_no: Mapped[str] = mapped_column(String(32), nullable=False)
     brush_table_no: Mapped[str] = mapped_column(String(64), nullable=False)
     spray_position: Mapped[str | None] = mapped_column(String(120))
-    part_id: Mapped[str | None] = mapped_column(ForeignKey("part.id"))
+    part_id: Mapped[str | None] = mapped_column(String(36))
     remark: Mapped[str | None] = mapped_column(Text)
 
 
 class BrushParameter(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "brush_parameter"
     __table_args__ = (
-        UniqueConstraint("brush_id", "parameter_code", name="uq_brush_parameter"),
+        UniqueConstraint("brush_id", "parameter_code", name="uk_brush_parameter"),
     )
 
-    brush_id: Mapped[str] = mapped_column(ForeignKey("brush.id"), nullable=False)
-    parameter_definition_id: Mapped[str | None] = mapped_column(
-        ForeignKey("parameter_definition.id")
-    )
+    brush_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    parameter_definition_id: Mapped[str | None] = mapped_column(String(36))
     parameter_code: Mapped[str] = mapped_column(String(64), nullable=False)
     parameter_name: Mapped[str] = mapped_column(String(120), nullable=False)
     configured_value: Mapped[float] = mapped_column(Float, nullable=False)
@@ -349,25 +341,24 @@ class BrushParameter(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class BrushPointContribution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "brush_point_contribution"
     __table_args__ = (
-        UniqueConstraint("brush_id", "measurement_point_id", name="uq_brush_point"),
+        UniqueConstraint("brush_id", "measurement_point_id", name="uk_brush_point"),
     )
 
-    brush_id: Mapped[str] = mapped_column(ForeignKey("brush.id"), nullable=False)
-    measurement_point_id: Mapped[str] = mapped_column(
-        ForeignKey("measurement_point.id"), nullable=False
+    brush_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    measurement_point_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     overlap_ratio: Mapped[float] = mapped_column(Float, nullable=False)
     contribution_weight: Mapped[float] = mapped_column(Float, nullable=False)
     source: Mapped[str] = mapped_column(String(32), default="EXPERT", nullable=False)
-    version: Mapped[str] = mapped_column(String(32), default="1.0", nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", default="1.0", nullable=False)
     is_approved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class DurrRobot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "durr_robot"
-    __table_args__ = (UniqueConstraint("factory_id", "code", name="uq_factory_durr_robot"),)
+    __table_args__ = (UniqueConstraint("factory_id", "code", name="uk_factory_durr_robot"),)
 
-    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
+    factory_id: Mapped[str] = mapped_column(String(36), nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     model: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -381,10 +372,10 @@ class DurrRobot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class DurrApplicationController(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "durr_application_controller"
     __table_args__ = (
-        UniqueConstraint("factory_id", "code", name="uq_factory_durr_controller"),
+        UniqueConstraint("factory_id", "code", name="uk_factory_durr_controller"),
     )
 
-    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
+    factory_id: Mapped[str] = mapped_column(String(36), nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     model: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -398,13 +389,11 @@ class DurrApplicationController(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class DurrRotaryAtomizer(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "durr_rotary_atomizer"
     __table_args__ = (
-        UniqueConstraint("factory_id", "code", name="uq_factory_durr_atomizer"),
+        UniqueConstraint("factory_id", "code", name="uk_factory_durr_atomizer"),
     )
 
-    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
-    controller_id: Mapped[str | None] = mapped_column(
-        ForeignKey("durr_application_controller.id")
-    )
+    factory_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    controller_id: Mapped[str | None] = mapped_column(String(36))
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     model: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -422,19 +411,16 @@ class ProgramDeviceConfiguration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint(
             "program_version_id",
             "configuration_version",
-            name="uq_program_device_configuration_version",
+            name="uk_program_device_configuration_version",
         ),
     )
 
-    program_version_id: Mapped[str] = mapped_column(
-        ForeignKey("spray_program_version.id"), nullable=False
+    program_version_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    robot_id: Mapped[str] = mapped_column(ForeignKey("durr_robot.id"), nullable=False)
-    atomizer_id: Mapped[str] = mapped_column(
-        ForeignKey("durr_rotary_atomizer.id"), nullable=False
+    robot_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    atomizer_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    controller_id: Mapped[str] = mapped_column(
-        ForeignKey("durr_application_controller.id"), nullable=False
+    controller_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     configuration_version: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
@@ -452,16 +438,15 @@ class TrajectoryProgram(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "program_version_id",
             "trajectory_code",
             "version",
-            name="uq_program_trajectory_version",
+            name="uk_program_trajectory_version",
         ),
     )
 
-    program_version_id: Mapped[str] = mapped_column(
-        ForeignKey("spray_program_version.id"), nullable=False
+    program_version_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     trajectory_code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
-    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", nullable=False)
     checksum: Mapped[str] = mapped_column(String(128), nullable=False)
     coordinate_system: Mapped[str | None] = mapped_column(String(80))
     tcp_name: Mapped[str | None] = mapped_column(String(120))
@@ -478,17 +463,16 @@ class TrajectoryPathSegment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint(
             "trajectory_program_id",
             "segment_no",
-            name="uq_trajectory_path_segment_no",
+            name="uk_trajectory_path_segment_no",
         ),
     )
 
-    trajectory_program_id: Mapped[str] = mapped_column(
-        ForeignKey("trajectory_program.id"), nullable=False
+    trajectory_program_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     segment_no: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
-    brush_id: Mapped[str | None] = mapped_column(ForeignKey("brush.id"))
-    part_id: Mapped[str | None] = mapped_column(ForeignKey("part.id"))
+    brush_id: Mapped[str | None] = mapped_column(String(36))
+    part_id: Mapped[str | None] = mapped_column(String(36))
     tcp_name: Mapped[str | None] = mapped_column(String(120))
     configured_speed: Mapped[float | None] = mapped_column(Float)
     speed_unit: Mapped[str | None] = mapped_column(String(24))
@@ -508,15 +492,14 @@ class PointContributionVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "program_version_id",
             "target_family",
             "version",
-            name="uq_program_target_contribution_version",
+            name="uk_program_target_contribution_version",
         ),
     )
 
-    program_version_id: Mapped[str] = mapped_column(
-        ForeignKey("spray_program_version.id"), nullable=False
+    program_version_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     target_family: Mapped[str] = mapped_column(String(32), nullable=False)
-    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", nullable=False)
     method: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
     evidence_uri: Mapped[str | None] = mapped_column(String(500))
@@ -532,25 +515,16 @@ class PointContributionEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "contribution_version_id",
             "measurement_point_id",
             "source_key",
-            name="uq_version_point_contribution_source",
-        ),
-        CheckConstraint(
-            "(brush_id IS NOT NULL AND path_segment_id IS NULL) OR "
-            "(brush_id IS NULL AND path_segment_id IS NOT NULL)",
-            name="ck_point_contribution_exactly_one_source",
+            name="uk_version_point_contribution_source",
         ),
     )
 
-    contribution_version_id: Mapped[str] = mapped_column(
-        ForeignKey("point_contribution_version.id"), nullable=False
+    contribution_version_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    measurement_point_id: Mapped[str] = mapped_column(
-        ForeignKey("measurement_point.id"), nullable=False
+    measurement_point_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    brush_id: Mapped[str | None] = mapped_column(ForeignKey("brush.id"))
-    path_segment_id: Mapped[str | None] = mapped_column(
-        ForeignKey("trajectory_path_segment.id")
-    )
+    brush_id: Mapped[str | None] = mapped_column(String(36))
+    path_segment_id: Mapped[str | None] = mapped_column(String(36))
     source_key: Mapped[str] = mapped_column(String(100), nullable=False)
     overlap_ratio: Mapped[float] = mapped_column(Float, nullable=False)
     contribution_weight: Mapped[float] = mapped_column(Float, nullable=False)
@@ -587,15 +561,14 @@ class MaterialCharacteristicDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base
 class MaterialTestMethod(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "material_test_method"
     __table_args__ = (
-        UniqueConstraint("code", "version", name="uq_material_test_method_version"),
+        UniqueConstraint("code", "version", name="uk_material_test_method_version"),
     )
 
-    characteristic_definition_id: Mapped[str] = mapped_column(
-        ForeignKey("material_characteristic_definition.id"), nullable=False
+    characteristic_definition_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", nullable=False)
     method_type: Mapped[str] = mapped_column(String(64), nullable=False)
     result_unit: Mapped[str] = mapped_column(String(24), nullable=False)
     procedure_uri: Mapped[str | None] = mapped_column(String(500))
@@ -612,16 +585,15 @@ class MaterialSpecification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "characteristic_definition_id",
             "method_id",
             "version",
-            name="uq_material_specification_version",
+            name="uk_material_specification_version",
         ),
     )
 
     material_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    characteristic_definition_id: Mapped[str] = mapped_column(
-        ForeignKey("material_characteristic_definition.id"), nullable=False
+    characteristic_definition_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    method_id: Mapped[str] = mapped_column(ForeignKey("material_test_method.id"), nullable=False)
-    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    method_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", nullable=False)
     lower_limit: Mapped[float | None] = mapped_column(Float)
     upper_limit: Mapped[float | None] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
@@ -641,12 +613,11 @@ class MaterialCharacteristicApplicability(UUIDPrimaryKeyMixin, TimestampMixin, B
             "material_type",
             "process_stage",
             "target_family",
-            name="uq_material_characteristic_applicability",
+            name="uk_material_characteristic_applicability",
         ),
     )
 
-    characteristic_definition_id: Mapped[str] = mapped_column(
-        ForeignKey("material_characteristic_definition.id"), nullable=False
+    characteristic_definition_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     material_type: Mapped[str] = mapped_column(String(24), nullable=False)
     process_stage: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -670,12 +641,11 @@ class MaterialBatchTestResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     result_no: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
-    material_batch_id: Mapped[str] = mapped_column(ForeignKey("material_batch.id"), nullable=False)
-    characteristic_definition_id: Mapped[str] = mapped_column(
-        ForeignKey("material_characteristic_definition.id"), nullable=False
+    material_batch_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    characteristic_definition_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    method_id: Mapped[str] = mapped_column(ForeignKey("material_test_method.id"), nullable=False)
-    specification_id: Mapped[str | None] = mapped_column(ForeignKey("material_specification.id"))
+    method_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    specification_id: Mapped[str | None] = mapped_column(String(36))
     result_value: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(String(24), nullable=False)
     tested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -698,9 +668,9 @@ class ProductionRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     run_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     body_no: Mapped[str | None] = mapped_column(String(64), index=True)
-    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
-    vehicle_model_id: Mapped[str] = mapped_column(ForeignKey("vehicle_model.id"), nullable=False)
-    color_id: Mapped[str] = mapped_column(ForeignKey("color.id"), nullable=False)
+    factory_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    vehicle_model_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    color_id: Mapped[str] = mapped_column(String(36), nullable=False)
     shift: Mapped[str | None] = mapped_column(String(24))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -710,15 +680,14 @@ class ProductionRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class ProductionStageRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "production_stage_run"
     __table_args__ = (
-        UniqueConstraint("production_run_id", "process_stage", name="uq_run_stage"),
+        UniqueConstraint("production_run_id", "process_stage", name="uk_run_stage"),
     )
 
-    production_run_id: Mapped[str] = mapped_column(ForeignKey("production_run.id"), nullable=False)
+    production_run_id: Mapped[str] = mapped_column(String(36), nullable=False)
     process_stage: Mapped[str] = mapped_column(String(32), nullable=False)
-    program_version_id: Mapped[str] = mapped_column(
-        ForeignKey("spray_program_version.id"), nullable=False
+    program_version_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    material_batch_id: Mapped[str | None] = mapped_column(ForeignKey("material_batch.id"))
+    material_batch_id: Mapped[str | None] = mapped_column(String(36))
     actual_parameters: Mapped[dict | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(24), default="COMPLETED", nullable=False)
 
@@ -726,17 +695,14 @@ class ProductionStageRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class ProductionDeviceExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "production_device_execution"
     __table_args__ = (
-        UniqueConstraint("production_stage_run_id", name="uq_stage_device_execution"),
+        UniqueConstraint("production_stage_run_id", name="uk_stage_device_execution"),
     )
 
-    production_stage_run_id: Mapped[str] = mapped_column(
-        ForeignKey("production_stage_run.id"), nullable=False
+    production_stage_run_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    device_configuration_id: Mapped[str] = mapped_column(
-        ForeignKey("program_device_configuration.id"), nullable=False
+    device_configuration_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    trajectory_program_id: Mapped[str] = mapped_column(
-        ForeignKey("trajectory_program.id"), nullable=False
+    trajectory_program_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     executed_checksum: Mapped[str] = mapped_column(String(128), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -752,15 +718,13 @@ class PathSegmentExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint(
             "device_execution_id",
             "path_segment_id",
-            name="uq_device_path_segment_execution",
+            name="uk_device_path_segment_execution",
         ),
     )
 
-    device_execution_id: Mapped[str] = mapped_column(
-        ForeignKey("production_device_execution.id"), nullable=False
+    device_execution_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    path_segment_id: Mapped[str] = mapped_column(
-        ForeignKey("trajectory_path_segment.id"), nullable=False
+    path_segment_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     actual_speed: Mapped[float | None] = mapped_column(Float)
     speed_unit: Mapped[str | None] = mapped_column(String(24))
@@ -774,13 +738,10 @@ class ActualParameter(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_actual_parameter_stage_code", "production_stage_run_id", "parameter_code"),
     )
 
-    production_stage_run_id: Mapped[str] = mapped_column(
-        ForeignKey("production_stage_run.id"), nullable=False
+    production_stage_run_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    brush_id: Mapped[str | None] = mapped_column(ForeignKey("brush.id"))
-    parameter_definition_id: Mapped[str | None] = mapped_column(
-        ForeignKey("parameter_definition.id")
-    )
+    brush_id: Mapped[str | None] = mapped_column(String(36))
+    parameter_definition_id: Mapped[str | None] = mapped_column(String(36))
     parameter_code: Mapped[str] = mapped_column(String(64), nullable=False)
     actual_value: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(String(24), nullable=False)
@@ -806,11 +767,11 @@ class MeasurementInstrument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class MeasurementMethod(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "measurement_method"
-    __table_args__ = (UniqueConstraint("code", "version", name="uq_measurement_method_version"),)
+    __table_args__ = (UniqueConstraint("code", "version", name="uk_measurement_method_version"),)
 
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", nullable=False)
     quality_type: Mapped[str] = mapped_column(String(32), nullable=False)
     instrument_type: Mapped[str] = mapped_column(String(32), nullable=False)
     method_type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -843,12 +804,12 @@ class MeasurementReferenceStandard(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class MeasurementImportProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "measurement_import_profile"
     __table_args__ = (
-        UniqueConstraint("code", "version", name="uq_measurement_import_profile_version"),
+        UniqueConstraint("code", "version", name="uk_measurement_import_profile_version"),
     )
 
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", nullable=False)
     instrument_type: Mapped[str] = mapped_column(String(32), nullable=False)
     quality_type: Mapped[str] = mapped_column(String(32), nullable=False)
     schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -862,13 +823,10 @@ class MeasurementCalibrationRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (Index("ix_calibration_instrument_time", "instrument_id", "calibrated_at"),)
 
     calibration_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    instrument_id: Mapped[str] = mapped_column(
-        ForeignKey("measurement_instrument.id"), nullable=False
+    instrument_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    method_id: Mapped[str | None] = mapped_column(ForeignKey("measurement_method.id"))
-    reference_standard_id: Mapped[str | None] = mapped_column(
-        ForeignKey("measurement_reference_standard.id")
-    )
+    method_id: Mapped[str | None] = mapped_column(String(36))
+    reference_standard_id: Mapped[str | None] = mapped_column(String(36))
     calibrated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     result: Mapped[str] = mapped_column(String(24), nullable=False)
@@ -885,27 +843,20 @@ class QualityMeasurement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     data_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    production_run_id: Mapped[str] = mapped_column(ForeignKey("production_run.id"), nullable=False)
-    measurement_group_id: Mapped[str | None] = mapped_column(ForeignKey("measurement_group.id"))
-    measurement_point_id: Mapped[str] = mapped_column(
-        ForeignKey("measurement_point.id"), nullable=False
+    production_run_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    measurement_group_id: Mapped[str | None] = mapped_column(String(36))
+    measurement_point_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     quality_type: Mapped[str] = mapped_column(String(32), nullable=False)
     data_type: Mapped[str] = mapped_column(String(24), default="TEST", nullable=False)
     measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     measured_by: Mapped[str | None] = mapped_column(String(80))
     device_code: Mapped[str | None] = mapped_column(String(64))
-    instrument_id: Mapped[str | None] = mapped_column(ForeignKey("measurement_instrument.id"))
-    measurement_method_id: Mapped[str | None] = mapped_column(ForeignKey("measurement_method.id"))
-    calibration_record_id: Mapped[str | None] = mapped_column(
-        ForeignKey("measurement_calibration_record.id")
-    )
-    reference_standard_id: Mapped[str | None] = mapped_column(
-        ForeignKey("measurement_reference_standard.id")
-    )
-    import_profile_id: Mapped[str | None] = mapped_column(
-        ForeignKey("measurement_import_profile.id")
-    )
+    instrument_id: Mapped[str | None] = mapped_column(String(36))
+    measurement_method_id: Mapped[str | None] = mapped_column(String(36))
+    calibration_record_id: Mapped[str | None] = mapped_column(String(36))
+    reference_standard_id: Mapped[str | None] = mapped_column(String(36))
+    import_profile_id: Mapped[str | None] = mapped_column(String(36))
     measurement_direction: Mapped[str | None] = mapped_column(String(32))
     raw_file_uri: Mapped[str | None] = mapped_column(String(500))
     reliability_status: Mapped[str] = mapped_column(
@@ -919,7 +870,7 @@ class QualityMeasurement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class QualityMetricDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "quality_metric_definition"
     __table_args__ = (
-        UniqueConstraint("quality_type", "code", name="uq_quality_type_metric_code"),
+        UniqueConstraint("quality_type", "code", name="uk_quality_type_metric_code"),
     )
 
     quality_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -933,11 +884,10 @@ class QualityMetricDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class QualityMetricValue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "quality_metric_value"
     __table_args__ = (
-        UniqueConstraint("measurement_id", "metric_code", name="uq_measurement_metric"),
+        UniqueConstraint("measurement_id", "metric_code", name="uk_measurement_metric"),
     )
 
-    measurement_id: Mapped[str] = mapped_column(
-        ForeignKey("quality_measurement.id"), nullable=False
+    measurement_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     metric_code: Mapped[str] = mapped_column(String(64), nullable=False)
     metric_name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -953,12 +903,11 @@ class MeasurementRepeatReading(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "measurement_id",
             "repeat_no",
             "metric_code",
-            name="uq_measurement_repeat_metric",
+            name="uk_measurement_repeat_metric",
         ),
     )
 
-    measurement_id: Mapped[str] = mapped_column(
-        ForeignKey("quality_measurement.id"), nullable=False
+    measurement_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     repeat_no: Mapped[int] = mapped_column(Integer, nullable=False)
     metric_code: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -976,14 +925,14 @@ class QualityStandard(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     standard_no: Mapped[str] = mapped_column(String(64), nullable=False)
-    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", nullable=False)
     standard_type: Mapped[str] = mapped_column(String(24), default="PRODUCTION", nullable=False)
     quality_type: Mapped[str] = mapped_column(String(32), nullable=False)
     metric_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    vehicle_model_id: Mapped[str | None] = mapped_column(ForeignKey("vehicle_model.id"))
-    color_id: Mapped[str | None] = mapped_column(ForeignKey("color.id"))
-    part_id: Mapped[str | None] = mapped_column(ForeignKey("part.id"))
-    measurement_point_id: Mapped[str | None] = mapped_column(ForeignKey("measurement_point.id"))
+    vehicle_model_id: Mapped[str | None] = mapped_column(String(36))
+    color_id: Mapped[str | None] = mapped_column(String(36))
+    part_id: Mapped[str | None] = mapped_column(String(36))
+    measurement_point_id: Mapped[str | None] = mapped_column(String(36))
     min_value: Mapped[float | None] = mapped_column(Float)
     max_value: Mapped[float | None] = mapped_column(Float)
     unit: Mapped[str | None] = mapped_column(String(24))
@@ -998,13 +947,12 @@ class PointFeatureSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "measurement_point_id",
             "feature_set_version",
             "target_family",
-            name="uq_run_point_feature_target_version",
+            name="uk_run_point_feature_target_version",
         ),
     )
 
-    production_run_id: Mapped[str] = mapped_column(ForeignKey("production_run.id"), nullable=False)
-    measurement_point_id: Mapped[str] = mapped_column(
-        ForeignKey("measurement_point.id"), nullable=False
+    production_run_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    measurement_point_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     feature_set_version: Mapped[str] = mapped_column(String(64), nullable=False)
     target_family: Mapped[str] = mapped_column(
@@ -1019,11 +967,11 @@ class PointFeatureSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class DatasetSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "dataset_snapshot"
     __table_args__ = (
-        UniqueConstraint("dataset_code", "version", name="uq_dataset_snapshot_version"),
+        UniqueConstraint("dataset_code", "version", name="uk_dataset_snapshot_version"),
     )
 
     dataset_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", nullable=False)
     target_metric: Mapped[str] = mapped_column(String(64), nullable=False)
     feature_set_version: Mapped[str] = mapped_column(String(64), nullable=False)
     split_strategy: Mapped[str] = mapped_column(String(48), nullable=False)
@@ -1049,23 +997,19 @@ class DatasetSplitMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint(
             "dataset_snapshot_id",
             "point_feature_snapshot_id",
-            name="uq_dataset_feature_snapshot",
+            name="uk_dataset_feature_snapshot",
         ),
         Index("ix_dataset_split_group", "dataset_snapshot_id", "split", "group_value"),
     )
 
-    dataset_snapshot_id: Mapped[str] = mapped_column(
-        ForeignKey("dataset_snapshot.id"), nullable=False
+    dataset_snapshot_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    point_feature_snapshot_id: Mapped[str] = mapped_column(
-        ForeignKey("point_feature_snapshot.id"), nullable=False
+    point_feature_snapshot_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    production_run_id: Mapped[str] = mapped_column(ForeignKey("production_run.id"), nullable=False)
-    measurement_point_id: Mapped[str] = mapped_column(
-        ForeignKey("measurement_point.id"), nullable=False
+    production_run_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    measurement_point_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
-    target_measurement_id: Mapped[str] = mapped_column(
-        ForeignKey("quality_measurement.id"), nullable=False
+    target_measurement_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     group_value: Mapped[str] = mapped_column(String(100), nullable=False)
     split: Mapped[str] = mapped_column(String(24), nullable=False)
@@ -1077,16 +1021,16 @@ class DatasetSplitMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class ModelVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "model_version"
     __table_args__ = (
-        UniqueConstraint("model_code", "version", name="uq_model_version"),
+        UniqueConstraint("model_code", "version", name="uk_model_version"),
     )
 
     model_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", nullable=False)
     model_type: Mapped[str] = mapped_column(String(32), nullable=False)
     target_metric: Mapped[str] = mapped_column(String(64), nullable=False)
     feature_set_version: Mapped[str] = mapped_column(String(64), nullable=False)
     artifact_uri: Mapped[str] = mapped_column(String(500), nullable=False)
-    dataset_snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("dataset_snapshot.id"))
+    dataset_snapshot_id: Mapped[str | None] = mapped_column(String(36))
     model_payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     evaluation_metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
     training_sample_count: Mapped[int] = mapped_column(default=0, nullable=False)
@@ -1100,9 +1044,8 @@ class ModelAcceptanceDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_model_acceptance_decision_time", "model_version_id", "decided_at"),
     )
 
-    model_version_id: Mapped[str] = mapped_column(ForeignKey("model_version.id"), nullable=False)
-    dataset_snapshot_id: Mapped[str] = mapped_column(
-        ForeignKey("dataset_snapshot.id"), nullable=False
+    model_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    dataset_snapshot_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     decision: Mapped[str] = mapped_column(String(24), nullable=False)
     criteria: Mapped[dict] = mapped_column(JSON, nullable=False)
@@ -1120,15 +1063,15 @@ class ModelApplicabilityScope(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "factory_id",
             "vehicle_model_id",
             "color_id",
-            name="uq_model_applicability_context",
+            name="uk_model_applicability_context",
         ),
         Index("ix_model_applicability_status", "model_version_id", "status"),
     )
 
-    model_version_id: Mapped[str] = mapped_column(ForeignKey("model_version.id"), nullable=False)
-    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
-    vehicle_model_id: Mapped[str] = mapped_column(ForeignKey("vehicle_model.id"), nullable=False)
-    color_id: Mapped[str] = mapped_column(ForeignKey("color.id"), nullable=False)
+    model_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    factory_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    vehicle_model_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    color_id: Mapped[str] = mapped_column(String(36), nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="PENDING", nullable=False)
     source: Mapped[str] = mapped_column(String(32), default="DATASET_DERIVED", nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(80))
@@ -1139,10 +1082,10 @@ class ModelApplicabilityScope(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class ModelOodPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "model_ood_policy"
     __table_args__ = (
-        UniqueConstraint("model_version_id", name="uq_model_ood_policy_version"),
+        UniqueConstraint("model_version_id", name="uk_model_ood_policy_version"),
     )
 
-    model_version_id: Mapped[str] = mapped_column(ForeignKey("model_version.id"), nullable=False)
+    model_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
     max_abs_standardized_shift: Mapped[float] = mapped_column(Float, nullable=False)
     max_outlier_feature_ratio: Mapped[float] = mapped_column(Float, nullable=False)
     min_feature_completeness: Mapped[float] = mapped_column(Float, nullable=False)
@@ -1156,7 +1099,7 @@ class ModelOodPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class ModelAcceptancePolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "model_acceptance_policy"
     __table_args__ = (
-        UniqueConstraint("policy_code", "version", name="uq_model_acceptance_policy_version"),
+        UniqueConstraint("policy_code", "version", name="uk_model_acceptance_policy_version"),
         Index(
             "ix_model_acceptance_policy_match",
             "factory_id",
@@ -1166,8 +1109,8 @@ class ModelAcceptancePolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     policy_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    version: Mapped[str] = mapped_column(String(32), nullable=False)
-    factory_id: Mapped[str] = mapped_column(ForeignKey("factory.id"), nullable=False)
+    version: Mapped[str] = mapped_column("version_no", String(32), key="version", nullable=False)
+    factory_id: Mapped[str] = mapped_column(String(36), nullable=False)
     target_metric: Mapped[str] = mapped_column(String(64), nullable=False)
     policy_type: Mapped[str] = mapped_column(String(24), default="FACTORY_APPROVED", nullable=False)
     max_validation_rmse: Mapped[float] = mapped_column(Float, nullable=False)
@@ -1187,10 +1130,9 @@ class PredictionResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_prediction_run_point", "production_run_id", "measurement_point_id"),
     )
 
-    model_version_id: Mapped[str] = mapped_column(ForeignKey("model_version.id"), nullable=False)
-    production_run_id: Mapped[str] = mapped_column(ForeignKey("production_run.id"), nullable=False)
-    measurement_point_id: Mapped[str] = mapped_column(
-        ForeignKey("measurement_point.id"), nullable=False
+    model_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    production_run_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    measurement_point_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     metric_code: Mapped[str] = mapped_column(String(64), nullable=False)
     predicted_value: Mapped[float] = mapped_column(Float, nullable=False)
@@ -1210,10 +1152,9 @@ class PredictionResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class DiagnosisResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "diagnosis_result"
 
-    prediction_result_id: Mapped[str | None] = mapped_column(ForeignKey("prediction_result.id"))
-    production_run_id: Mapped[str] = mapped_column(ForeignKey("production_run.id"), nullable=False)
-    measurement_point_id: Mapped[str] = mapped_column(
-        ForeignKey("measurement_point.id"), nullable=False
+    prediction_result_id: Mapped[str | None] = mapped_column(String(36))
+    production_run_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    measurement_point_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     metric_code: Mapped[str] = mapped_column(String(64), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1229,9 +1170,8 @@ class Recommendation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (Index("ix_recommendation_status", "status", "created_at"),)
 
     recommendation_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    production_run_id: Mapped[str] = mapped_column(ForeignKey("production_run.id"), nullable=False)
-    measurement_point_id: Mapped[str] = mapped_column(
-        ForeignKey("measurement_point.id"), nullable=False
+    production_run_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    measurement_point_id: Mapped[str] = mapped_column(String(36), nullable=False
     )
     target_quality_type: Mapped[str] = mapped_column(String(32), nullable=False)
     target_metric: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -1252,7 +1192,7 @@ class Recommendation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class RecommendationAction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "recommendation_action"
 
-    recommendation_id: Mapped[str] = mapped_column(ForeignKey("recommendation.id"), nullable=False)
+    recommendation_id: Mapped[str] = mapped_column(String(36), nullable=False)
     process_stage: Mapped[str] = mapped_column(String(32), nullable=False)
     brush_no: Mapped[str | None] = mapped_column(String(32))
     parameter_code: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -1268,10 +1208,10 @@ class RecommendationAction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class ClosedLoopEvaluation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "closed_loop_evaluation"
     __table_args__ = (
-        UniqueConstraint("recommendation_id", name="uq_recommendation_evaluation"),
+        UniqueConstraint("recommendation_id", name="uk_recommendation_evaluation"),
     )
 
-    recommendation_id: Mapped[str] = mapped_column(ForeignKey("recommendation.id"), nullable=False)
+    recommendation_id: Mapped[str] = mapped_column(String(36), nullable=False)
     baseline_value: Mapped[float] = mapped_column(Float, nullable=False)
     verified_value: Mapped[float] = mapped_column(Float, nullable=False)
     actual_improvement: Mapped[float] = mapped_column(Float, nullable=False)
@@ -1299,12 +1239,12 @@ class IntegrationEndpoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class IntegrationEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "integration_event"
     __table_args__ = (
-        UniqueConstraint("endpoint_id", "source_event_id", name="uq_endpoint_source_event"),
+        UniqueConstraint("endpoint_id", "source_event_id", name="uk_endpoint_source_event"),
         Index("ix_integration_event_status_time", "status", "created_at"),
     )
 
     event_no: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
-    endpoint_id: Mapped[str] = mapped_column(ForeignKey("integration_endpoint.id"), nullable=False)
+    endpoint_id: Mapped[str] = mapped_column(String(36), nullable=False)
     source_event_id: Mapped[str] = mapped_column(String(160), nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     direction: Mapped[str] = mapped_column(String(24), default="INBOUND", nullable=False)

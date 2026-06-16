@@ -18,7 +18,7 @@ from app.db.session import SessionLocal
 from app.models.domain import AuditLog
 
 
-EXEMPT_PATHS = {"/", "/docs", "/openapi.json", "/api/v1/health"}
+EXEMPT_PATHS = {"/", "/docs", "/openapi.json", "/api/v1/health", "/api/v1/auth/login", "/api/v1/auth/register"}
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
