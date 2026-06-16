@@ -7,6 +7,7 @@ dependencies = [
   "fastapi==0.115.6",
   "pydantic==2.10.4",
   "pydantic-settings==2.7.0",
+  "python-multipart==0.0.20",
   "SQLAlchemy>=2.0,<2.1",
   "pymysql==1.1.1",
   "uvicorn[standard]==0.32.1",
