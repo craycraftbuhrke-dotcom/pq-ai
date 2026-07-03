@@ -25,7 +25,7 @@ from app.api.routes.quality import (
     update_quality_measurement,
     update_quality_standard,
 )
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.models.domain import (
     MeasurementCalibrationRecord,
     MeasurementInstrument,
@@ -60,7 +60,7 @@ def build_session() -> Session:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     return Session(engine)
 
 

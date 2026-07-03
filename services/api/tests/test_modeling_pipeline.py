@@ -39,7 +39,7 @@ from app.api.routes.ai import (
     record_trial_rollback,
     verify_recommendation,
 )
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.domain.scope_policy import CURRENT_FEATURE_SET_VERSION
 from app.models import domain  # noqa: F401
 from app.models.domain import (
@@ -87,7 +87,7 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     now = datetime.now(UTC)
     with Session(engine, expire_on_commit=False) as db:
         factory = Factory(code="F1", name="工厂")
@@ -705,7 +705,7 @@ def test_ineffective_controlled_trial_records_rollback_snapshot() -> None:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     now = datetime.now(UTC)
     with Session(engine, expire_on_commit=False) as db:
         factory = Factory(code="F2", name="工厂二")

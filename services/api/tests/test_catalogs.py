@@ -4,7 +4,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.routes.process import seed_parameter_catalog
 from app.api.routes.quality import seed_quality_metric_catalog
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.domain.parameter_catalog import PARAMETER_CATALOG
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
 from app.models import domain  # noqa: F401
@@ -46,7 +46,7 @@ def test_catalog_seed_is_idempotent() -> None:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     with Session(engine) as db:
         first_parameters = seed_parameter_catalog(db)
         second_parameters = seed_parameter_catalog(db)

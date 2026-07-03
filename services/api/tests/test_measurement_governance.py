@@ -21,7 +21,7 @@ from app.api.routes.measurement_governance import (
 )
 from app.api.routes.process import create_production_run
 from app.api.routes.quality import create_quality_measurement, get_quality_measurement
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.models.domain import (
     MeasurementInstrument,
     MeasurementMethod,
@@ -53,7 +53,7 @@ from app.services.measurement_reliability import refresh_measurement_reliability
 
 def build_session() -> Session:
     engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     return Session(engine)
 
 

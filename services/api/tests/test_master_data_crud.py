@@ -40,7 +40,7 @@ from app.api.routes.master_data import (
     list_measurement_group_points,
     list_vehicle_model_colors,
 )
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.schemas.common import FactoryCreate, FactoryUpdate
 from app.schemas.master_data import (
     ColorCreate,
@@ -68,7 +68,7 @@ def build_session() -> Session:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     return Session(engine)
 
 

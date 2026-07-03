@@ -30,7 +30,7 @@ from app.api.routes.process import (
     upsert_brush_point_contribution,
 )
 from app.api.routes.quality import create_quality_measurement, quality_summary
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.models import domain  # noqa: F401
 from app.models.domain import PointFeatureSnapshot, QualityMeasurement
 from app.schemas.common import FactoryCreate
@@ -66,7 +66,7 @@ def db() -> Session:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     with Session(engine, expire_on_commit=False) as session:
         yield session
 

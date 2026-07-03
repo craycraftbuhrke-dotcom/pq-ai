@@ -9,7 +9,7 @@ from app.api.routes.factories import create_factory
 from app.api.routes.master_data import create_measurement_group
 from app.api.routes.process import create_production_run
 from app.api.routes.quality import create_quality_standard
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.domain.scope_policy import (
     CURRENT_FEATURE_SET_VERSION,
     ScopeViolation,
@@ -25,7 +25,7 @@ from app.schemas.quality import QualityStandardCreate
 
 def build_session() -> Session:
     engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     return Session(engine)
 
 

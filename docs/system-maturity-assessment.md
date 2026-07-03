@@ -19,7 +19,7 @@ Estimated overall maturity: **86% - governed demonstrable prototype / factory-da
 | Data lineage/flow | 85% | Production run/point backbone, verified measurement/material gates, target-family contribution, trajectory execution, material result and specification lineage | Real external-file lineage and validated contribution evidence remain |
 | AI modeling | 84% | Immutable datasets, independent validation, multi-axis grouped validation folds, registered model artifact hashes, versioned factory acceptance policies, exact applicability, statistical OOD blocking, persisted inference evidence, prediction/diagnosis/recommendation and drift | Real factory policy configuration, richer uncertainty, stronger models, governed external artifact storage, and causal evidence |
 | Workflow/UX | 86% | Real CRUD, measurement/material/Dürr governance, factory acceptance-policy maintenance, model acceptance/applicability/OOD governance, pre-inference checks, controlled-trial plans, approved constraint-source evidence, recommendation approval gating, execution, verification, and rollback record | Missing instrument/material import wizard, measurement-plan execution, trajectory/contribution visualization, automatic program-version rollback publishing, and sustained verification dashboard |
-| Integration/operations | 60% | Integration task framework plus robot actual/trajectory and governed material-result ingestion, auth, audit, local MySQL | Real device/MES/QMS/material mappings, SSO, backup/DR, observability, and factory acceptance remain |
+| Integration/operations | 62% | Integration task framework plus robot actual/trajectory and governed material-result ingestion, auth, audit, local MySQL, and manual database-change control | Real device/MES/QMS/material mappings, SSO, backup/DR, observability, factory acceptance, and executed DBA ticket evidence remain |
 
 ## High-Priority Findings
 
@@ -96,6 +96,8 @@ Keep the current production-run and measurement-point backbone. Add versioned en
 - Extend implemented `controlled_trial`, `parameter_constraint_source`, and `program_rollback_execution` with change proposal grouping, automatic rollback publishing, and sustained verification.
 
 Generic JSON columns may remain as raw ingestion payloads, but approved feature generation must use governed values.
+
+Database operations rule: MySQL schema changes are not executed by the application, Docker, local scripts, CI, Alembic, or SQLAlchemy metadata calls. Every structure change requires approved manual SQL, rollback evidence, and DBA execution record. Test-only schema creation is restricted to transient SQLite through the guarded test helper.
 
 ### Business And Data Flow
 

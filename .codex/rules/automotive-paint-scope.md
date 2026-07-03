@@ -38,4 +38,6 @@ These rules are mandatory for code, schema, APIs, UI, seed data, tests, analytic
 - Prediction, diagnosis, and recommendation must block out-of-scope, incomplete, or out-of-distribution inputs and persist the governance evidence. OOD thresholds are statistical policies, never substitutes for device, material, or process safety limits.
 - Model explanations are associations unless supported by controlled causal evidence.
 - Recommendations require approved source-versioned constraints, an approved controlled-trial plan, human approval, execution capture, verification, rollback plan, rollback execution record when ineffective, and sustained observation.
+- MySQL schema changes must never be executed automatically by application code, Docker startup, local scripts, CI, Alembic, or SQLAlchemy metadata calls. Use approved manual SQL tickets only.
+- Unit tests may create transient SQLite schemas only through the guarded test helper; this exception never applies to MySQL or shared databases.
 - Never invent factory limits, TDS values, device semantics, instrument fields, or standards.

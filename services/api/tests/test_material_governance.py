@@ -33,7 +33,7 @@ from app.api.routes.process import (
     create_spray_program,
     upsert_brush_point_contribution,
 )
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.schemas.common import FactoryCreate
 from app.schemas.features import PointFeatureBuildRequest
 from app.schemas.master_data import ColorCreate, MeasurementPointCreate, PartCreate, VehicleModelCreate
@@ -60,7 +60,7 @@ from app.schemas.process import (
 
 def build_session() -> Session:
     engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     return Session(engine)
 
 

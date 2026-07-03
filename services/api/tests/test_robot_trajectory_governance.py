@@ -36,7 +36,7 @@ from app.api.routes.robot_governance import (
     robot_governance_summary,
     update_device_execution,
 )
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.schemas.common import FactoryCreate
 from app.schemas.features import PointFeatureBuildRequest
 from app.schemas.master_data import (
@@ -69,7 +69,7 @@ from app.schemas.process import (
 
 def build_session() -> Session:
     engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     return Session(engine)
 
 

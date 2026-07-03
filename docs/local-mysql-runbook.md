@@ -9,7 +9,11 @@
 
 数据库密码与 API Key 保存在被 Git 忽略的 `.env.local`，不会进入版本库。
 
-## 首次初始化或升级数据库
+## 首次初始化或刷新演示数据
+
+数据库结构变更不允许由项目脚本自动执行。建库、建表、改表、索引、约束等必须按
+[MySQL 数据库变更控制](database-change-control.md) 走审批工单并由人工执行 SQL。
+以下脚本只在既有结构正确的数据库上写入或刷新幂等演示数据。
 
 ```bash
 cd /mnt/d/codex/brush-param/pq-ai
@@ -30,7 +34,7 @@ cd /mnt/d/codex/brush-param/pq-ai
 
 停止系统时在启动终端按 `Ctrl+C`。
 
-`start-local.sh` 默认会先执行最新数据库迁移、幂等初始化和前端生产构建，避免数据库结构或页面版本滞后。仅在确认已完成构建时可设置 `SKIP_WEB_BUILD=true` 跳过构建。
+`start-local.sh` 默认会执行幂等演示数据初始化和前端生产构建，但不会建库、建表或改表。仅在确认已完成构建时可设置 `SKIP_WEB_BUILD=true` 跳过构建。
 
 ## 当前可实际操作范围
 
@@ -43,4 +47,4 @@ cd /mnt/d/codex/brush-param/pq-ai
 - AI 工作台支持不可变数据集快照、分组时间留出、泄漏检查、候选模型训练、独立验证、人工验收/激活，以及预测、诊断、约束推荐、审批、执行和复测评价。
 - 集成与任务中心支持 MES/QMS/机器人/材料端点、幂等事件、失败重试、死信和重放。
 
-每次代码升级后先执行 `./scripts/init-local-mysql.sh`，确保最新 Alembic 迁移和幂等初始化数据已写入 MySQL。
+每次代码升级后，若涉及数据库结构，请先完成审批工单和人工 SQL 执行；随后再执行 `./scripts/init-local-mysql.sh` 刷新幂等演示数据。

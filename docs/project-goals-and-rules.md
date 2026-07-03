@@ -29,6 +29,8 @@ Explicitly excluded: pretreatment, e-coat, sealing, booth temperature/humidity, 
 11. A model's factory/model/color applicability and statistical OOD blocking policy are governed acceptance facts. Unsupported, incomplete, or distribution-outlier inputs must never reach prediction, diagnosis, or recommendation.
 12. Statistical OOD policy does not replace approved device, material, TDS, program, or process safety constraints.
 13. Every production model must satisfy a versioned, source-backed, active factory acceptance policy for every applicable factory and target metric. Demo thresholds never qualify as factory approval.
+14. MySQL schema changes are controlled production operations. Code, scripts, Docker entrypoints, and CI must not create, migrate, alter, or drop MySQL schema objects automatically.
+15. Every database-structure change requires an approval ticket, forward SQL, rollback SQL or rollback limitation, risk assessment, database-owner approval, manual execution, and execution record.
 
 ## Development Gate
 
@@ -42,3 +44,4 @@ Every new feature must pass:
 - Workflow check: engineer decision, approval, rollback, and verification are represented.
 - Robot execution check: approved configuration/trajectory, actual checksum, path-segment facts, target-family contribution version, and mismatch blocking are represented.
 - Material governance check: definition, canonical unit, method, specification source/effective period, stage/target-family applicability, production-time gate, reliability, and lineage are represented.
+- Database governance check: no automatic MySQL DDL; schema changes have an approved manual SQL ticket and are documented in release evidence.

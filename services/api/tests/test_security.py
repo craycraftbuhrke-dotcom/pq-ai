@@ -4,13 +4,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.core.security import authenticate_api_key, hash_api_key, required_permission
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.models.domain import ApiKey, AppUser, Permission, Role, RolePermission, UserRole
 
 
 def build_security_session() -> tuple[Session, str]:
     engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     db = Session(engine)
     permission = Permission(code="quality.write", name="维护质量数据")
     role = Role(code="QUALITY_ENGINEER", name="质量工程师")

@@ -38,7 +38,9 @@ Use this skill for every change that touches process stages, parameters, materia
 18. Require an approved controlled-trial plan before recommendation approval.
 19. Controlled-trial plans must record hypothesis, evidence type, expected outcome, risk, rollback plan, sustained observation plan, execution linkage, and post-change measurement outcome.
 20. Ineffective trials must be reversible: record rollback execution, target program/version when known, execution note, and action snapshot before treating the loop as closed.
-21. Reject or quarantine out-of-scope features before snapshot creation and training.
+21. Do not use Alembic or automatic MySQL schema mutation. Database-structure changes require an approved manual SQL ticket and human execution record.
+22. SQLAlchemy `Base.metadata.create_all/drop_all` is forbidden outside the guarded SQLite-only test helper.
+23. Reject or quarantine out-of-scope features before snapshot creation and training.
 
 ## Reference Loading
 
@@ -53,5 +55,6 @@ Use this skill for every change that touches process stages, parameters, materia
 - Every model result is traceable to feature set, training data, model version, applicability scope, and measurement provenance.
 - Every recommendation shows evidence, source-versioned constraints, uncertainty, approval, execution values, verification results, and rollback record when ineffective.
 - Tests cover scope filtering, traceability, grouped/temporal evaluation, and closed-loop audit behavior.
+- Database changes include an approved manual SQL workflow reference; code, scripts, Docker, and CI contain no automatic MySQL DDL or migration command.
 - Robot/trajectory changes cover device identity, program/path version, checksum matching, target-family contribution, actual execution, and rollback traceability.
 - Material changes cover characteristic semantics, canonical unit, method version, specification source/effective period, stage/target-family applicability, batch result reliability, production-time gate, and feature lineage.

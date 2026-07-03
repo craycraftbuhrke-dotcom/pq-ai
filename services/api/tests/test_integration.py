@@ -13,7 +13,7 @@ from app.api.routes.integration import (
     replay_event,
     update_endpoint,
 )
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.models.domain import (
     ActualParameter,
     Brush,
@@ -51,7 +51,7 @@ def build_session() -> Session:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     return Session(engine)
 
 

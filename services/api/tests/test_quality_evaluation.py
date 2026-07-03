@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.db.base import Base
+from tests.schema_guard import create_transient_test_schema
 from app.models import domain  # noqa: F401
 from app.models.domain import (
     Color,
@@ -26,7 +26,7 @@ def test_quality_evaluation_prefers_point_standard_and_detects_violation() -> No
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(engine)
+    create_transient_test_schema(engine)
     now = datetime.now(UTC)
     with Session(engine, expire_on_commit=False) as db:
         factory = Factory(code="F1", name="工厂")

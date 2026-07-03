@@ -13,7 +13,7 @@ export PYTHONPATH="$ROOT_DIR/services/api/.runtime/site-packages:$ROOT_DIR/servi
 if [ "${RUN_DB_INIT:-true}" = "true" ]; then
   (
     cd "$ROOT_DIR/services/api"
-    python3 -m alembic upgrade head
+    echo "数据库结构变更已禁用自动执行；如需建库/建表/改表，请先走审批工单并由人工执行 SQL。"
     python3 -m app.db.seed_demo
   )
 fi
