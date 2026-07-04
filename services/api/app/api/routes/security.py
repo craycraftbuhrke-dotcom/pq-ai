@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import (
     PERMISSION_CATALOG,
+    build_actor_for_user,
     hash_api_key,
     hash_password,
     login_with_password,
     revoke_session_token,
+    verify_password,
 )
 from app.db.session import get_db
 from app.models.domain import (
@@ -31,6 +33,9 @@ from app.schemas.security import (
     AuditSummary,
     LoginRequest,
     LoginResponse,
+    PasswordChangeRequest,
+    ProfileUpdateRequest,
+    RegisterRequest,
     RoleCreate,
     RoleRead,
     UserCreate,
@@ -41,20 +46,17 @@ from app.schemas.security import (
 router = APIRouter(tags=["security-audit"])
 
 
-def _actor_payload(actor, *, auth_enabled: bool) -> dict:
+@router.get("/auth/me", response_model=ActorRead)
+def current_actor(request: Request) -> dict:
+    actor = request.state.actor
     return {
         "user_id": actor.user_id,
         "username": actor.username,
         "display_name": actor.display_name,
         "roles": list(actor.roles),
         "permissions": sorted(actor.permissions),
-        "auth_enabled": auth_enabled,
+        "auth_enabled": settings.api_auth_enabled,
     }
-
-
-@router.get("/auth/me", response_model=ActorRead)
-def current_actor(request: Request) -> dict:
-    return _actor_payload(request.state.actor, auth_enabled=settings.api_auth_enabled)
 
 
 @router.post("/auth/login", response_model=LoginResponse)
@@ -67,22 +69,159 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         client_ip=request.client.host if request.client else None,
     )
     if not result:
-        raise HTTPException(status_code=401, detail="用户名或密码错误，或账号已被临时锁定")
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
     actor, access_token, expires_at = result
+    raw_key = f"pq_{token_urlsafe(32)}"
+    api_key = ApiKey(
+        user_id=actor.user_id,
+        name=f"浏览器登录 {payload.username}",
+        key_prefix=raw_key[:12],
+        key_hash=hash_api_key(raw_key),
+    )
+    db.add(api_key)
+    db.commit()
+    db.refresh(api_key)
+    actor_payload = {
+        "user_id": actor.user_id,
+        "username": actor.username,
+        "display_name": actor.display_name,
+        "roles": list(actor.roles),
+        "permissions": sorted(actor.permissions),
+        "auth_enabled": settings.api_auth_enabled,
+    }
     return {
+        **actor_payload,
+        "api_key": raw_key,
+        "api_key_name": api_key.name,
         "access_token": access_token,
         "token_type": "bearer",
         "expires_at": expires_at,
-        "actor": _actor_payload(actor, auth_enabled=settings.api_auth_enabled),
+        "actor": actor_payload,
+    }
+
+
+@router.post("/auth/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
+def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> dict:
+    if db.scalar(select(AppUser).where(AppUser.username == payload.username)):
+        raise HTTPException(status_code=409, detail="用户名已存在")
+    if payload.email and db.scalar(select(AppUser).where(AppUser.email == payload.email)):
+        raise HTTPException(status_code=409, detail="邮箱已被注册")
+    user = AppUser(
+        username=payload.username,
+        display_name=payload.display_name,
+        email=payload.email,
+        department=payload.department,
+        password_hash=hash_password(payload.password),
+    )
+    db.add(user)
+    db.flush()
+    raw_key = f"pq_{token_urlsafe(32)}"
+    api_key = ApiKey(
+        user_id=user.id,
+        name=f"注册自动签发 {payload.username}",
+        key_prefix=raw_key[:12],
+        key_hash=hash_api_key(raw_key),
+    )
+    db.add(api_key)
+    db.commit()
+    db.refresh(user)
+    result = login_with_password(
+        db,
+        payload.username,
+        payload.password,
+    )
+    if not result:
+        raise HTTPException(status_code=500, detail="注册成功但自动登录失败")
+    actor, access_token, expires_at = result
+    actor_payload = {
+        "user_id": actor.user_id,
+        "username": actor.username,
+        "display_name": actor.display_name,
+        "roles": list(actor.roles),
+        "permissions": sorted(actor.permissions),
+        "auth_enabled": settings.api_auth_enabled,
+    }
+    return {
+        **actor_payload,
+        "api_key": raw_key,
+        "api_key_name": api_key.name,
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_at": expires_at,
+        "actor": actor_payload,
+    }
+
+
+@router.put("/auth/me/password")
+def change_password(
+    payload: PasswordChangeRequest, request: Request, db: Session = Depends(get_db)
+) -> dict:
+    actor = request.state.actor
+    if not actor.user_id:
+        raise HTTPException(status_code=401, detail="需要登录后才能修改密码")
+    user = db.get(AppUser, actor.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="当前密码不正确")
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return {"message": "密码已更新"}
+
+
+@router.put("/auth/me", response_model=ActorRead)
+def update_profile(
+    payload: ProfileUpdateRequest, request: Request, db: Session = Depends(get_db)
+) -> dict:
+    actor = request.state.actor
+    if not actor.user_id:
+        raise HTTPException(status_code=401, detail="需要登录后才能修改个人信息")
+    user = db.get(AppUser, actor.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    updates = payload.model_dump(exclude_none=True)
+    if "email" in updates and updates["email"] != user.email:
+        if updates["email"] and db.scalar(
+            select(AppUser).where(AppUser.email == updates["email"], AppUser.id != user.id)
+        ):
+            raise HTTPException(status_code=409, detail="邮箱已被其他用户使用")
+    for key, value in updates.items():
+        setattr(user, key, value)
+    db.commit()
+    db.refresh(user)
+    new_actor = build_actor_for_user(db, user)
+    return {
+        "user_id": new_actor.user_id,
+        "username": new_actor.username,
+        "display_name": new_actor.display_name,
+        "roles": list(new_actor.roles),
+        "permissions": sorted(new_actor.permissions),
+        "auth_enabled": settings.api_auth_enabled,
     }
 
 
 @router.post("/auth/logout")
 def logout(request: Request, db: Session = Depends(get_db)) -> dict:
-    authorization = request.headers.get("authorization", "")
-    scheme, _, token = authorization.partition(" ")
-    revoked = revoke_session_token(db, token.strip() if scheme.lower() == "bearer" else "")
-    return {"revoked": revoked}
+    bearer_token = _bearer_token(request.headers.get("authorization", ""))
+    if bearer_token:
+        revoke_session_token(db, bearer_token)
+    api_key_header = request.headers.get("x-api-key", "")
+    if api_key_header:
+        key_hash = hash_api_key(api_key_header)
+        api_key = db.scalar(
+            select(ApiKey).where(ApiKey.key_hash == key_hash, ApiKey.is_active.is_(True))
+        )
+        if api_key:
+            api_key.is_active = False
+            db.commit()
+    return {"message": "已退出登录"}
+
+
+def _bearer_token(header_value: str) -> str:
+    scheme, _, token = header_value.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return ""
+    return token.strip()
 
 
 @router.get("/security/users", response_model=list[UserRead])
@@ -168,6 +307,30 @@ def assign_user_role(
         db.add(UserRole(user_id=user.id, role_id=role.id))
         db.commit()
     return {"user_id": user.id, "role_code": role.code, "assigned": True}
+
+
+@router.get("/security/users/{user_id}/api-keys/list", response_model=list[dict])
+def list_api_keys(user_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    if not db.get(AppUser, user_id):
+        raise HTTPException(status_code=404, detail="用户不存在")
+    keys = list(
+        db.scalars(
+            select(ApiKey)
+            .where(ApiKey.user_id == user_id)
+            .order_by(ApiKey.created_at.desc())
+        )
+    )
+    return [
+        {
+            "id": key.id,
+            "name": key.name,
+            "key_prefix": key.key_prefix,
+            "expires_at": key.expires_at,
+            "last_used_at": key.last_used_at,
+            "is_active": key.is_active,
+        }
+        for key in keys
+    ]
 
 
 @router.post(

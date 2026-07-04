@@ -1,7 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const sessionCookieName = "pq_ai_session";
-const publicPaths = new Set(["/login", "/api/auth/login", "/api/auth/logout", "/icon.svg", "/robots.txt"]);
+const publicPaths = new Set([
+  "/login",
+  "/register",
+  "/api/auth/login",
+  "/api/auth/logout",
+  "/icon.svg",
+  "/robots.txt",
+]);
 
 function isPublicPath(pathname: string): boolean {
   return (
@@ -19,7 +26,8 @@ export function middleware(request: NextRequest) {
   }
 
   const hasSession = Boolean(request.cookies.get(sessionCookieName)?.value);
-  if (hasSession) {
+  const hasApiKey = Boolean(request.cookies.get("pq_api_key")?.value);
+  if (hasSession || hasApiKey) {
     return NextResponse.next();
   }
 

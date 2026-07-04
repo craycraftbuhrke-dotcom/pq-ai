@@ -51,6 +51,11 @@ export function Dashboard({ snapshot }: DashboardProps) {
         <span className="live-dot" /> 数据更新时间 {refreshed} ·
         {snapshot.source === "api" ? " API 实时数据" : " 演示快照"}
       </div>
+      {snapshot.error ? (
+        <div className="message-banner message-error" role="alert">
+          <span>后端数据库/服务异常：{snapshot.error}</span>
+        </div>
+      ) : null}
       <MetricStrip snapshot={snapshot} />
       <ProcessFlow stages={snapshot.stages} />
       <div className="dashboard-grid">

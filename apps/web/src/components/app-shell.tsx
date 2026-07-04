@@ -3,34 +3,30 @@
 import { LogOut, Menu, Search, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { navigationIcons } from "@/components/icons";
-import type { CurrentActor } from "@/lib/auth-data";
+import { ContextSelector } from "@/components/context-selector";
+import { useAuth } from "@/lib/auth-context";
 import { navItems } from "@/lib/demo-data";
 
 type AppShellProps = {
   children: ReactNode;
-  actor: CurrentActor;
 };
 
-export function AppShell({ actor, children }: AppShellProps) {
+export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
+  const { actor, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  useEffect(() => {
-    if (pathname !== "/login" && actor.authEnabled && !actor.userId) {
-      window.location.href = `/login?next=${encodeURIComponent(pathname)}`;
-    }
-  }, [actor.authEnabled, actor.userId, pathname]);
+  const isAuthPage = pathname === "/login" || pathname === "/register";
 
-  if (pathname === "/login") {
-    return <>{children}</>;
-  }
-
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
-    window.location.href = "/login";
+  if (isAuthPage) {
+    return (
+      <div className="app-shell">
+        <main className="auth-main">{children}</main>
+      </div>
+    );
   }
 
   return (
@@ -69,6 +65,16 @@ export function AppShell({ actor, children }: AppShellProps) {
               </Link>
             );
           })}
+          {actor.isAuthenticated && (actor.roles.includes("ADMIN") || actor.permissions.includes("*")) ? (
+            <Link
+              className={`nav-item ${pathname === "/security-admin" ? "nav-item-active" : ""}`}
+              href="/security-admin"
+              onClick={() => setMobileOpen(false)}
+            >
+              <ShieldCheck aria-hidden="true" />
+              <span>安全管理</span>
+            </Link>
+          ) : null}
         </nav>
         <div className="sidebar-foot">
           <div className="system-state">
@@ -78,18 +84,33 @@ export function AppShell({ actor, children }: AppShellProps) {
               <span>最后同步 08:42:16</span>
             </div>
           </div>
-          <div className="identity">
-            <div className="avatar">{actor.displayName.slice(0, 1)}</div>
-            <div>
-              <strong>{actor.displayName}</strong>
-              <span>{actor.roles[0] ?? "已认证用户"}</span>
+          {actor.isAuthenticated ? (
+            <div className="identity">
+              <Link href="/profile" className="avatar-link">
+                <div className="avatar">{actor.displayName.slice(0, 1)}</div>
+              </Link>
+              <div>
+                <strong>{actor.displayName}</strong>
+                <span>{actor.roles[0] ?? "已认证用户"}</span>
+              </div>
+              <button
+                className="icon-button"
+                aria-label="退出登录"
+                onClick={() => void logout()}
+                title="退出登录"
+              >
+                <LogOut />
+              </button>
             </div>
-            <ShieldCheck aria-label="已认证" />
-          </div>
-          <button className="logout-button" onClick={() => void logout()}>
-            <LogOut />
-            退出登录
-          </button>
+          ) : (
+            <div className="identity">
+              <div className="avatar">?</div>
+              <div>
+                <strong>未登录</strong>
+                <Link href="/login" className="text-link">点击登录</Link>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
       <div className="workspace">
@@ -111,6 +132,7 @@ export function AppShell({ actor, children }: AppShellProps) {
             <strong>2026-06-10 · 白班</strong>
           </div>
         </header>
+        <ContextSelector />
         <main>{children}</main>
       </div>
     </div>

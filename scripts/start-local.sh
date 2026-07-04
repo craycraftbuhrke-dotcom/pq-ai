@@ -10,11 +10,15 @@ API_PORT="${API_PORT:-8012}"
 WEB_PORT="${WEB_PORT:-3012}"
 export PYTHONPATH="$ROOT_DIR/services/api/.runtime/site-packages:$ROOT_DIR/services/api"
 
-if [ "${RUN_DB_INIT:-true}" = "true" ]; then
+if [ "${RUN_DB_INIT:-false}" = "true" ]; then
+  echo "自动数据库 DDL 已禁用：请通过公司工单审批手动创建/变更数据库结构。" >&2
+fi
+
+if [ "${RUN_DEMO_SEED:-false}" = "true" ]; then
   (
     cd "$ROOT_DIR/services/api"
     echo "数据库结构变更已禁用自动执行；如需建库/建表/改表，请先走审批工单并由人工执行 SQL。"
-    python3 -m app.db.seed_demo
+    python3 -m app.db.seed_demo || echo "演示数据初始化失败，继续启动本地服务。" >&2
   )
 fi
 

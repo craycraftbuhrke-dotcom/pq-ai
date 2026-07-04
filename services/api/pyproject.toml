@@ -2,14 +2,15 @@
 name = "pq-ai-api"
 version = "0.1.0"
 description = "PQ-AI paint process and quality closed-loop API"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
   "fastapi==0.115.6",
   "pydantic==2.10.4",
   "pydantic-settings==2.7.0",
-  "sqlalchemy==2.0.36",
+  "SQLAlchemy>=2.0,<2.1",
   "pymysql==1.1.1",
   "openpyxl==3.1.5",
+  "python-multipart==0.0.20",
   "uvicorn[standard]==0.32.1",
 ]
 
@@ -25,7 +26,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py311"
 
 [build-system]
 requires = ["setuptools>=75"]

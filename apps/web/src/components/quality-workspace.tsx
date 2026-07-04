@@ -15,6 +15,7 @@ import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useState } f
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
 import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
+import { SpcChart } from "@/components/spc-chart";
 import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
 
 type Resource = { id: string; code: string; name: string };

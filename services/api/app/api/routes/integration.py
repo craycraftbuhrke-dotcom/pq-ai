@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.delete_policy import reject_physical_delete
+from app.core.referential_integrity import check_fk
 from app.db.session import get_db
 from app.models.domain import IntegrationEndpoint, IntegrationEvent
 from app.schemas.integration import (
@@ -123,6 +124,7 @@ def get_event(event_id: str, db: Session = Depends(get_db)) -> IntegrationEvent:
 
 @router.post("/events", response_model=IntegrationEventRead, status_code=status.HTTP_201_CREATED)
 def create_event(payload: IntegrationEventCreate, db: Session = Depends(get_db)) -> IntegrationEvent:
+    check_fk(db, IntegrationEndpoint, payload.endpoint_id, label="集成端点")
     endpoint = _required(db, IntegrationEndpoint, payload.endpoint_id, "集成端点")
     if not endpoint.is_active:
         raise HTTPException(status_code=409, detail="集成端点已停用")

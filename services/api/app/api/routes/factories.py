@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.api.delete_policy import reject_physical_delete
 from app.db.session import get_db
-from app.models.domain import Factory
+from app.models.domain import Factory, FactoryVehicleModel, SprayProgram
 from app.schemas.common import FactoryCreate, FactoryRead, FactoryUpdate
 
 router = APIRouter(prefix="/factories", tags=["master-data"])

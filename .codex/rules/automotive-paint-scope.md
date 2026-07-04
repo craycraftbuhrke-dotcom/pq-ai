@@ -45,3 +45,14 @@ These rules are mandatory for code, schema, APIs, UI, seed data, tests, analytic
 - Human web access must use personal username/password sessions stored in HttpOnly cookies; API Keys are for system integration and server-side automation only. Never expose session tokens or API Keys to browser JavaScript.
 - Unit tests may create transient SQLite schemas only through the guarded test helper; this exception never applies to MySQL or shared databases.
 - Never invent factory limits, TDS values, device semantics, instrument fields, or standards.
+
+## Mandatory Pre-Commit Verification
+
+Every code change must pass ALL of the following before commit. Code that fails any check must NOT be committed:
+
+1. **Self-Check**: Python AST syntax pass, TypeScript type-check clean, imports resolve correctly, no debug/dead code left behind.
+2. **Test**: `pytest tests/` all pass (backend); `npm run build:web` succeeds (frontend TypeScript + Next.js production build).
+3. **Build**: Docker build succeeds for both `dockerfile.backend` and `dockerfile.frontend`; all COPY source paths exist.
+4. **UX Simulation**: New pages render in local dev; new API endpoints respond correctly via curl/docs; form submissions, button clicks, empty/loading/error states all verified.
+
+Violations of this rule require immediate rollback and repair.

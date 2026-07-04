@@ -1,11 +1,15 @@
 from collections import defaultdict
+from csv import DictReader
+from datetime import datetime
+from io import StringIO
 from statistics import mean, pstdev
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.delete_policy import reject_physical_delete
+from app.core.referential_integrity import check_fk
 from app.db.session import get_db
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
 from app.domain.scope_policy import (
@@ -35,6 +39,7 @@ from app.models.domain import (
     QualityStandard,
     VehicleModel,
 )
+from app.services.measurement_reliability import measurement_is_eligible
 from app.schemas.quality import (
     QualityMeasurementCreate,
     QualityAnalytics,
@@ -585,6 +590,8 @@ def create_quality_measurement(
         [reading.model_dump() for reading in payload.repeat_readings],
     )
     _validate_measurement_governance_relations(db, payload.model_dump())
+    check_fk(db, ProductionRun, payload.production_run_id, "生产事件")
+    check_fk(db, MeasurementPoint, payload.measurement_point_id, "测量点")
     if db.scalar(select(QualityMeasurement).where(QualityMeasurement.data_no == payload.data_no)):
         raise HTTPException(status_code=409, detail="质量数据编号已存在")
     if not db.get(ProductionRun, payload.production_run_id):
@@ -772,6 +779,10 @@ def create_quality_standard(
 
 def _validate_standard_relations(db: Session, values: dict) -> None:
     _validate_quality_scope(values["quality_type"], [values["metric_code"]])
+    check_fk(db, VehicleModel, values.get("vehicle_model_id"), "车型")
+    check_fk(db, Color, values.get("color_id"), "颜色")
+    check_fk(db, Part, values.get("part_id"), "零件")
+    check_fk(db, MeasurementPoint, values.get("measurement_point_id"), "测量点")
     for field, model, label in (
         ("vehicle_model_id", VehicleModel, "车型"),
         ("color_id", Color, "颜色"),
@@ -819,3 +830,217 @@ def delete_quality_standard(
 ) -> Response:
     _required(db, QualityStandard, standard_id, "质量标准")
     reject_physical_delete("质量标准")
+
+@router.get("/monitoring/quality-summary")
+def data_quality_monitoring(db: Session = Depends(get_db)) -> dict:
+    total_measurements = int(db.scalar(select(func.count()).select_from(QualityMeasurement)) or 0)
+    valid_measurements = int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.is_valid.is_(True))) or 0)
+    verified_measurements = int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.reliability_status == "VERIFIED")) or 0)
+    unverified_measurements = int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.reliability_status == "UNVERIFIED")) or 0)
+    failed_measurements = int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.reliability_status == "FAILED")) or 0)
+
+    total_instruments = int(db.scalar(select(func.count()).select_from(MeasurementInstrument)) or 0)
+    active_instruments = int(db.scalar(select(func.count()).select_from(MeasurementInstrument).where(MeasurementInstrument.status == "ACTIVE")) or 0)
+
+    now = datetime.now()
+    valid_calibrations = int(db.scalar(select(func.count()).select_from(MeasurementCalibrationRecord).where(MeasurementCalibrationRecord.result == "PASS", MeasurementCalibrationRecord.valid_until > now)) or 0)
+    expired_calibrations = int(db.scalar(select(func.count()).select_from(MeasurementCalibrationRecord).where(MeasurementCalibrationRecord.valid_until <= now)) or 0)
+    total_calibrations = int(db.scalar(select(func.count()).select_from(MeasurementCalibrationRecord)) or 0)
+
+    total_standards = int(db.scalar(select(func.count()).select_from(QualityStandard).where(QualityStandard.is_active.is_(True))) or 0)
+
+    metric_completeness = round(valid_measurements / max(total_measurements, 1) * 100, 1)
+    verification_rate = round(verified_measurements / max(valid_measurements, 1) * 100, 1)
+    calibration_health = round(valid_calibrations / max(total_calibrations, 1) * 100, 1) if total_calibrations else 0
+
+    reliability_by_type = [
+        {
+            "quality_type": quality_type,
+            "total": int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.quality_type == quality_type)) or 0),
+            "verified": int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.quality_type == quality_type, QualityMeasurement.reliability_status == "VERIFIED")) or 0),
+            "failed": int(db.scalar(select(func.count()).select_from(QualityMeasurement).where(QualityMeasurement.quality_type == quality_type, QualityMeasurement.reliability_status == "FAILED")) or 0),
+        }
+        for quality_type in ("ORANGE_PEEL", "COLOR_DIFFERENCE", "THICKNESS")
+    ]
+
+    instruments_requiring_calibration = [
+        {
+            "id": instrument.id,
+            "code": instrument.code,
+            "name": instrument.name,
+            "instrument_type": instrument.instrument_type,
+            "status": instrument.status,
+        }
+        for instrument in db.scalars(
+            select(MeasurementInstrument).where(
+                MeasurementInstrument.calibration_required.is_(True),
+                MeasurementInstrument.status == "ACTIVE",
+            )
+        ).all()
+        if not db.scalar(
+            select(MeasurementCalibrationRecord).where(
+                MeasurementCalibrationRecord.instrument_id == instrument.id,
+                MeasurementCalibrationRecord.result == "PASS",
+                MeasurementCalibrationRecord.valid_until > now,
+            )
+        )
+    ]
+
+    return {
+        "overview": {
+            "total_measurements": total_measurements,
+            "valid_measurements": valid_measurements,
+            "verified_measurements": verified_measurements,
+            "unverified_measurements": unverified_measurements,
+            "failed_measurements": failed_measurements,
+            "metric_completeness": metric_completeness,
+            "verification_rate": verification_rate,
+        },
+        "instruments": {
+            "total": total_instruments,
+            "active": active_instruments,
+            "total_calibrations": total_calibrations,
+            "valid_calibrations": valid_calibrations,
+            "expired_calibrations": expired_calibrations,
+            "calibration_health": calibration_health,
+            "needs_calibration": instruments_requiring_calibration,
+        },
+        "standards": {
+            "active_standards": total_standards,
+        },
+        "reliability_by_type": reliability_by_type,
+        "health_score": round(
+            (metric_completeness * 0.3 + verification_rate * 0.3 + calibration_health * 0.4),
+            1,
+        ),
+    }
+
+
+@router.post("/measurements/import-csv")
+def import_quality_csv(file: UploadFile, db: Session = Depends(get_db)) -> dict:
+    content = (file.file.read()).decode("utf-8-sig")
+    reader = DictReader(StringIO(content))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="CSV 文件为空或缺少表头")
+    required = {"data_no", "production_run_no", "measurement_point_code", "quality_type", "measured_at"}
+    missing = required - set(reader.fieldnames)
+    if missing:
+        raise HTTPException(status_code=422, detail=f"缺少必填列：{', '.join(sorted(missing))}")
+
+    result = {"total_rows": 0, "created": 0, "updated": 0, "skipped": 0, "errors": []}
+    run_by_no = {
+        run.run_no: run
+        for run in db.scalars(select(ProductionRun)).all()
+    }
+    point_by_code = {
+        point.code: point
+        for point in db.scalars(select(MeasurementPoint)).all()
+    }
+
+    for row_num, row in enumerate(reader, start=2):
+        result["total_rows"] += 1
+        try:
+            data_no = (row.get("data_no") or "").strip()
+            run_no = (row.get("production_run_no") or "").strip()
+            point_code = (row.get("measurement_point_code") or "").strip()
+            quality_type = (row.get("quality_type") or "").strip().upper()
+            measured_at_str = (row.get("measured_at") or "").strip()
+            measured_by = (row.get("measured_by") or "").strip() or None
+            data_type = (row.get("data_type") or "TEST").strip()
+            metric_codes_str = (row.get("metric_codes") or "").strip()
+            metric_values_str = (row.get("metric_values") or "").strip()
+            metric_units_str = (row.get("metric_units") or "").strip()
+
+            if not all([data_no, run_no, point_code, quality_type, measured_at_str]):
+                result["errors"].append(f"第{row_num}行：必填字段缺失")
+                result["skipped"] += 1
+                continue
+
+            if quality_type not in APPROVED_QUALITY_TYPES:
+                result["errors"].append(f"第{row_num}行：质量类型 {quality_type} 不在批准范围")
+                result["skipped"] += 1
+                continue
+
+            run = run_by_no.get(run_no)
+            if not run:
+                result["errors"].append(f"第{row_num}行：生产事件 {run_no} 不存在")
+                result["skipped"] += 1
+                continue
+
+            point = point_by_code.get(point_code)
+            if not point:
+                result["errors"].append(f"第{row_num}行：测量点 {point_code} 不存在")
+                result["skipped"] += 1
+                continue
+
+            try:
+                measured_at = datetime.fromisoformat(measured_at_str)
+            except ValueError:
+                result["errors"].append(f"第{row_num}行：测量时间格式无效，需为 ISO 8601 格式")
+                result["skipped"] += 1
+                continue
+
+            existing = db.scalar(select(QualityMeasurement).where(QualityMeasurement.data_no == data_no))
+            if existing:
+                existing.quality_type = quality_type
+                existing.measured_at = measured_at
+                existing.measured_by = measured_by or existing.measured_by
+                existing.data_type = data_type
+                db.flush()
+                result["updated"] += 1
+                measurement = existing
+            else:
+                measurement = QualityMeasurement(
+                    data_no=data_no,
+                    production_run_id=run.id,
+                    measurement_point_id=point.id,
+                    quality_type=quality_type,
+                    data_type=data_type,
+                    measured_at=measured_at,
+                    measured_by=measured_by,
+                )
+                db.add(measurement)
+                db.flush()
+                result["created"] += 1
+
+            metric_codes = [c.strip() for c in metric_codes_str.split(",") if c.strip()]
+            metric_values = metric_values_str.split(",") if metric_values_str else []
+            metric_units = [u.strip() for u in metric_units_str.split(",")] if metric_units_str else []
+
+            if metric_codes:
+                for i, code in enumerate(metric_codes):
+                    if i >= len(metric_values):
+                        break
+                    try:
+                        value = float(metric_values[i].strip())
+                    except (ValueError, IndexError):
+                        result["errors"].append(f"第{row_num}行：指标 {code} 的值无效")
+                        continue
+                    unit = metric_units[i].strip() if i < len(metric_units) else None
+                    existing_metric = db.scalar(
+                        select(QualityMetricValue).where(
+                            QualityMetricValue.measurement_id == measurement.id,
+                            QualityMetricValue.metric_code == code,
+                        )
+                    )
+                    if existing_metric:
+                        existing_metric.raw_value = value
+                        if unit:
+                            existing_metric.unit = unit
+                    else:
+                        db.add(
+                            QualityMetricValue(
+                                measurement_id=measurement.id,
+                                metric_code=code,
+                                metric_name=code,
+                                raw_value=value,
+                                unit=unit or None,
+                            )
+                        )
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            result["errors"].append(f"第{row_num}行：处理异常 - {exc}")
+            result["skipped"] += 1
+
+    return result

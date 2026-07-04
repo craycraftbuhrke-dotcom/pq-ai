@@ -5,6 +5,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.delete_policy import reject_physical_delete
+from app.core.referential_integrity import check_fk, check_delete_safe
 from app.db.session import get_db
 from app.domain.scope_policy import ScopeViolation, require_approved_quality_type
 from app.models.domain import (
@@ -217,6 +218,7 @@ def list_robots(db: Session = Depends(get_db)) -> list[DurrRobot]:
 
 @router.post("/robots", response_model=DurrRobotRead, status_code=status.HTTP_201_CREATED)
 def create_robot(payload: DurrRobotCreate, db: Session = Depends(get_db)) -> DurrRobot:
+    check_fk(db, Factory, payload.factory_id, "工厂")
     _required(db, Factory, payload.factory_id, "工厂")
     _unique_device(db, DurrRobot, payload.factory_id, payload.code, payload.serial_no)
     return _save(db, DurrRobot(**payload.model_dump()))
@@ -245,7 +247,9 @@ def update_robot(
 
 @router.delete("/robots/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_robot(resource_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(db, _required(db, DurrRobot, resource_id, "Dürr 机器人"), "Dürr 机器人")
+    resource = _required(db, DurrRobot, resource_id, "Dürr 机器人")
+    check_delete_safe(db, ProgramDeviceConfiguration, ProgramDeviceConfiguration.robot_id, resource_id, "Dürr 机器人")
+    return _delete(db, resource, "Dürr 机器人")
 
 
 @router.get("/controllers", response_model=list[DurrControllerRead])
@@ -261,6 +265,7 @@ def list_controllers(db: Session = Depends(get_db)) -> list[DurrApplicationContr
 def create_controller(
     payload: DurrControllerCreate, db: Session = Depends(get_db)
 ) -> DurrApplicationController:
+    check_fk(db, Factory, payload.factory_id, "工厂")
     _required(db, Factory, payload.factory_id, "工厂")
     _unique_device(
         db,
@@ -295,11 +300,10 @@ def update_controller(
 
 @router.delete("/controllers/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_controller(resource_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(
-        db,
-        _required(db, DurrApplicationController, resource_id, "Dürr 应用控制器"),
-        "Dürr 应用控制器",
-    )
+    resource = _required(db, DurrApplicationController, resource_id, "Dürr 应用控制器")
+    check_delete_safe(db, DurrRotaryAtomizer, DurrRotaryAtomizer.controller_id, resource_id, "Dürr 应用控制器")
+    check_delete_safe(db, ProgramDeviceConfiguration, ProgramDeviceConfiguration.controller_id, resource_id, "Dürr 应用控制器")
+    return _delete(db, resource, "Dürr 应用控制器")
 
 
 @router.get("/atomizers", response_model=list[DurrAtomizerRead])
@@ -313,6 +317,7 @@ def list_atomizers(db: Session = Depends(get_db)) -> list[DurrRotaryAtomizer]:
 def create_atomizer(
     payload: DurrAtomizerCreate, db: Session = Depends(get_db)
 ) -> DurrRotaryAtomizer:
+    check_fk(db, Factory, payload.factory_id, "工厂")
     _required(db, Factory, payload.factory_id, "工厂")
     if payload.controller_id:
         controller = _required(
@@ -354,9 +359,9 @@ def update_atomizer(
 
 @router.delete("/atomizers/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_atomizer(resource_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(
-        db, _required(db, DurrRotaryAtomizer, resource_id, "Dürr 旋杯"), "Dürr 旋杯"
-    )
+    resource = _required(db, DurrRotaryAtomizer, resource_id, "Dürr 旋杯")
+    check_delete_safe(db, ProgramDeviceConfiguration, ProgramDeviceConfiguration.atomizer_id, resource_id, "Dürr 旋杯")
+    return _delete(db, resource, "Dürr 旋杯")
 
 
 @router.get("/device-configurations", response_model=list[ProgramDeviceConfigurationRead])
@@ -377,6 +382,10 @@ def list_device_configurations(
 def create_device_configuration(
     payload: ProgramDeviceConfigurationCreate, db: Session = Depends(get_db)
 ) -> ProgramDeviceConfiguration:
+    check_fk(db, SprayProgramVersion, payload.program_version_id, "喷涂程序版本")
+    check_fk(db, DurrRobot, payload.robot_id, "Dürr 机器人")
+    check_fk(db, DurrRotaryAtomizer, payload.atomizer_id, "Dürr 旋杯")
+    check_fk(db, DurrApplicationController, payload.controller_id, "Dürr 应用控制器")
     values = payload.model_dump()
     _validate_device_configuration(db, values)
     if db.scalar(
@@ -442,11 +451,9 @@ def update_device_configuration(
 
 @router.delete("/device-configurations/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_device_configuration(resource_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(
-        db,
-        _required(db, ProgramDeviceConfiguration, resource_id, "程序设备配置"),
-        "程序设备配置",
-    )
+    resource = _required(db, ProgramDeviceConfiguration, resource_id, "程序设备配置")
+    check_delete_safe(db, ProductionDeviceExecution, ProductionDeviceExecution.device_configuration_id, resource_id, "程序设备配置")
+    return _delete(db, resource, "程序设备配置")
 
 
 @router.get("/trajectory-programs", response_model=list[TrajectoryProgramRead])
@@ -467,6 +474,7 @@ def list_trajectory_programs(
 def create_trajectory_program(
     payload: TrajectoryProgramCreate, db: Session = Depends(get_db)
 ) -> TrajectoryProgram:
+    check_fk(db, SprayProgramVersion, payload.program_version_id, "喷涂程序版本")
     _required(db, SprayProgramVersion, payload.program_version_id, "喷涂程序版本")
     if db.scalar(
         select(TrajectoryProgram).where(
@@ -526,9 +534,10 @@ def update_trajectory_program(
 
 @router.delete("/trajectory-programs/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_trajectory_program(resource_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(
-        db, _required(db, TrajectoryProgram, resource_id, "轨迹程序"), "轨迹程序"
-    )
+    resource = _required(db, TrajectoryProgram, resource_id, "轨迹程序")
+    check_delete_safe(db, TrajectoryPathSegment, TrajectoryPathSegment.trajectory_program_id, resource_id, "轨迹程序")
+    check_delete_safe(db, ProductionDeviceExecution, ProductionDeviceExecution.trajectory_program_id, resource_id, "轨迹程序")
+    return _delete(db, resource, "轨迹程序")
 
 
 @router.get(
@@ -575,6 +584,9 @@ def list_all_path_segments(
 def create_path_segment(
     payload: TrajectoryPathSegmentCreate, db: Session = Depends(get_db)
 ) -> TrajectoryPathSegment:
+    check_fk(db, TrajectoryProgram, payload.trajectory_program_id, "轨迹程序")
+    check_fk(db, Brush, payload.brush_id, "刷子")
+    check_fk(db, Part, payload.part_id, "零件")
     trajectory = _required(db, TrajectoryProgram, payload.trajectory_program_id, "轨迹程序")
     if payload.brush_id:
         brush = _required(db, Brush, payload.brush_id, "刷子")
@@ -623,7 +635,10 @@ def update_path_segment(
 
 @router.delete("/path-segments/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_path_segment(resource_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(db, _required(db, TrajectoryPathSegment, resource_id, "路径段"), "路径段")
+    resource = _required(db, TrajectoryPathSegment, resource_id, "路径段")
+    check_delete_safe(db, PointContributionEntry, PointContributionEntry.path_segment_id, resource_id, "路径段")
+    check_delete_safe(db, PathSegmentExecution, PathSegmentExecution.path_segment_id, resource_id, "路径段")
+    return _delete(db, resource, "路径段")
 
 
 @router.get("/contribution-versions", response_model=list[PointContributionVersionRead])
@@ -650,6 +665,7 @@ def create_contribution_version(
     payload: PointContributionVersionCreate, db: Session = Depends(get_db)
 ) -> PointContributionVersion:
     _validate_quality_type(payload.target_family)
+    check_fk(db, SprayProgramVersion, payload.program_version_id, "喷涂程序版本")
     _required(db, SprayProgramVersion, payload.program_version_id, "喷涂程序版本")
     if db.scalar(
         select(PointContributionVersion).where(
@@ -763,6 +779,10 @@ def list_all_contribution_entries(
 def create_contribution_entry(
     payload: PointContributionEntryCreate, db: Session = Depends(get_db)
 ) -> PointContributionEntry:
+    check_fk(db, PointContributionVersion, payload.contribution_version_id, "点位贡献版本")
+    check_fk(db, MeasurementPoint, payload.measurement_point_id, "测量点")
+    check_fk(db, Brush, payload.brush_id, "刷子")
+    check_fk(db, TrajectoryPathSegment, payload.path_segment_id, "路径段")
     version = _required(
         db, PointContributionVersion, payload.contribution_version_id, "点位贡献版本"
     )

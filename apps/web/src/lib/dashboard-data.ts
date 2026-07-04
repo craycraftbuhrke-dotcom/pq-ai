@@ -16,6 +16,7 @@ export type DiagnosisFactor = {
 
 export type DashboardSnapshot = {
   source: "api" | "fallback";
+  error?: string;
   context: {
     factory: string;
     vehicleModel: string;
@@ -129,6 +130,39 @@ export const fallbackDashboard: DashboardSnapshot = {
   },
 };
 
+type ApiErrorPayload = {
+  detail?: unknown;
+  error?: unknown;
+};
+
+
+function cloneFallbackDashboard(error?: string): DashboardSnapshot {
+  return {
+    ...fallbackDashboard,
+    error,
+    context: { ...fallbackDashboard.context },
+    stages: fallbackDashboard.stages.map((stage) => ({ ...stage })),
+    riskPoints: fallbackDashboard.riskPoints.map((point) => ({ ...point })),
+    diagnosis: {
+      ...fallbackDashboard.diagnosis,
+      factors: fallbackDashboard.diagnosis.factors.map((factor) => ({ ...factor })),
+    },
+    recommendation: {
+      ...fallbackDashboard.recommendation,
+      actions: fallbackDashboard.recommendation.actions.map((action) => ({ ...action })),
+    },
+  };
+}
+
+
+function stringifyApiError(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) || (value && typeof value === "object")) {
+    return JSON.stringify(value);
+  }
+  return undefined;
+}
+
 function mapApiDashboard(data: ApiDashboard): DashboardSnapshot {
   return {
     source: "api",
@@ -181,7 +215,7 @@ function mapApiDashboard(data: ApiDashboard): DashboardSnapshot {
 export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
   const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
   if (!apiUrl) {
-    return fallbackDashboard;
+    return cloneFallbackDashboard("后端 API 地址未配置，当前展示演示快照。");
   }
 
   try {
@@ -191,10 +225,16 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
       signal: AbortSignal.timeout(2500),
     });
     if (!response.ok) {
-      return fallbackDashboard;
+      const payload = (await response.json().catch(() => ({}))) as ApiErrorPayload;
+      const message =
+        stringifyApiError(payload.detail) ??
+        stringifyApiError(payload.error) ??
+        `后端服务返回错误（HTTP ${response.status}）`;
+      return cloneFallbackDashboard(message);
     }
     return mapApiDashboard((await response.json()) as ApiDashboard);
-  } catch {
-    return fallbackDashboard;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "无法连接后端服务";
+    return cloneFallbackDashboard(`无法连接后端服务：${message}`);
   }
 }

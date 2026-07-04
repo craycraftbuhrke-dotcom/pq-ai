@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.delete_policy import reject_physical_delete
+from app.core.referential_integrity import check_fk, check_delete_safe
 from app.db.session import get_db
 from app.domain.scope_policy import (
     ScopeViolation,
@@ -247,7 +248,12 @@ def update_definition(resource_id: str, payload: MaterialCharacteristicDefinitio
 
 @router.delete("/definitions/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_definition(resource_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(db, _required(db, MaterialCharacteristicDefinition, resource_id, "材料特性定义"), "材料特性定义")
+    resource = _required(db, MaterialCharacteristicDefinition, resource_id, "材料特性定义")
+    check_delete_safe(db, MaterialTestMethod, MaterialTestMethod.characteristic_definition_id, resource_id, "材料特性定义")
+    check_delete_safe(db, MaterialSpecification, MaterialSpecification.characteristic_definition_id, resource_id, "材料特性定义")
+    check_delete_safe(db, MaterialCharacteristicApplicability, MaterialCharacteristicApplicability.characteristic_definition_id, resource_id, "材料特性定义")
+    check_delete_safe(db, MaterialBatchTestResult, MaterialBatchTestResult.characteristic_definition_id, resource_id, "材料特性定义")
+    return _delete(db, resource, "材料特性定义")
 
 
 @router.get("/methods", response_model=list[MaterialTestMethodRead])
@@ -257,6 +263,7 @@ def list_methods(db: Session = Depends(get_db)) -> list[MaterialTestMethod]:
 
 @router.post("/methods", response_model=MaterialTestMethodRead, status_code=status.HTTP_201_CREATED)
 def create_method(payload: MaterialTestMethodCreate, db: Session = Depends(get_db)) -> MaterialTestMethod:
+    check_fk(db, MaterialCharacteristicDefinition, payload.characteristic_definition_id, "材料特性定义")
     values = payload.model_dump()
     _validate_method(db, values)
     if db.scalar(select(MaterialTestMethod).where(MaterialTestMethod.code == payload.code, MaterialTestMethod.version == payload.version)):
@@ -288,7 +295,10 @@ def update_method(resource_id: str, payload: MaterialTestMethodUpdate, db: Sessi
 
 @router.delete("/methods/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_method(resource_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(db, _required(db, MaterialTestMethod, resource_id, "材料检测方法"), "材料检测方法")
+    resource = _required(db, MaterialTestMethod, resource_id, "材料检测方法")
+    check_delete_safe(db, MaterialSpecification, MaterialSpecification.method_id, resource_id, "材料检测方法")
+    check_delete_safe(db, MaterialBatchTestResult, MaterialBatchTestResult.method_id, resource_id, "材料检测方法")
+    return _delete(db, resource, "材料检测方法")
 
 
 @router.get("/specifications", response_model=list[MaterialSpecificationRead])
@@ -298,6 +308,8 @@ def list_specifications(db: Session = Depends(get_db)) -> list[MaterialSpecifica
 
 @router.post("/specifications", response_model=MaterialSpecificationRead, status_code=status.HTTP_201_CREATED)
 def create_specification(payload: MaterialSpecificationCreate, db: Session = Depends(get_db)) -> MaterialSpecification:
+    check_fk(db, MaterialCharacteristicDefinition, payload.characteristic_definition_id, "材料特性定义")
+    check_fk(db, MaterialTestMethod, payload.method_id, "材料检测方法")
     values = payload.model_dump()
     _validate_specification(db, values)
     if db.scalar(select(MaterialSpecification).where(MaterialSpecification.material_code == payload.material_code, MaterialSpecification.characteristic_definition_id == payload.characteristic_definition_id, MaterialSpecification.method_id == payload.method_id, MaterialSpecification.version == payload.version)):
@@ -363,7 +375,9 @@ def update_specification(resource_id: str, payload: MaterialSpecificationUpdate,
 
 @router.delete("/specifications/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_specification(resource_id: str, db: Session = Depends(get_db)) -> Response:
-    return _delete(db, _required(db, MaterialSpecification, resource_id, "材料规格"), "材料规格")
+    resource = _required(db, MaterialSpecification, resource_id, "材料规格")
+    check_delete_safe(db, MaterialBatchTestResult, MaterialBatchTestResult.specification_id, resource_id, "材料规格")
+    return _delete(db, resource, "材料规格")
 
 
 @router.get("/applicabilities", response_model=list[MaterialCharacteristicApplicabilityRead])
@@ -373,6 +387,7 @@ def list_applicabilities(db: Session = Depends(get_db)) -> list[MaterialCharacte
 
 @router.post("/applicabilities", response_model=MaterialCharacteristicApplicabilityRead, status_code=status.HTTP_201_CREATED)
 def create_applicability(payload: MaterialCharacteristicApplicabilityCreate, db: Session = Depends(get_db)) -> MaterialCharacteristicApplicability:
+    check_fk(db, MaterialCharacteristicDefinition, payload.characteristic_definition_id, "材料特性定义")
     values = payload.model_dump()
     _validate_applicability(db, values)
     if db.scalar(select(MaterialCharacteristicApplicability).where(MaterialCharacteristicApplicability.characteristic_definition_id == payload.characteristic_definition_id, MaterialCharacteristicApplicability.material_type == payload.material_type, MaterialCharacteristicApplicability.process_stage == payload.process_stage, MaterialCharacteristicApplicability.target_family == payload.target_family)):
@@ -419,6 +434,9 @@ def list_results(material_batch_id: str | None = None, db: Session = Depends(get
 
 @router.post("/results", response_model=MaterialBatchTestResultRead, status_code=status.HTTP_201_CREATED)
 def create_result(payload: MaterialBatchTestResultCreate, db: Session = Depends(get_db)) -> MaterialBatchTestResult:
+    check_fk(db, MaterialBatch, payload.material_batch_id, "材料批次")
+    check_fk(db, MaterialCharacteristicDefinition, payload.characteristic_definition_id, "材料特性定义")
+    check_fk(db, MaterialTestMethod, payload.method_id, "材料检测方法")
     values = payload.model_dump()
     _validate_result(db, values)
     if db.scalar(select(MaterialBatchTestResult).where(MaterialBatchTestResult.result_no == payload.result_no)):

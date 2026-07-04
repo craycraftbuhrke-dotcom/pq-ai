@@ -1,11 +1,10 @@
 .git
 .gitignore
-
 node_modules
-apps/web/.next
-apps/web/.runtime
 apps/web/tsconfig.tsbuildinfo
 apps/web/node_modules
+apps/web/.next
+apps/web/.runtime
 
 services/api/.venv
 services/api/.runtime
@@ -13,6 +12,9 @@ services/api/.pytest_cache
 services/api/pq_ai_api.egg-info
 services/api/**/*.pyc
 services/api/**/__pycache__
+services/api/__pycache__
+services/api/app/**/__pycache__
+services/api/tests/**/__pycache__
 
 .env
 .env.*
@@ -22,3 +24,9 @@ docs
 .codex
 *.log
 npm-debug.log*
+.pytest_cache
+.next
+*.err.log
+docker-compose*.yml
+docs/codebase-study-and-maturity-report-*.md
+docs/product-introduction-*.md

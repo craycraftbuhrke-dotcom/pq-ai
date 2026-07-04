@@ -11,6 +11,7 @@ export type CurrentActor = {
   roles: string[];
   permissions: string[];
   authEnabled: boolean;
+  connectionError?: string;
 };
 
 type ApiActor = {
@@ -29,6 +30,11 @@ export const fallbackActor: CurrentActor = {
   roles: [],
   permissions: [],
   authEnabled: process.env.API_AUTH_ENABLED === "true",
+};
+
+type ApiErrorPayload = {
+  detail?: unknown;
+  error?: unknown;
 };
 
 function mapActor(actor: ApiActor): CurrentActor {
@@ -60,9 +66,32 @@ async function sessionToken(request?: Request): Promise<string | null> {
   return store.get(sessionCookieName)?.value ?? null;
 }
 
+function stringifyApiError(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) || (value && typeof value === "object")) {
+    return JSON.stringify(value);
+  }
+  return undefined;
+}
+
+function withConnectionError(message: string): CurrentActor {
+  return { ...fallbackActor, connectionError: message };
+}
+
+async function apiKeyFromRequest(request?: Request): Promise<string | null> {
+  if (request) {
+    return cookieFromHeader(request.headers.get("cookie"), "pq_api_key");
+  }
+  const store = await cookies();
+  return store.get("pq_api_key")?.value ?? null;
+}
+
 export async function apiRequestHeaders(request?: Request): Promise<HeadersInit> {
   const token = await sessionToken(request);
   if (token) return { Authorization: `Bearer ${token}` };
+
+  const cookieApiKey = await apiKeyFromRequest(request);
+  if (cookieApiKey) return { "x-api-key": cookieApiKey };
 
   const apiKey = process.env.API_KEY;
   return apiKey ? { "x-api-key": apiKey } : {};
@@ -71,7 +100,7 @@ export async function apiRequestHeaders(request?: Request): Promise<HeadersInit>
 export async function getCurrentActor(): Promise<CurrentActor> {
   const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
   if (!apiUrl) {
-    return fallbackActor;
+    return withConnectionError("后端 API 地址未配置");
   }
   try {
     const response = await fetch(`${apiUrl}/auth/me`, {
@@ -80,10 +109,16 @@ export async function getCurrentActor(): Promise<CurrentActor> {
       signal: AbortSignal.timeout(2500),
     });
     if (!response.ok) {
-      return fallbackActor;
+      const payload = (await response.json().catch(() => ({}))) as ApiErrorPayload;
+      return withConnectionError(
+        stringifyApiError(payload.detail) ??
+          stringifyApiError(payload.error) ??
+          `后端认证接口返回错误（HTTP ${response.status}）`,
+      );
     }
     return mapActor((await response.json()) as ApiActor);
-  } catch {
-    return fallbackActor;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "无法连接后端认证接口";
+    return withConnectionError(`无法连接后端认证接口：${message}`);
   }
 }

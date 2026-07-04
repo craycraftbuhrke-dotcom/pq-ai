@@ -154,6 +154,21 @@ def _actor_for_user(db: Session, user: AppUser) -> Actor:
     )
 
 
+def build_actor_for_user(db: Session, user: AppUser) -> Actor:
+    return _actor_for_user(db, user)
+
+
+def authenticate_password(db: Session, username: str, password: str) -> AppUser | None:
+    user = db.scalar(select(AppUser).where(AppUser.username == username))
+    if not user or not user.is_active or not verify_password(password, user.password_hash):
+        return None
+    user.last_login_at = datetime.now(UTC)
+    user.failed_login_count = 0
+    user.locked_until = None
+    db.commit()
+    return user
+
+
 def authenticate_api_key(db: Session, raw_key: str) -> Actor | None:
     if not raw_key:
         return None

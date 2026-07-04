@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     login_lockout_threshold: int = 5
     login_lockout_minutes: int = 15
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
     @property
     def cors_origins(self) -> list[str]:

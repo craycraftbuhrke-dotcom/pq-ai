@@ -3,8 +3,10 @@ from uuid import uuid4
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
+from app.core.database_errors import database_error_response
 from app.core.security import (
     ANONYMOUS_ACTOR,
     SYSTEM_ACTOR,
@@ -17,7 +19,7 @@ from app.db.session import SessionLocal
 from app.models.domain import AuditLog
 
 
-EXEMPT_PATHS = {"/", "/docs", "/openapi.json", "/api/v1/health", "/api/v1/auth/login"}
+EXEMPT_PATHS = {"/", "/docs", "/openapi.json", "/api/v1/health", "/api/v1/auth/login", "/api/v1/auth/register"}
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -30,12 +32,15 @@ async def security_and_audit_middleware(request: Request, call_next) -> Response
     if settings.api_auth_enabled and path not in EXEMPT_PATHS and request.method != "OPTIONS":
         bearer_token = _bearer_token(request.headers.get("authorization", ""))
         raw_key = request.headers.get("x-api-key", "")
-        with SessionLocal() as db:
-            actor = (
-                authenticate_session_token(db, bearer_token)
-                if bearer_token
-                else authenticate_api_key(db, raw_key)
-            )
+        try:
+            with SessionLocal() as db:
+                actor = (
+                    authenticate_session_token(db, bearer_token)
+                    if bearer_token
+                    else authenticate_api_key(db, raw_key)
+                )
+        except SQLAlchemyError as exc:
+            return database_error_response(exc, request_id)
         if not actor:
             if request.method in WRITE_METHODS and path.startswith(settings.api_prefix):
                 _write_audit(request, ANONYMOUS_ACTOR, request_id, 401, 0)
@@ -69,6 +74,10 @@ async def security_and_audit_middleware(request: Request, call_next) -> Response
     started = perf_counter()
     try:
         response = await call_next(request)
+    except SQLAlchemyError as exc:
+        if request.method in WRITE_METHODS:
+            _write_audit(request, actor, request_id, 500, perf_counter() - started)
+        return database_error_response(exc, request_id)
     except Exception:
         if request.method in WRITE_METHODS:
             _write_audit(request, actor, request_id, 500, perf_counter() - started)

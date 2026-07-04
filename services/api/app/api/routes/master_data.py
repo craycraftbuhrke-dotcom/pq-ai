@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.api.delete_policy import reject_physical_delete
 from app.db.session import get_db
+from app.core.referential_integrity import check_fk
 from app.domain.scope_policy import (
     APPROVED_QUALITY_TYPES,
     ScopeViolation,
@@ -270,8 +271,8 @@ def delete_part(part_id: str, db: Session = Depends(get_db)) -> Response:
 def bind_factory_vehicle_model(
     payload: FactoryVehicleModelCreate, db: Session = Depends(get_db)
 ) -> FactoryVehicleModel:
-    _ensure_exists(db, Factory, payload.factory_id, "工厂")
-    _ensure_exists(db, VehicleModel, payload.vehicle_model_id, "车型")
+    check_fk(db, Factory, payload.factory_id, label="工厂")
+    check_fk(db, VehicleModel, payload.vehicle_model_id, label="车型")
     return _create_unique(
         db,
         FactoryVehicleModel,
@@ -309,8 +310,8 @@ def delete_factory_vehicle_model(relation_id: str, db: Session = Depends(get_db)
 def bind_vehicle_model_color(
     payload: VehicleModelColorCreate, db: Session = Depends(get_db)
 ) -> VehicleModelColor:
-    _ensure_exists(db, VehicleModel, payload.vehicle_model_id, "车型")
-    _ensure_exists(db, Color, payload.color_id, "颜色")
+    check_fk(db, VehicleModel, payload.vehicle_model_id, label="车型")
+    check_fk(db, Color, payload.color_id, label="颜色")
     return _create_unique(
         db,
         VehicleModelColor,
@@ -367,7 +368,7 @@ def create_measurement_group(
     payload: MeasurementGroupCreate, db: Session = Depends(get_db)
 ) -> MeasurementGroup:
     _validate_quality_types([payload.quality_type])
-    _ensure_exists(db, VehicleModel, payload.vehicle_model_id, "车型")
+    check_fk(db, VehicleModel, payload.vehicle_model_id, label="车型")
     return _create_unique(
         db,
         MeasurementGroup,
@@ -391,7 +392,7 @@ def update_measurement_group(
     _validate_quality_types([changes.get("quality_type", group.quality_type)])
     vehicle_model_id = changes.get("vehicle_model_id", group.vehicle_model_id)
     code = changes.get("code", group.code)
-    _ensure_exists(db, VehicleModel, vehicle_model_id, "车型")
+    check_fk(db, VehicleModel, vehicle_model_id, label="车型")
     duplicate = db.scalar(
         select(MeasurementGroup).where(
             MeasurementGroup.vehicle_model_id == vehicle_model_id,
@@ -444,8 +445,8 @@ def create_measurement_point(
     payload: MeasurementPointCreate, db: Session = Depends(get_db)
 ) -> MeasurementPoint:
     _validate_quality_types(payload.quality_types)
-    _ensure_exists(db, VehicleModel, payload.vehicle_model_id, "车型")
-    _ensure_exists(db, Part, payload.part_id, "零件")
+    check_fk(db, VehicleModel, payload.vehicle_model_id, label="车型")
+    check_fk(db, Part, payload.part_id, label="零件")
     return _create_unique(
         db,
         MeasurementPoint,
@@ -470,8 +471,8 @@ def update_measurement_point(
     vehicle_model_id = changes.get("vehicle_model_id", point.vehicle_model_id)
     part_id = changes.get("part_id", point.part_id)
     code = changes.get("code", point.code)
-    _ensure_exists(db, VehicleModel, vehicle_model_id, "车型")
-    _ensure_exists(db, Part, part_id, "零件")
+    check_fk(db, VehicleModel, vehicle_model_id, label="车型")
+    check_fk(db, Part, part_id, label="零件")
     duplicate = db.scalar(
         select(MeasurementPoint).where(
             MeasurementPoint.vehicle_model_id == vehicle_model_id,
@@ -506,8 +507,8 @@ def delete_measurement_point(
 def add_measurement_group_point(
     group_id: str, payload: MeasurementGroupPointCreate, db: Session = Depends(get_db)
 ) -> MeasurementGroupPoint:
-    _ensure_exists(db, MeasurementGroup, group_id, "测量编组")
-    _ensure_exists(db, MeasurementPoint, payload.measurement_point_id, "测量点")
+    check_fk(db, MeasurementGroup, group_id, label="测量编组")
+    check_fk(db, MeasurementPoint, payload.measurement_point_id, label="测量点")
     return _create_unique(
         db,
         MeasurementGroupPoint,
