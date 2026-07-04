@@ -2,9 +2,9 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, or_, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.delete_policy import reject_physical_delete
 from app.db.session import get_db
 from app.domain.scope_policy import (
     ScopeViolation,
@@ -70,16 +70,7 @@ def _save(db: Session, resource):
 
 
 def _delete(db: Session, resource, label: str) -> Response:
-    try:
-        db.delete(resource)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail=f"{label}已被测量或校准记录引用，请停用或保留追溯",
-        ) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    reject_physical_delete(label)
 
 
 def _refresh_linked_measurements(db: Session, *conditions) -> None:

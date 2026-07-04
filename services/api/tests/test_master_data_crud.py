@@ -72,6 +72,12 @@ def build_session() -> Session:
     return Session(engine)
 
 
+def assert_delete_disabled(callable_, *args) -> None:
+    with pytest.raises(HTTPException) as error:
+        callable_(*args)
+    assert error.value.status_code == 405
+
+
 def test_factory_crud_and_duplicate_code_validation() -> None:
     db = build_session()
     factory = create_factory(
@@ -88,10 +94,8 @@ def test_factory_crud_and_duplicate_code_validation() -> None:
         update_factory(factory.id, FactoryUpdate(code="F02"), db)
     assert error.value.status_code == 409
 
-    delete_factory(factory.id, db)
-    with pytest.raises(HTTPException) as missing:
-        get_factory(factory.id, db)
-    assert missing.value.status_code == 404
+    assert_delete_disabled(delete_factory, factory.id, db)
+    assert get_factory(factory.id, db).id == factory.id
     db.close()
 
 
@@ -120,9 +124,9 @@ def test_vehicle_color_and_part_crud() -> None:
     assert update_color(color.id, ColorUpdate(supplier="供应商 B"), db).supplier == "供应商 B"
     assert update_part(part.id, PartUpdate(region="前部"), db).region == "前部"
 
-    delete_vehicle_model(vehicle.id, db)
-    delete_color(color.id, db)
-    delete_part(part.id, db)
+    assert_delete_disabled(delete_vehicle_model, vehicle.id, db)
+    assert_delete_disabled(delete_color, color.id, db)
+    assert_delete_disabled(delete_part, part.id, db)
     db.close()
 
 
@@ -189,13 +193,13 @@ def test_measurement_group_and_point_crud() -> None:
         db,
     ).is_match_point
 
-    delete_measurement_group_point(point_relation.id, db)
-    delete_factory_vehicle_model(factory_relation.id, db)
-    delete_vehicle_model_color(color_relation.id, db)
-    delete_measurement_group(group.id, db)
-    delete_measurement_point(point.id, db)
-    delete_factory(factory.id, db)
-    delete_color(color.id, db)
+    assert_delete_disabled(delete_measurement_group_point, point_relation.id, db)
+    assert_delete_disabled(delete_factory_vehicle_model, factory_relation.id, db)
+    assert_delete_disabled(delete_vehicle_model_color, color_relation.id, db)
+    assert_delete_disabled(delete_measurement_group, group.id, db)
+    assert_delete_disabled(delete_measurement_point, point.id, db)
+    assert_delete_disabled(delete_factory, factory.id, db)
+    assert_delete_disabled(delete_color, color.id, db)
     db.close()
 
 
@@ -208,8 +212,6 @@ def test_referenced_factory_cannot_be_deleted() -> None:
         db,
     )
 
-    with pytest.raises(HTTPException) as error:
-        delete_factory(factory.id, db)
-    assert error.value.status_code == 409
+    assert_delete_disabled(delete_factory, factory.id, db)
     assert get_factory(factory.id, db).id == factory.id
     db.close()

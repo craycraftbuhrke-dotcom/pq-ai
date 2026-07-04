@@ -1,9 +1,9 @@
 "use client";
 
-import { Menu, Search, ShieldCheck, X } from "lucide-react";
+import { LogOut, Menu, Search, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { navigationIcons } from "@/components/icons";
 import type { CurrentActor } from "@/lib/auth-data";
@@ -17,6 +17,21 @@ type AppShellProps = {
 export function AppShell({ actor, children }: AppShellProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    if (pathname !== "/login" && actor.authEnabled && !actor.userId) {
+      window.location.href = `/login?next=${encodeURIComponent(pathname)}`;
+    }
+  }, [actor.authEnabled, actor.userId, pathname]);
+
+  if (pathname === "/login") {
+    return <>{children}</>;
+  }
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    window.location.href = "/login";
+  }
 
   return (
     <div className="app-shell">
@@ -71,6 +86,10 @@ export function AppShell({ actor, children }: AppShellProps) {
             </div>
             <ShieldCheck aria-label="已认证" />
           </div>
+          <button className="logout-button" onClick={() => void logout()}>
+            <LogOut />
+            退出登录
+          </button>
         </div>
       </aside>
       <div className="workspace">

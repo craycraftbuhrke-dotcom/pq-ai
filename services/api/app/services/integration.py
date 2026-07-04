@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.scope_policy import (
@@ -261,48 +261,67 @@ def _process_qms_measurement(db: Session, payload: dict) -> dict:
     if measurement:
         for field, value in values.items():
             setattr(measurement, field, value)
-        db.execute(
-            delete(QualityMetricValue).where(QualityMetricValue.measurement_id == measurement.id)
-        )
-        db.execute(
-            delete(MeasurementRepeatReading).where(
-                MeasurementRepeatReading.measurement_id == measurement.id
-            )
-        )
         operation = "UPDATED"
     else:
         measurement = QualityMeasurement(data_no=payload["data_no"], **values)
         db.add(measurement)
         db.flush()
         operation = "CREATED"
-    db.add_all(
-        [
-            QualityMetricValue(
-                measurement_id=measurement.id,
-                metric_code=metric["metric_code"],
-                metric_name=metric.get("metric_name", metric["metric_code"]),
-                raw_value=float(metric["raw_value"]),
-                corrected_value=metric.get("corrected_value"),
-                unit=metric.get("unit"),
+    existing_metrics = {
+        metric.metric_code: metric
+        for metric in db.scalars(
+            select(QualityMetricValue).where(QualityMetricValue.measurement_id == measurement.id)
+        )
+    }
+    for metric in metrics:
+        metric_values = {
+            "metric_name": metric.get("metric_name", metric["metric_code"]),
+            "raw_value": float(metric["raw_value"]),
+            "corrected_value": metric.get("corrected_value"),
+            "unit": metric.get("unit"),
+        }
+        existing = existing_metrics.get(metric["metric_code"])
+        if existing:
+            for field, value in metric_values.items():
+                setattr(existing, field, value)
+        else:
+            db.add(
+                QualityMetricValue(
+                    measurement_id=measurement.id,
+                    metric_code=metric["metric_code"],
+                    **metric_values,
+                )
             )
-            for metric in metrics
-        ]
-    )
-    db.add_all(
-        [
-            MeasurementRepeatReading(
-                measurement_id=measurement.id,
-                repeat_no=int(reading["repeat_no"]),
-                metric_code=reading["metric_code"],
-                raw_value=float(reading["raw_value"]),
-                corrected_value=reading.get("corrected_value"),
-                unit=reading.get("unit"),
-                is_valid=reading.get("is_valid", True),
-                invalid_reason=reading.get("invalid_reason"),
+    existing_readings = {
+        (reading.repeat_no, reading.metric_code): reading
+        for reading in db.scalars(
+            select(MeasurementRepeatReading).where(
+                MeasurementRepeatReading.measurement_id == measurement.id
             )
-            for reading in repeat_readings
-        ]
-    )
+        )
+    }
+    for reading in repeat_readings:
+        key = (int(reading["repeat_no"]), reading["metric_code"])
+        reading_values = {
+            "raw_value": float(reading["raw_value"]),
+            "corrected_value": reading.get("corrected_value"),
+            "unit": reading.get("unit"),
+            "is_valid": reading.get("is_valid", True),
+            "invalid_reason": reading.get("invalid_reason"),
+        }
+        existing = existing_readings.get(key)
+        if existing:
+            for field, value in reading_values.items():
+                setattr(existing, field, value)
+        else:
+            db.add(
+                MeasurementRepeatReading(
+                    measurement_id=measurement.id,
+                    repeat_no=key[0],
+                    metric_code=key[1],
+                    **reading_values,
+                )
+            )
     db.flush()
     refresh_measurement_reliability(db, measurement)
     return {"operation": operation, "resource_type": "quality_measurement", "resource_id": measurement.id}
@@ -433,11 +452,6 @@ def _process_robot_trajectory_execution(db: Session, payload: dict) -> dict:
     if execution:
         for field, value in values.items():
             setattr(execution, field, value)
-        db.execute(
-            delete(PathSegmentExecution).where(
-                PathSegmentExecution.device_execution_id == execution.id
-            )
-        )
     else:
         execution = ProductionDeviceExecution(
             production_stage_run_id=stage.id,
@@ -445,6 +459,14 @@ def _process_robot_trajectory_execution(db: Session, payload: dict) -> dict:
         )
         db.add(execution)
         db.flush()
+    existing_segments = {
+        row.path_segment_id: row
+        for row in db.scalars(
+            select(PathSegmentExecution).where(
+                PathSegmentExecution.device_execution_id == execution.id
+            )
+        )
+    }
     for item in payload.get("segments", []):
         segment = db.scalar(
             select(TrajectoryPathSegment).where(
@@ -454,16 +476,24 @@ def _process_robot_trajectory_execution(db: Session, payload: dict) -> dict:
         )
         if not segment:
             raise ValueError(f"轨迹路径段不存在：{item['segment_no']}")
-        db.add(
-            PathSegmentExecution(
-                device_execution_id=execution.id,
-                path_segment_id=segment.id,
-                actual_speed=item.get("actual_speed"),
-                speed_unit=item.get("speed_unit"),
-                trigger_state=item.get("trigger_state"),
-                actual_values=item.get("actual_values"),
+        segment_values = {
+            "actual_speed": item.get("actual_speed"),
+            "speed_unit": item.get("speed_unit"),
+            "trigger_state": item.get("trigger_state"),
+            "actual_values": item.get("actual_values"),
+        }
+        existing = existing_segments.get(segment.id)
+        if existing:
+            for field, value in segment_values.items():
+                setattr(existing, field, value)
+        else:
+            db.add(
+                PathSegmentExecution(
+                    device_execution_id=execution.id,
+                    path_segment_id=segment.id,
+                    **segment_values,
+                )
             )
-        )
     db.flush()
     return {
         "operation": operation,

@@ -1,6 +1,6 @@
 ---
 name: automotive-paint-process-quality
-description: Apply the approved PQ-AI automotive paint domain boundary and engineering rules when designing, implementing, reviewing, testing, or documenting 3C2B process, Dürr rotary-bell/robot, paint-material, BYK color/orange-peel, Fischer thickness, point aggregation, quality diagnosis, prediction, and recommendation features.
+description: Apply the approved PQ-AI automotive paint domain boundary and engineering rules when designing, implementing, reviewing, testing, or documenting 3C3B/3C2B spray execution, Dürr rotary-bell/robot, paint-material, BYK color/orange-peel, Fischer thickness, point aggregation, quality diagnosis, prediction, recommendation, and engineer closed-loop task features.
 ---
 
 # PQ-AI Automotive Paint Process Quality
@@ -11,7 +11,8 @@ Use this skill for every change that touches process stages, parameters, materia
 
 - Include only midcoat, basecoat, clearcoat, paint-surface inspection, Dürr electrostatic rotary-bell application, relevant material characteristics, and BYK/Fischer measurements.
 - Model three coating systems: midcoat, basecoat, and clearcoat.
-- Model five execution stages: midcoat external spray, basecoat pass 1/2, and clearcoat pass 1/2. Passes are not separate coating systems.
+- Model five approved spray execution stages: midcoat external spray, basecoat pass 1/2, and clearcoat pass 1/2. Passes are not separate coating systems.
+- Model factory-level 3C3B process-route versions and route steps for traceability, but keep oven temperature, booth humidity/temperature, pretreatment, e-coat, sealing, and paint-mix-room data outside the approved AI feature scope unless the project boundary is formally changed.
 - Target only film thickness, color difference/effect, and orange peel.
 - Exclude pretreatment, e-coat, sealing, booth temperature/humidity, oven temperature, paint-mix-room data, and gloss from the approved product/model scope.
 - Never invent Dürr limits, TDS limits, instrument semantics, or quality standards. Store factory-approved values with source/version/effective period.
@@ -38,9 +39,15 @@ Use this skill for every change that touches process stages, parameters, materia
 18. Require an approved controlled-trial plan before recommendation approval.
 19. Controlled-trial plans must record hypothesis, evidence type, expected outcome, risk, rollback plan, sustained observation plan, execution linkage, and post-change measurement outcome.
 20. Ineffective trials must be reversible: record rollback execution, target program/version when known, execution note, and action snapshot before treating the loop as closed.
-21. Do not use Alembic or automatic MySQL schema mutation. Database-structure changes require an approved manual SQL ticket and human execution record.
-22. SQLAlchemy `Base.metadata.create_all/drop_all` is forbidden outside the guarded SQLite-only test helper.
-23. Reject or quarantine out-of-scope features before snapshot creation and training.
+21. Engineer issue tasks must preserve abnormality discovery, measurement reliability review, material batch review, Dürr execution review, hypothesis, evidence, recommendation/trial linkage, conclusion, and causality level. Mark conclusions as association unless controlled DOE/trial evidence exists.
+22. Real-file ingestion must use approved import profiles, preview, validation, error reports, replay records, and checksums. Imports must never trigger schema creation or structural mutation.
+23. Do not use Alembic or automatic MySQL schema mutation. Database-structure changes require an approved manual SQL ticket and human execution record.
+24. SQLAlchemy `Base.metadata.create_all/drop_all` is forbidden outside the guarded SQLite-only test helper.
+25. Apply the company MySQL standards: lowercase underscore names, <=32 character project names, comments on tables/fields, `uk_`/`idx_` naming, <=50 fields per table, <=5 indexes per table, InnoDB/utf8mb4, no unsupported field types, and no large binary/file storage.
+26. Never add physical foreign keys. Use `logical_fk` metadata and application-layer reference checks.
+27. Runtime MySQL operations must not perform physical `DELETE`, `CREATE`, `DROP`, `ALTER`, `TRUNCATE`, `REPLACE`, or application-authored `SET`. Use disable/archive/status/version workflows.
+28. Web users authenticate through personal username/password sessions stored as HttpOnly cookies. API Keys are reserved for system integration and server-side automation and must never be exposed to browser JavaScript.
+29. Reject or quarantine out-of-scope features before snapshot creation and training.
 
 ## Reference Loading
 
@@ -55,6 +62,6 @@ Use this skill for every change that touches process stages, parameters, materia
 - Every model result is traceable to feature set, training data, model version, applicability scope, and measurement provenance.
 - Every recommendation shows evidence, source-versioned constraints, uncertainty, approval, execution values, verification results, and rollback record when ineffective.
 - Tests cover scope filtering, traceability, grouped/temporal evaluation, and closed-loop audit behavior.
-- Database changes include an approved manual SQL workflow reference; code, scripts, Docker, and CI contain no automatic MySQL DDL or migration command.
+- Database changes include an approved manual SQL workflow reference; code, scripts, Docker, and CI contain no automatic MySQL DDL or migration command, no physical foreign keys, and no runtime physical deletes.
 - Robot/trajectory changes cover device identity, program/path version, checksum matching, target-family contribution, actual execution, and rollback traceability.
 - Material changes cover characteristic semantics, canonical unit, method version, specification source/effective period, stage/target-family applicability, batch result reliability, production-time gate, and feature lineage.

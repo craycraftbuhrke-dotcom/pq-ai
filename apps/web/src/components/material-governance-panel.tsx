@@ -3,6 +3,9 @@
 import { FlaskConical, LoaderCircle, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { BulkDataActions } from "@/components/bulk-data-actions";
+import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
+
 type Kind = "definitions" | "methods" | "specifications" | "applicabilities" | "results";
 type FormState = Record<string, string | boolean>;
 type Resource = {
@@ -178,18 +181,13 @@ export function MaterialGovernancePanel() {
     }
   }
 
-  async function remove(record: Resource) {
-    if (!window.confirm(`确认删除${kindName(kind)}？已被结果或生产数据引用时系统会阻止删除。`)) return;
-    setSubmitting(true);
-    try {
-      await request(`/api/process/material-governance/${kind}/${record.id}`, { method: "DELETE" });
-      setMessage({ type: "success", text: `${kindName(kind)}已删除` });
-      await reload();
-    } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "删除失败" });
-    } finally {
-      setSubmitting(false);
-    }
+  function remove(_record: Resource) {
+    void _record;
+    setMessage({ type: "error", text: `${kindName(kind)}不能物理删除。${physicalDeleteDisabledMessage}` });
+  }
+
+  function bulkResult(message: string, type: "success" | "error") {
+    setMessage({ type, text: message });
   }
 
   return (
@@ -203,7 +201,7 @@ export function MaterialGovernancePanel() {
       </section>
       <div className="governance-toolbar">
         <div className="master-tabs">{kinds.map(([key, text]) => <button key={key} className={kind === key ? "master-tab master-tab-active" : "master-tab"} onClick={() => setKind(key)}>{text}<span>{resources[key].length}</span></button>)}</div>
-        <div className="page-actions"><button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} />刷新</button><button className="button button-primary" onClick={() => open()}><Plus />新建{kindName(kind)}</button></div>
+        <div className="page-actions"><button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} />刷新</button><BulkDataActions resourceKey={`material-governance.${kind}`} resourceLabel={kindName(kind)} disabled={loading || submitting} onImported={reload} onResult={bulkResult} /><button className="button button-primary" onClick={() => open()}><Plus />新建{kindName(kind)}</button></div>
       </div>
       <div className="master-table-wrap">
         <table className="master-table governance-table material-governance-table">

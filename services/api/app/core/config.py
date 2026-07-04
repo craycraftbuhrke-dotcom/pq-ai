@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     api_cors_origins: str = "http://localhost:3000"
     api_auth_enabled: bool = False
     bootstrap_api_key: str = "pq-ai-demo-key"
+    bootstrap_admin_password: str = "pq-ai-demo-password"
+    session_ttl_minutes: int = 12 * 60
+    login_lockout_threshold: int = 5
+    login_lockout_minutes: int = 15
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

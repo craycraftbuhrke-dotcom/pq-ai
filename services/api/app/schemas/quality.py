@@ -222,6 +222,7 @@ class QualityMeasurementCreate(BaseModel):
     measured_by: str | None = Field(default=None, max_length=80)
     device_code: str | None = Field(default=None, max_length=64)
     instrument_id: str | None = None
+    measurement_probe_id: str | None = None
     measurement_method_id: str | None = None
     calibration_record_id: str | None = None
     reference_standard_id: str | None = None
@@ -245,6 +246,7 @@ class QualityMeasurementUpdate(BaseModel):
     measured_by: str | None = Field(default=None, max_length=80)
     device_code: str | None = Field(default=None, max_length=64)
     instrument_id: str | None = None
+    measurement_probe_id: str | None = None
     measurement_method_id: str | None = None
     calibration_record_id: str | None = None
     reference_standard_id: str | None = None
@@ -280,6 +282,9 @@ class QualityMeasurementRead(ResourceRead):
     instrument_id: str | None
     instrument_code: str | None
     instrument_name: str | None
+    measurement_probe_id: str | None
+    measurement_probe_code: str | None
+    measurement_probe_name: str | None
     measurement_method_id: str | None
     measurement_method_code: str | None
     calibration_record_id: str | None

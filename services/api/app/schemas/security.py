@@ -12,16 +12,36 @@ class ActorRead(BaseModel):
     auth_enabled: bool
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=2, max_length=80)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_at: datetime
+    actor: ActorRead
+
+
 class UserCreate(BaseModel):
     username: str = Field(min_length=2, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
     display_name: str = Field(min_length=1, max_length=120)
     email: str | None = Field(default=None, max_length=255)
     department: str | None = Field(default=None, max_length=120)
+    password: str | None = Field(default=None, min_length=8, max_length=200)
     is_active: bool = True
 
 
-class UserRead(UserCreate):
+class UserRead(BaseModel):
     id: str
+    username: str
+    display_name: str
+    email: str | None
+    department: str | None
+    is_active: bool
+    last_login_at: datetime | None = None
+    locked_until: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

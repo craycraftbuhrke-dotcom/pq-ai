@@ -2,10 +2,10 @@ from collections import defaultdict
 from statistics import mean, pstdev
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.delete_policy import reject_physical_delete
 from app.db.session import get_db
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
 from app.domain.scope_policy import (
@@ -24,6 +24,7 @@ from app.models.domain import (
     MeasurementInstrument,
     MeasurementMethod,
     MeasurementPoint,
+    MeasurementProbe,
     MeasurementReferenceStandard,
     MeasurementRepeatReading,
     Part,
@@ -79,6 +80,7 @@ def _validate_repeat_readings(quality_type: str, repeat_readings: list[dict]) ->
 def _validate_measurement_governance_relations(db: Session, values: dict) -> None:
     for field, model, label in (
         ("instrument_id", MeasurementInstrument, "测量仪器"),
+        ("measurement_probe_id", MeasurementProbe, "测量探头"),
         ("measurement_method_id", MeasurementMethod, "测量方法"),
         ("calibration_record_id", MeasurementCalibrationRecord, "校准/检查记录"),
         ("reference_standard_id", MeasurementReferenceStandard, "参考件"),
@@ -86,6 +88,12 @@ def _validate_measurement_governance_relations(db: Session, values: dict) -> Non
     ):
         if values.get(field):
             _required(db, model, values[field], label)
+    if values.get("measurement_probe_id") and not values.get("instrument_id"):
+        raise HTTPException(status_code=422, detail="维护测量探头时必须同时关联测量仪器")
+    if values.get("measurement_probe_id") and values.get("instrument_id"):
+        probe = _required(db, MeasurementProbe, values["measurement_probe_id"], "测量探头")
+        if probe.instrument_id != values["instrument_id"]:
+            raise HTTPException(status_code=422, detail="测量探头不属于该测量仪器")
 
 
 def _required(db: Session, model: type, resource_id: str, label: str):
@@ -105,6 +113,11 @@ def _measurement_dict(
     instrument = (
         db.get(MeasurementInstrument, measurement.instrument_id)
         if measurement.instrument_id
+        else None
+    )
+    probe = (
+        db.get(MeasurementProbe, measurement.measurement_probe_id)
+        if measurement.measurement_probe_id
         else None
     )
     method = (
@@ -152,6 +165,9 @@ def _measurement_dict(
         "instrument_id": measurement.instrument_id,
         "instrument_code": instrument.code if instrument else None,
         "instrument_name": instrument.name if instrument else None,
+        "measurement_probe_id": measurement.measurement_probe_id,
+        "measurement_probe_code": probe.code if probe else None,
+        "measurement_probe_name": probe.name if probe else None,
         "measurement_method_id": measurement.measurement_method_id,
         "measurement_method_code": method.code if method else None,
         "calibration_record_id": measurement.calibration_record_id,
@@ -630,7 +646,29 @@ def update_quality_measurement(
     _validate_quality_scope(resolved_quality_type, resolved_metric_codes)
     if repeat_readings_payload is not None:
         _validate_repeat_readings(resolved_quality_type, repeat_readings_payload)
-    _validate_measurement_governance_relations(db, changes)
+    _validate_measurement_governance_relations(
+        db,
+        {
+            "instrument_id": changes.get("instrument_id", measurement.instrument_id),
+            "measurement_probe_id": changes.get(
+                "measurement_probe_id",
+                measurement.measurement_probe_id,
+            ),
+            "measurement_method_id": changes.get(
+                "measurement_method_id",
+                measurement.measurement_method_id,
+            ),
+            "calibration_record_id": changes.get(
+                "calibration_record_id",
+                measurement.calibration_record_id,
+            ),
+            "reference_standard_id": changes.get(
+                "reference_standard_id",
+                measurement.reference_standard_id,
+            ),
+            "import_profile_id": changes.get("import_profile_id", measurement.import_profile_id),
+        },
+    )
     if "data_no" in changes:
         duplicate = db.scalar(
             select(QualityMeasurement).where(
@@ -651,25 +689,38 @@ def update_quality_measurement(
     for field, value in changes.items():
         setattr(measurement, field, value)
     if metrics_payload is not None:
-        db.execute(delete(QualityMetricValue).where(QualityMetricValue.measurement_id == measurement_id))
-        db.add_all(
-            [
-                QualityMetricValue(measurement_id=measurement_id, **metric)
-                for metric in metrics_payload
-            ]
-        )
-    if repeat_readings_payload is not None:
-        db.execute(
-            delete(MeasurementRepeatReading).where(
-                MeasurementRepeatReading.measurement_id == measurement_id
+        existing_metrics = {
+            metric.metric_code: metric
+            for metric in db.scalars(
+                select(QualityMetricValue).where(
+                    QualityMetricValue.measurement_id == measurement_id
+                )
             )
-        )
-        db.add_all(
-            [
-                MeasurementRepeatReading(measurement_id=measurement_id, **reading)
-                for reading in repeat_readings_payload
-            ]
-        )
+        }
+        for metric in metrics_payload:
+            existing = existing_metrics.get(metric["metric_code"])
+            if existing:
+                for field, value in metric.items():
+                    setattr(existing, field, value)
+            else:
+                db.add(QualityMetricValue(measurement_id=measurement_id, **metric))
+    if repeat_readings_payload is not None:
+        existing_readings = {
+            (reading.repeat_no, reading.metric_code): reading
+            for reading in db.scalars(
+                select(MeasurementRepeatReading).where(
+                    MeasurementRepeatReading.measurement_id == measurement_id
+                )
+            )
+        }
+        for reading in repeat_readings_payload:
+            key = (reading["repeat_no"], reading["metric_code"])
+            existing = existing_readings.get(key)
+            if existing:
+                for field, value in reading.items():
+                    setattr(existing, field, value)
+            else:
+                db.add(MeasurementRepeatReading(measurement_id=measurement_id, **reading))
     db.flush()
     refresh_measurement_reliability(db, measurement)
     db.commit()
@@ -681,23 +732,8 @@ def update_quality_measurement(
 def delete_quality_measurement(
     measurement_id: str, db: Session = Depends(get_db)
 ) -> Response:
-    measurement = _required(db, QualityMeasurement, measurement_id, "质量数据")
-    try:
-        db.execute(
-            delete(MeasurementRepeatReading).where(
-                MeasurementRepeatReading.measurement_id == measurement_id
-            )
-        )
-        db.execute(delete(QualityMetricValue).where(QualityMetricValue.measurement_id == measurement_id))
-        db.delete(measurement)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="质量数据已被模型快照或闭环复测引用，不能删除",
-        ) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    _required(db, QualityMeasurement, measurement_id, "质量数据")
+    reject_physical_delete("质量数据")
 
 
 @router.get("/standards", response_model=list[QualityStandardRead])
@@ -781,7 +817,5 @@ def update_quality_standard(
 def delete_quality_standard(
     standard_id: str, db: Session = Depends(get_db)
 ) -> Response:
-    standard = _required(db, QualityStandard, standard_id, "质量标准")
-    db.delete(standard)
-    db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    _required(db, QualityStandard, standard_id, "质量标准")
+    reject_physical_delete("质量标准")

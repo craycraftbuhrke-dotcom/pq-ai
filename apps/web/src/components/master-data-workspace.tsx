@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Download,
   LoaderCircle,
   Pencil,
   Plus,
@@ -11,6 +10,9 @@ import {
   X,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+
+import { BulkDataActions } from "@/components/bulk-data-actions";
+import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
 
 type ResourceKey =
   | "factories"
@@ -474,22 +476,9 @@ export function MasterDataWorkspace() {
     }
   }
 
-  async function deleteRecord(record: MasterRecord) {
-    if (!window.confirm(`确认删除 ${record.code} / ${record.name}？此操作不可撤销。`)) return;
-    setSubmitting(true);
-    setError("");
-    try {
-      const response = await fetch(`/api/master-data/${activeResource}/${record.id}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) throw new Error(await readApiError(response));
-      setNotice(`${config.singular}已删除`);
-      await loadData();
-    } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "删除失败");
-    } finally {
-      setSubmitting(false);
-    }
+  function deleteRecord(record: MasterRecord) {
+    setNotice("");
+    setError(`${config.singular} ${record.code} / ${record.name} 不能物理删除。${physicalDeleteDisabledMessage}`);
   }
 
   function relationName(resource: ResourceKey, id?: string): string {
@@ -532,37 +521,11 @@ export function MasterDataWorkspace() {
     }
   }
 
-  async function deleteRelation(record: RelationRecord) {
+  function deleteRelation(_record: RelationRecord) {
+    void _record;
     const relation = relationConfigs[activeRelation];
-    if (!window.confirm(`确认解除${relation.label}关系？`)) return;
-    setSubmitting(true);
-    try {
-      const response = await fetch(`/api/master-data/${activeRelation}/${record.id}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) throw new Error(await readApiError(response));
-      setNotice(`${relation.label}关系已解除`);
-      await loadData();
-    } catch (relationError) {
-      setError(relationError instanceof Error ? relationError.message : "关系解除失败");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  function exportCsv() {
-    const headers = config.columns.map((column) => column.label);
-    const rows = filteredRecords.map((record) =>
-      config.columns.map((column) => `"${displayValue(record, column.key).replaceAll('"', '""')}"`),
-    );
-    const content = `\uFEFF${[headers, ...rows].map((row) => row.join(",")).join("\n")}`;
-    const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${config.label}-${new Date().toISOString().slice(0, 10)}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setNotice(`已导出 ${filteredRecords.length} 条${config.label}数据`);
+    setNotice("");
+    setError(`${relation.label}关系不能物理删除。${physicalDeleteDisabledMessage}`);
   }
 
   return (
@@ -630,6 +593,16 @@ export function MasterDataWorkspace() {
             </label>
             {activeRelation === "measurement-group-points" ? <label className="form-field"><span>点位顺序</span><input type="number" min="0" value={relationSequence} onChange={(event) => setRelationSequence(event.target.value)} /></label> : null}
             <button className="button button-primary" disabled={!selectedRelationLeftId || !selectedRelationRightId || submitting}><Plus /> 建立关系</button>
+            <BulkDataActions
+              resourceKey={`master.${activeRelation}`}
+              resourceLabel={relationConfigs[activeRelation].label}
+              disabled={submitting}
+              onImported={loadData}
+              onResult={(message, type) => {
+                setNotice(type === "success" ? message : "");
+                setError(type === "error" ? message : "");
+              }}
+            />
           </form>
           <div className="relation-list">
             <div className="relation-row relation-head"><span>主对象</span><span>关联对象</span><span>属性</span><span>操作</span></div>
@@ -691,10 +664,16 @@ export function MasterDataWorkspace() {
               <RefreshCw className={loading ? "spin" : ""} aria-hidden="true" />
               刷新
             </button>
-            <button className="button button-secondary" onClick={exportCsv} disabled={!filteredRecords.length}>
-              <Download aria-hidden="true" />
-              导出
-            </button>
+            <BulkDataActions
+              resourceKey={`master.${activeResource}`}
+              resourceLabel={config.label}
+              disabled={loading || submitting}
+              onImported={loadData}
+              onResult={(message, type) => {
+                setNotice(type === "success" ? message : "");
+                setError(type === "error" ? message : "");
+              }}
+            />
           </div>
         </div>
 

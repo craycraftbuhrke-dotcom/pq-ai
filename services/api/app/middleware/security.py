@@ -9,6 +9,7 @@ from app.core.security import (
     ANONYMOUS_ACTOR,
     SYSTEM_ACTOR,
     authenticate_api_key,
+    authenticate_session_token,
     required_permission,
     resource_from_path,
 )
@@ -16,7 +17,7 @@ from app.db.session import SessionLocal
 from app.models.domain import AuditLog
 
 
-EXEMPT_PATHS = {"/", "/docs", "/openapi.json", "/api/v1/health"}
+EXEMPT_PATHS = {"/", "/docs", "/openapi.json", "/api/v1/health", "/api/v1/auth/login"}
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -27,9 +28,14 @@ async def security_and_audit_middleware(request: Request, call_next) -> Response
     actor = SYSTEM_ACTOR
 
     if settings.api_auth_enabled and path not in EXEMPT_PATHS and request.method != "OPTIONS":
+        bearer_token = _bearer_token(request.headers.get("authorization", ""))
         raw_key = request.headers.get("x-api-key", "")
         with SessionLocal() as db:
-            actor = authenticate_api_key(db, raw_key)
+            actor = (
+                authenticate_session_token(db, bearer_token)
+                if bearer_token
+                else authenticate_api_key(db, raw_key)
+            )
         if not actor:
             if request.method in WRITE_METHODS and path.startswith(settings.api_prefix):
                 _write_audit(request, ANONYMOUS_ACTOR, request_id, 401, 0)
@@ -47,6 +53,17 @@ async def security_and_audit_middleware(request: Request, call_next) -> Response
                 content={"detail": f"缺少权限：{permission}", "request_id": request_id},
                 headers={"x-request-id": request_id},
             )
+
+    if request.method == "DELETE" and path.startswith(settings.api_prefix):
+        _write_audit(request, actor, request_id, 405, 0)
+        return JSONResponse(
+            status_code=405,
+            content={
+                "detail": "公司 MySQL 规范禁止物理 DELETE；请使用停用、归档或版本替换流程",
+                "request_id": request_id,
+            },
+            headers={"x-request-id": request_id},
+        )
 
     request.state.actor = actor
     started = perf_counter()
@@ -88,3 +105,10 @@ def _write_audit(request: Request, actor, request_id: str, status_code: int, dur
     except Exception:
         # Audit failures must not hide the original business response.
         return
+
+
+def _bearer_token(header_value: str) -> str:
+    scheme, _, token = header_value.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return ""
+    return token.strip()

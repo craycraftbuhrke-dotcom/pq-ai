@@ -26,11 +26,12 @@ export async function POST(
   }
 
   try {
+    const authHeaders = await apiRequestHeaders(request);
     const response = await fetch(
       `${apiUrl}/ai/recommendations/${encodeURIComponent(recommendationId)}/approval`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...apiRequestHeaders() },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({
           approved: true,
           approved_by: payload.approvedBy ?? "工艺审批人",

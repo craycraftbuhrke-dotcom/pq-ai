@@ -1,10 +1,10 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.delete_policy import reject_physical_delete
 from app.db.session import get_db
 from app.domain.parameter_catalog import PARAMETER_CATALOG
 from app.domain.scope_policy import ScopeViolation, is_out_of_scope_name, require_approved_mapping
@@ -132,16 +132,7 @@ def _save(db: Session, resource):
 
 
 def _delete_resource(db: Session, resource, label: str) -> Response:
-    try:
-        db.delete(resource)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail=f"{label}已被生产数据或下游配置引用，请先解除关联",
-        ) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    reject_physical_delete(label)
 
 
 @router.get("/parameter-definitions", response_model=list[ParameterDefinitionRead])
@@ -419,21 +410,33 @@ def update_program_version(
     if vehicle_model_ids is not None:
         for model_id in vehicle_model_ids:
             _required(db, VehicleModel, model_id, "车型")
-        db.execute(delete(ProgramVehicleModel).where(ProgramVehicleModel.program_version_id == version_id))
+        existing_model_ids = set(
+            db.scalars(
+                select(ProgramVehicleModel.vehicle_model_id).where(
+                    ProgramVehicleModel.program_version_id == version_id
+                )
+            )
+        )
         db.add_all(
             [
                 ProgramVehicleModel(program_version_id=version_id, vehicle_model_id=model_id)
                 for model_id in vehicle_model_ids
+                if model_id not in existing_model_ids
             ]
         )
     if color_ids is not None:
         for color_id in color_ids:
             _required(db, Color, color_id, "颜色")
-        db.execute(delete(ProgramColor).where(ProgramColor.program_version_id == version_id))
+        existing_color_ids = set(
+            db.scalars(
+                select(ProgramColor.color_id).where(ProgramColor.program_version_id == version_id)
+            )
+        )
         db.add_all(
             [
                 ProgramColor(program_version_id=version_id, color_id=color_id)
                 for color_id in color_ids
+                if color_id not in existing_color_ids
             ]
         )
     if changes.get("status") in {"APPROVED", "ACTIVE"}:
@@ -448,19 +451,8 @@ def update_program_version(
 
 @router.delete("/program-versions/{version_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_program_version(version_id: str, db: Session = Depends(get_db)) -> Response:
-    version = _required(db, SprayProgramVersion, version_id, "程序版本")
-    db.execute(delete(ProgramVehicleModel).where(ProgramVehicleModel.program_version_id == version_id))
-    db.execute(delete(ProgramColor).where(ProgramColor.program_version_id == version_id))
-    try:
-        db.delete(version)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="程序版本已被刷子、生产实绩或下游数据引用，请先解除关联",
-        ) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    _required(db, SprayProgramVersion, version_id, "程序版本")
+    reject_physical_delete("程序版本")
 
 
 @router.post(

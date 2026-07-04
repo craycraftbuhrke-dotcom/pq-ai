@@ -3,6 +3,9 @@
 import { Cable, LoaderCircle, Pencil, Plus, RefreshCw, ShieldAlert, Trash2, X } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { BulkDataActions } from "@/components/bulk-data-actions";
+import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
+
 type Kind =
   | "robots"
   | "controllers"
@@ -256,18 +259,13 @@ export function DurrTrajectoryPanel() {
     }
   }
 
-  async function remove(record: Resource) {
-    if (!window.confirm(`确认删除${kindName(kind)}？已被程序、贡献或生产实绩引用的数据不能删除。`)) return;
-    setSubmitting(true);
-    try {
-      await request(`/api/process/robot-governance/${kind}/${record.id}`, { method: "DELETE" });
-      setMessage({ type: "success", text: `${kindName(kind)}已删除` });
-      await reload();
-    } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "删除失败" });
-    } finally {
-      setSubmitting(false);
-    }
+  function remove(_record: Resource) {
+    void _record;
+    setMessage({ type: "error", text: `${kindName(kind)}不能物理删除。${physicalDeleteDisabledMessage}` });
+  }
+
+  function bulkResult(message: string, type: "success" | "error") {
+    setMessage({ type, text: message });
   }
 
   const rows = resources[kind];
@@ -286,6 +284,13 @@ export function DurrTrajectoryPanel() {
         </div>
         <div className="page-actions">
           <button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} />刷新</button>
+          <BulkDataActions
+            resourceKey={`robot-governance.${kind}`}
+            resourceLabel={kindName(kind)}
+            disabled={loading || submitting}
+            onImported={reload}
+            onResult={bulkResult}
+          />
           {kind !== "device-executions" ? <button className="button button-primary" onClick={() => open()}><Plus />新建{kindName(kind)}</button> : null}
         </div>
       </div>

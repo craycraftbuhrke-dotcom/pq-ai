@@ -27,9 +27,9 @@ async function proxy(request: Request, context: Context) {
   if (!apiUrl) {
     return NextResponse.json({ error: "后端 API 地址未配置" }, { status: 503 });
   }
-  const headers = new Headers(apiRequestHeaders());
+  const headers = new Headers(await apiRequestHeaders(request));
   let body: string | undefined;
-  if (!["GET", "DELETE"].includes(request.method)) {
+  if (request.method !== "GET") {
     headers.set("Content-Type", "application/json");
     body = await request.text();
   }
@@ -56,4 +56,3 @@ export const GET = proxy;
 export const POST = proxy;
 export const PATCH = proxy;
 export const PUT = proxy;
-export const DELETE = proxy;

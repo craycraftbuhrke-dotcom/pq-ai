@@ -3,6 +3,9 @@
 import { LoaderCircle, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { BulkDataActions } from "@/components/bulk-data-actions";
+import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
+
 type Kind = "instruments" | "methods" | "references" | "calibrations" | "import-profiles";
 type FormState = Record<string, string | boolean>;
 type GovernanceResource = {
@@ -159,18 +162,13 @@ export function MeasurementGovernancePanel() {
     }
   }
 
-  async function remove(record: GovernanceResource) {
-    if (!window.confirm(`确认删除${kindLabels[kind]}？已被测量引用的数据不能删除。`)) return;
-    setSubmitting(true);
-    try {
-      await request(`/api/quality/governance/${kind}/${record.id}`, { method: "DELETE" });
-      setMessage({ type: "success", text: `${kindLabels[kind]}已删除` });
-      await reload();
-    } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "删除失败" });
-    } finally {
-      setSubmitting(false);
-    }
+  function remove(_record: GovernanceResource) {
+    void _record;
+    setMessage({ type: "error", text: `${kindLabels[kind]}不能物理删除。${physicalDeleteDisabledMessage}` });
+  }
+
+  function bulkResult(message: string, type: "success" | "error") {
+    setMessage({ type, text: message });
   }
 
   return (
@@ -186,7 +184,7 @@ export function MeasurementGovernancePanel() {
         <div className="master-tabs">
           {(Object.keys(kindLabels) as Kind[]).map((item) => <button key={item} className={kind === item ? "master-tab master-tab-active" : "master-tab"} onClick={() => setKind(item)}>{kindLabels[item]} <span>{resources[item].length}</span></button>)}
         </div>
-        <div className="page-actions"><button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} />刷新</button><button className="button button-primary" onClick={() => open()}><Plus />新建{kindLabels[kind]}</button></div>
+        <div className="page-actions"><button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} />刷新</button><BulkDataActions resourceKey={`measurement-governance.${kind}`} resourceLabel={kindLabels[kind]} disabled={loading || submitting} onImported={reload} onResult={bulkResult} /><button className="button button-primary" onClick={() => open()}><Plus />新建{kindLabels[kind]}</button></div>
       </div>
       <div className="master-table-wrap">
         <table className="master-table governance-table">

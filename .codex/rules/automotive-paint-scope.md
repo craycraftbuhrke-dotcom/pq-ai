@@ -39,5 +39,9 @@ These rules are mandatory for code, schema, APIs, UI, seed data, tests, analytic
 - Model explanations are associations unless supported by controlled causal evidence.
 - Recommendations require approved source-versioned constraints, an approved controlled-trial plan, human approval, execution capture, verification, rollback plan, rollback execution record when ineffective, and sustained observation.
 - MySQL schema changes must never be executed automatically by application code, Docker startup, local scripts, CI, Alembic, or SQLAlchemy metadata calls. Use approved manual SQL tickets only.
+- Company MySQL standards are mandatory: lowercase underscore names, <=32 character project names, `uk_`/`idx_` index prefixes, <=50 fields per table, <=5 indexes per table, no unsupported MySQL field types, no large binary/file storage, and DBA-reviewed DDL only.
+- Physical foreign keys are forbidden. Use application-enforced `logical_fk` metadata, create/update existence checks, and reference checks instead.
+- Runtime MySQL operations must not execute physical `DELETE`, `CREATE`, `DROP`, `ALTER`, `TRUNCATE`, `REPLACE`, or application-authored `SET`. Removal workflows must use disable, archive, status transition, or version replacement.
+- Human web access must use personal username/password sessions stored in HttpOnly cookies; API Keys are for system integration and server-side automation only. Never expose session tokens or API Keys to browser JavaScript.
 - Unit tests may create transient SQLite schemas only through the guarded test helper; this exception never applies to MySQL or shared databases.
 - Never invent factory limits, TDS values, device semantics, instrument fields, or standards.

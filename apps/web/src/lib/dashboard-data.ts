@@ -187,7 +187,7 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
   try {
     const response = await fetch(`${apiUrl}/dashboard`, {
       cache: "no-store",
-      headers: apiRequestHeaders(),
+      headers: await apiRequestHeaders(),
       signal: AbortSignal.timeout(2500),
     });
     if (!response.ok) {

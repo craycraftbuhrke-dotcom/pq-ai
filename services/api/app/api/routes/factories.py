@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.delete_policy import reject_physical_delete
 from app.db.session import get_db
 from app.models.domain import Factory
 from app.schemas.common import FactoryCreate, FactoryRead, FactoryUpdate
@@ -56,14 +56,5 @@ def update_factory(
 
 @router.delete("/{factory_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_factory(factory_id: str, db: Session = Depends(get_db)) -> Response:
-    factory = get_factory(factory_id, db)
-    try:
-        db.delete(factory)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="工厂已被车型、喷涂程序或生产数据引用，请先停用或解除关联",
-        ) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    get_factory(factory_id, db)
+    reject_physical_delete("工厂")

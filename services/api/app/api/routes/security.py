@@ -1,11 +1,18 @@
 from secrets import token_urlsafe
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.security import PERMISSION_CATALOG, hash_api_key
+from app.core.security import (
+    PERMISSION_CATALOG,
+    hash_api_key,
+    hash_password,
+    login_with_password,
+    revoke_session_token,
+)
 from app.db.session import get_db
 from app.models.domain import (
     ApiKey,
@@ -22,6 +29,8 @@ from app.schemas.security import (
     ApiKeyIssued,
     AuditLogRead,
     AuditSummary,
+    LoginRequest,
+    LoginResponse,
     RoleCreate,
     RoleRead,
     UserCreate,
@@ -32,17 +41,48 @@ from app.schemas.security import (
 router = APIRouter(tags=["security-audit"])
 
 
-@router.get("/auth/me", response_model=ActorRead)
-def current_actor(request: Request) -> dict:
-    actor = request.state.actor
+def _actor_payload(actor, *, auth_enabled: bool) -> dict:
     return {
         "user_id": actor.user_id,
         "username": actor.username,
         "display_name": actor.display_name,
         "roles": list(actor.roles),
         "permissions": sorted(actor.permissions),
-        "auth_enabled": settings.api_auth_enabled,
+        "auth_enabled": auth_enabled,
     }
+
+
+@router.get("/auth/me", response_model=ActorRead)
+def current_actor(request: Request) -> dict:
+    return _actor_payload(request.state.actor, auth_enabled=settings.api_auth_enabled)
+
+
+@router.post("/auth/login", response_model=LoginResponse)
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    result = login_with_password(
+        db,
+        payload.username,
+        payload.password,
+        user_agent=request.headers.get("user-agent"),
+        client_ip=request.client.host if request.client else None,
+    )
+    if not result:
+        raise HTTPException(status_code=401, detail="用户名或密码错误，或账号已被临时锁定")
+    actor, access_token, expires_at = result
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_at": expires_at,
+        "actor": _actor_payload(actor, auth_enabled=settings.api_auth_enabled),
+    }
+
+
+@router.post("/auth/logout")
+def logout(request: Request, db: Session = Depends(get_db)) -> dict:
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    revoked = revoke_session_token(db, token.strip() if scheme.lower() == "bearer" else "")
+    return {"revoked": revoked}
 
 
 @router.get("/security/users", response_model=list[UserRead])
@@ -54,7 +94,11 @@ def list_users(db: Session = Depends(get_db)) -> list[AppUser]:
 def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> AppUser:
     if db.scalar(select(AppUser).where(AppUser.username == payload.username)):
         raise HTTPException(status_code=409, detail="用户名已存在")
-    user = AppUser(**payload.model_dump())
+    values = payload.model_dump(exclude={"password"})
+    user = AppUser(**values)
+    if payload.password:
+        user.password_hash = hash_password(payload.password)
+        user.password_changed_at = datetime.now(UTC)
     db.add(user)
     db.commit()
     db.refresh(user)

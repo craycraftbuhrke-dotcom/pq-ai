@@ -1,10 +1,10 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, func, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.api.delete_policy import reject_physical_delete
 from app.db.session import get_db
 from app.domain.scope_policy import ScopeViolation, require_approved_quality_type
 from app.models.domain import (
@@ -75,16 +75,7 @@ def _save(db: Session, resource):
 
 
 def _delete(db: Session, resource, label: str) -> Response:
-    try:
-        db.delete(resource)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail=f"{label}已被程序、贡献或生产实绩引用，请保留追溯或先解除关联",
-        ) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    reject_physical_delete(label)
 
 
 def _validate_quality_type(value: str) -> None:
@@ -724,11 +715,6 @@ def update_contribution_version(
 @router.delete("/contribution-versions/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_contribution_version(resource_id: str, db: Session = Depends(get_db)) -> Response:
     resource = _required(db, PointContributionVersion, resource_id, "点位贡献版本")
-    db.execute(
-        delete(PointContributionEntry).where(
-            PointContributionEntry.contribution_version_id == resource_id
-        )
-    )
     return _delete(db, resource, "点位贡献版本")
 
 
@@ -922,11 +908,6 @@ def update_device_execution(
 @router.delete("/device-executions/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_device_execution(resource_id: str, db: Session = Depends(get_db)) -> Response:
     resource = _required(db, ProductionDeviceExecution, resource_id, "设备轨迹执行")
-    db.execute(
-        delete(PathSegmentExecution).where(
-            PathSegmentExecution.device_execution_id == resource_id
-        )
-    )
     return _delete(db, resource, "设备轨迹执行")
 
 

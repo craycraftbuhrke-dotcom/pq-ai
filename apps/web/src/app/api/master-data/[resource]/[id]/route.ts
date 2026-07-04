@@ -11,8 +11,3 @@ export async function PATCH(request: Request, context: Context) {
   const { resource, id } = await context.params;
   return proxyMasterDataRequest(request, resource, id);
 }
-
-export async function DELETE(request: Request, context: Context) {
-  const { resource, id } = await context.params;
-  return proxyMasterDataRequest(request, resource, id);
-}

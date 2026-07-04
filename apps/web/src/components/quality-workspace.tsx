@@ -3,7 +3,6 @@
 import {
   Activity,
   Download,
-  FileJson,
   LoaderCircle,
   Pencil,
   Plus,
@@ -12,9 +11,11 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { BulkDataActions } from "@/components/bulk-data-actions";
 import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
+import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
 
 type Resource = { id: string; code: string; name: string };
 type ProductionRun = { id: string; run_no: string; body_no?: string | null; started_at: string };
@@ -241,7 +242,6 @@ export function QualityWorkspace() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const fileInput = useRef<HTMLInputElement>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -493,18 +493,14 @@ export function QualityWorkspace() {
     }
   }
 
-  async function remove(path: string, label: string) {
-    if (!window.confirm(`确认删除${label}？此操作不可撤销。`)) return;
-    setSubmitting(true);
-    try {
-      await request(path, { method: "DELETE" });
-      setNotice(`${label}已删除`);
-      await reload();
-    } catch (removeError) {
-      setError(removeError instanceof Error ? removeError.message : "删除失败");
-    } finally {
-      setSubmitting(false);
-    }
+  function remove(_path: string, label: string) {
+    setNotice("");
+    setError(`${label}不能物理删除。${physicalDeleteDisabledMessage}`);
+  }
+
+  function bulkResult(message: string, type: "success" | "error") {
+    setNotice(type === "success" ? message : "");
+    setError(type === "error" ? message : "");
   }
 
   function exportCsv() {
@@ -552,39 +548,11 @@ export function QualityWorkspace() {
     URL.revokeObjectURL(url);
   }
 
-  async function importJson(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    setSubmitting(true);
-    setError("");
-    try {
-      const rows = JSON.parse(await file.text()) as unknown[];
-      if (!Array.isArray(rows) || !rows.length) throw new Error("导入文件必须是非空 JSON 数组");
-      let created = 0;
-      for (const row of rows) {
-        await request("/api/quality/measurements", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(row),
-        });
-        created += 1;
-      }
-      setNotice(`已导入 ${created} 条质量测量记录`);
-      await reload();
-    } catch (importError) {
-      setError(importError instanceof Error ? importError.message : "导入失败");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   return (
     <div className="page-stack">
       <header className="page-header">
         <div><span className="page-kicker">MEASUREMENT · STANDARD · JUDGEMENT</span><h1>质量数据中心</h1><p>维护橘皮、色差/效应和膜厚数据，依据多维质量标准自动判定。</p></div>
         <div className="page-actions">
-          {tab === "measurements" ? <><input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(event) => void importJson(event)} /><button className="button button-secondary" onClick={() => fileInput.current?.click()} disabled={submitting}><FileJson />批量导入 JSON</button></> : null}
           <button className="button button-secondary" onClick={() => { void reload(); if (tab === "analytics") void loadAnalytics(); }} disabled={loading || analyticsLoading}><RefreshCw className={loading || analyticsLoading ? "spin" : ""} />刷新</button>
           {tab === "measurements" || tab === "standards" ? <button className="button button-primary" onClick={() => tab === "measurements" ? openMeasurement() : openStandard()}><Plus />新建{tab === "measurements" ? "质量测量" : "质量标准"}</button> : null}
         </div>
@@ -610,7 +578,17 @@ export function QualityWorkspace() {
           {tab !== "analytics" ? <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`搜索质量${tab === "measurements" ? "测量" : "标准"}`} /></label> : <div className="quality-analytics-title"><Activity /><span>实时过程能力与点位风险</span></div>}
           <select value={tab === "analytics" ? typeFilter || "ORANGE_PEEL" : typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>{tab !== "analytics" ? <option value="">全部质量类型</option> : null}{Object.entries(qualityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
           {tab === "analytics" ? <select value={resolvedAnalyticsMetric} onChange={(event) => setAnalyticsMetric(event.target.value)}>{analyticsDefinitions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code}</option>)}</select> : null}
-          <button className="button button-secondary" onClick={exportCsv}><Download />导出 CSV</button>
+          {tab === "measurements" || tab === "standards" ? (
+            <BulkDataActions
+              resourceKey={tab === "measurements" ? "quality.measurements" : "quality.standards"}
+              resourceLabel={tab === "measurements" ? "质量测量" : "质量标准"}
+              disabled={loading || submitting}
+              onImported={reload}
+              onResult={bulkResult}
+            />
+          ) : (
+            <button className="button button-secondary" onClick={exportCsv}><Download />导出 CSV</button>
+          )}
         </div> : null}
         {tab === "measurements" ? (
           <div className="quality-card-list">

@@ -16,6 +16,9 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { BulkDataActions } from "@/components/bulk-data-actions";
+import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
+
 type Summary = {
   endpoints: number;
   active_endpoints: number;
@@ -309,18 +312,13 @@ export function IntegrationWorkspace() {
     }
   }
 
-  async function deleteEndpoint(endpoint: Endpoint) {
-    if (!window.confirm(`确认删除集成端点 ${endpoint.code}？已有事件的端点只能停用。`)) return;
-    setSubmitting(`delete-${endpoint.id}`);
-    try {
-      await request(`/api/integrations/endpoints/${endpoint.id}`, { method: "DELETE" });
-      showSuccess("集成端点已删除");
-      await reload();
-    } catch (operationError) {
-      showError(operationError);
-    } finally {
-      setSubmitting("");
-    }
+  function deleteEndpoint(endpoint: Endpoint) {
+    showError(new Error(`集成端点 ${endpoint.code} 不能物理删除。${physicalDeleteDisabledMessage}`));
+  }
+
+  function bulkResult(message: string, type: "success" | "error") {
+    if (type === "success") showSuccess(message);
+    else showError(new Error(message));
   }
 
   async function submitEvent(event: FormEvent<HTMLFormElement>) {
@@ -383,9 +381,18 @@ export function IntegrationWorkspace() {
           <h1>集成与任务中心</h1>
           <p>管理外部系统端点、幂等事件、业务映射、失败重试、死信与人工重放。</p>
         </div>
-        <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
-          <RefreshCw className={loading ? "spin" : ""} /> 刷新任务状态
-        </button>
+        <div className="page-actions">
+          <BulkDataActions
+            resourceKey={tab === "events" ? "integrations.events" : "integrations.endpoints"}
+            resourceLabel={tab === "events" ? "集成事件" : "集成端点"}
+            disabled={loading || Boolean(submitting)}
+            onImported={reload}
+            onResult={bulkResult}
+          />
+          <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
+            <RefreshCw className={loading ? "spin" : ""} /> 刷新任务状态
+          </button>
+        </div>
       </header>
 
       {error ? <button className="message-banner message-error" onClick={() => setError("")}>{error}<X /></button> : null}

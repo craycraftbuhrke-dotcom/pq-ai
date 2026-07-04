@@ -66,6 +66,7 @@ from app.models.domain import (
     VehicleModel,
     VehicleModelColor,
     UserRole,
+    UserSession,
     Permission,
 )
 
@@ -137,5 +138,6 @@ __all__ = [
     "VehicleModel",
     "VehicleModelColor",
     "UserRole",
+    "UserSession",
     "Permission",
 ]

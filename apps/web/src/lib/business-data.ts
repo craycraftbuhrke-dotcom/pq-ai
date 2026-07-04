@@ -205,7 +205,7 @@ async function fetchJson<T>(path: string): Promise<T> {
   }
   const response = await fetch(`${apiUrl}${path}`, {
     cache: "no-store",
-    headers: apiRequestHeaders(),
+    headers: await apiRequestHeaders(),
     signal: AbortSignal.timeout(2500),
   });
   if (!response.ok) {

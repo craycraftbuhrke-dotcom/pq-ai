@@ -15,7 +15,9 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { BulkDataActions } from "@/components/bulk-data-actions";
 import { DurrTrajectoryPanel } from "@/components/durr-trajectory-panel";
+import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
 
 type Resource = { id: string; code: string; name: string };
 type Factory = Resource;
@@ -391,19 +393,14 @@ export function ProgramWorkspace() {
     }
   }
 
-  async function remove(path: string, label: string) {
-    if (!window.confirm(`确认删除${label}？此操作不可撤销。`)) return;
-    setSubmitting(true);
-    setError("");
-    try {
-      await request(path, { method: "DELETE" });
-      setNotice(`${label}已删除`);
-      await reload();
-    } catch (removeError) {
-      setError(removeError instanceof Error ? removeError.message : "删除失败");
-    } finally {
-      setSubmitting(false);
-    }
+  function remove(_path: string, label: string) {
+    setNotice("");
+    setError(`${label}不能物理删除。${physicalDeleteDisabledMessage}`);
+  }
+
+  function bulkResult(message: string, type: "success" | "error") {
+    setNotice(type === "success" ? message : "");
+    setError(type === "error" ? message : "");
   }
 
   async function advanceVersion(version: Version) {
@@ -445,6 +442,15 @@ export function ProgramWorkspace() {
             <RefreshCw className={loading ? "spin" : ""} aria-hidden="true" />
             刷新
           </button>
+          {workspaceTab === "programs" ? (
+            <BulkDataActions
+              resourceKey="process.spray-programs"
+              resourceLabel="喷涂程序"
+              disabled={loading || submitting}
+              onImported={reload}
+              onResult={bulkResult}
+            />
+          ) : null}
           {workspaceTab === "programs" ? <button className="button button-primary" onClick={() => openModal("program")}>
             <Plus aria-hidden="true" />
             新建喷涂程序
@@ -491,7 +497,16 @@ export function ProgramWorkspace() {
         <article className="panel program-column">
           <div className="program-column-heading">
             <div><span className="eyebrow">02 VERSION</span><h2>受控版本</h2></div>
-            <button className="icon-button" onClick={() => openModal("version")} disabled={!selectedProgram} aria-label="新建程序版本"><Plus /></button>
+            <div className="row-actions">
+              <BulkDataActions
+                resourceKey="process.program-versions"
+                resourceLabel="程序版本"
+                disabled={loading || submitting}
+                onImported={reload}
+                onResult={bulkResult}
+              />
+              <button className="icon-button" onClick={() => openModal("version")} disabled={!selectedProgram} aria-label="新建程序版本"><Plus /></button>
+            </div>
           </div>
           <div className="program-list">
             {versions.map((version) => (
@@ -524,7 +539,16 @@ export function ProgramWorkspace() {
         <article className="panel program-detail-column">
           <div className="program-column-heading">
             <div><span className="eyebrow">03 BRUSH & POINT</span><h2>刷子与点位贡献</h2></div>
-            <button className="button button-secondary" onClick={() => openModal("brush")} disabled={!selectedVersion}><Plus />新增刷子</button>
+            <div className="row-actions">
+              <BulkDataActions
+                resourceKey="process.brushes"
+                resourceLabel="刷子"
+                disabled={loading || submitting}
+                onImported={reload}
+                onResult={bulkResult}
+              />
+              <button className="button button-secondary" onClick={() => openModal("brush")} disabled={!selectedVersion}><Plus />新增刷子</button>
+            </div>
           </div>
           <div className="brush-selector">
             {brushes.map((brush) => (
@@ -547,7 +571,7 @@ export function ProgramWorkspace() {
                 </div>
               </div>
               <div className="program-subsection">
-                <div className="program-subheading"><div><span className="eyebrow">PARAMETER MATRIX</span><h3>配置参数</h3></div><button className="button button-secondary" onClick={() => openModal("parameter")}><Plus />新增参数</button></div>
+                <div className="program-subheading"><div><span className="eyebrow">PARAMETER MATRIX</span><h3>配置参数</h3></div><div className="row-actions"><BulkDataActions resourceKey="process.brush-parameters" resourceLabel="刷子参数" disabled={loading || submitting} onImported={reload} onResult={bulkResult} /><button className="button button-secondary" onClick={() => openModal("parameter")}><Plus />新增参数</button></div></div>
                 <div className="compact-table">
                   <div className="compact-row compact-head"><span>参数</span><span>配置值</span><span>软边界</span><span>可推荐</span><span /></div>
                   {parameters.map((parameter) => (
@@ -562,7 +586,7 @@ export function ProgramWorkspace() {
                 </div>
               </div>
               <div className="program-subsection">
-                <div className="program-subheading"><div><span className="eyebrow">POINT CONTRIBUTION</span><h3>测量点贡献权重</h3></div><button className="button button-secondary" onClick={() => openModal("contribution")}><Plus />配置贡献</button></div>
+                <div className="program-subheading"><div><span className="eyebrow">POINT CONTRIBUTION</span><h3>测量点贡献权重</h3></div><div className="row-actions"><BulkDataActions resourceKey="process.brush-contributions" resourceLabel="点位贡献" disabled={loading || submitting} onImported={reload} onResult={bulkResult} /><button className="button button-secondary" onClick={() => openModal("contribution")}><Plus />配置贡献</button></div></div>
                 <div className="compact-table">
                   <div className="compact-row contribution-row compact-head"><span>测量点</span><span>重叠率</span><span>贡献权重</span><span>审批</span><span /></div>
                   {contributions.map((item) => (

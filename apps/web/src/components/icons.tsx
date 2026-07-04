@@ -4,6 +4,7 @@ import {
   Boxes,
   ChartNoAxesCombined,
   CircleGauge,
+  ClipboardList,
   ClipboardCheck,
   Database,
   Factory,
@@ -24,6 +25,7 @@ export const navigationIcons: Record<string, LucideIcon> = {
   audit: ScrollText,
   integration: PlugZap,
   production: Activity,
+  engineering: ClipboardList,
 };
 
 export const metricIcons = {

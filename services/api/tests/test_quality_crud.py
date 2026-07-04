@@ -64,6 +64,12 @@ def build_session() -> Session:
     return Session(engine)
 
 
+def assert_delete_disabled(callable_, *args) -> None:
+    with pytest.raises(HTTPException) as error:
+        callable_(*args)
+    assert error.value.status_code == 405
+
+
 def test_quality_measurement_and_standard_crud() -> None:
     db = build_session()
     now = datetime.now(UTC)
@@ -205,8 +211,8 @@ def test_quality_measurement_and_standard_crud() -> None:
     assert analytics["data_quality"]["standard_coverage"] == 1
     assert analytics["point_risks"][0]["risk_score"] == 0
 
-    delete_quality_measurement(measurement["id"], db)
-    delete_quality_standard(standard.id, db)
+    assert_delete_disabled(delete_quality_measurement, measurement["id"], db)
+    assert_delete_disabled(delete_quality_standard, standard.id, db)
     db.close()
 
 

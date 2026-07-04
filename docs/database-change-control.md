@@ -1,14 +1,17 @@
 # MySQL Database Change Control
 
-PQ-AI uses MySQL as the only approved persistent database. Application code, Docker entrypoints, local scripts, and CI jobs must not create, migrate, alter, or drop MySQL schema objects automatically.
+PQ-AI uses MySQL as the only approved persistent database. Application code, Docker entrypoints, local scripts, seed jobs, tests against MySQL, and CI jobs must not create, migrate, alter, drop, or physically delete MySQL data/schema objects automatically.
 
-The screenshots referenced in the request were not readable from the current workspace path. This document records the mandatory database-operation rules explicitly provided in text. Any additional screenshot-only MySQL standards must be uploaded into the repository or pasted into an issue before they can be transcribed here.
+The company MySQL standards from the supplied screenshots are transcribed in [mysql-company-standards.md](mysql-company-standards.md). The baseline DBA review DDL is [sql/pq_ai_mysql_schema.sql](sql/pq_ai_mysql_schema.sql). The 3C3B engineering closed-loop delta for process routes, issue tasks, file imports, probes/MSA, supplier submissions, contribution validation, trajectory geometry, and model explanations is [sql/pq_ai_3c3b_engineering_delta.sql](sql/pq_ai_3c3b_engineering_delta.sql).
 
 ## Mandatory Rules
 
 - Alembic is not used in this project.
 - Runtime code must not call `Base.metadata.create_all`, `drop_all`, Alembic commands, or any equivalent automatic schema mutation against MySQL.
 - Docker startup, local startup, tests, and seed scripts must not execute DDL against MySQL.
+- Runtime application SQL must not execute physical `DELETE`, `CREATE`, `DROP`, `ALTER`, `TRUNCATE`, `REPLACE`, or application-authored `SET` statements against MySQL.
+- Physical foreign keys are forbidden. All table references are represented as logical `*_id` fields and enforced in application logic.
+- HTTP `DELETE` requests are rejected. Business removal must be implemented as disable, archive, status transition, or version replacement.
 - Every database-structure change requires a human approval ticket and manual execution by the database owner or approved DBA.
 - Schema changes include `CREATE DATABASE`, `CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`, `CREATE/DROP INDEX`, constraints, foreign keys, views, triggers, stored procedures, partitions, character set/collation changes, and any operation that changes table or column definitions.
 - Data seed or demo-data loading may run only after the approved schema already exists. Seed scripts must be idempotent and must not hide missing schema by creating tables.
@@ -52,3 +55,5 @@ They must not:
 - Create or alter tables.
 - Apply migration frameworks.
 - Drop or truncate schema objects.
+- Physically delete records in MySQL.
+- Convert logical references into physical foreign keys.

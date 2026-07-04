@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.security import PERMISSION_CATALOG, ROLE_CATALOG, hash_api_key
+from app.core.security import PERMISSION_CATALOG, ROLE_CATALOG, hash_api_key, hash_password
 from app.db.session import SessionLocal
 from app.domain.parameter_catalog import PARAMETER_CATALOG
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
@@ -261,9 +261,14 @@ def _seed_security(db: Session) -> AppUser:
             display_name="陈工",
             email="chen.gong@pq-ai.local",
             department="涂装工艺",
+            password_hash=hash_password(settings.bootstrap_admin_password),
+            password_changed_at=datetime.now(UTC),
         )
         db.add(admin)
         db.flush()
+    elif not admin.password_hash:
+        admin.password_hash = hash_password(settings.bootstrap_admin_password)
+        admin.password_changed_at = datetime.now(UTC)
     admin_role = roles["ADMIN"]
     if not db.scalar(
         select(UserRole).where(UserRole.user_id == admin.id, UserRole.role_id == admin_role.id)

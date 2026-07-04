@@ -90,6 +90,12 @@ def build_session() -> Session:
     return Session(engine)
 
 
+def assert_delete_disabled(callable_, *args) -> None:
+    with pytest.raises(HTTPException) as error:
+        callable_(*args)
+    assert error.value.status_code == 405
+
+
 def test_program_version_brush_parameter_and_contribution_crud() -> None:
     db = build_session()
     factory = create_factory(FactoryCreate(code="F01", name="一号工厂"), db)
@@ -174,11 +180,11 @@ def test_program_version_brush_parameter_and_contribution_crud() -> None:
         db,
     )
     assert len(list_brush_contributions(brush.id, db)) == 1
-    delete_brush_contribution(brush.id, point.id, db)
-    delete_brush_parameter(parameter.id, db)
-    delete_brush(brush.id, db)
-    delete_program_version(version.id, db)
-    delete_spray_program(program.id, db)
+    assert_delete_disabled(delete_brush_contribution, brush.id, point.id, db)
+    assert_delete_disabled(delete_brush_parameter, parameter.id, db)
+    assert_delete_disabled(delete_brush, brush.id, db)
+    assert_delete_disabled(delete_program_version, version.id, db)
+    assert_delete_disabled(delete_spray_program, program.id, db)
     db.close()
 
 
@@ -197,9 +203,7 @@ def test_program_with_version_cannot_be_deleted() -> None:
         db,
     )
     create_program_version(program.id, SprayProgramVersionCreate(version="V1"), db)
-    with pytest.raises(HTTPException) as error:
-        delete_spray_program(program.id, db)
-    assert error.value.status_code == 409
+    assert_delete_disabled(delete_spray_program, program.id, db)
     db.close()
 
 
@@ -348,10 +352,10 @@ def test_production_material_stage_and_actual_parameter_crud() -> None:
     ).actual_value == 312
     assert get_actual_parameter(actual.id, db).parameter_code == "clearcoat_1_spray_flow"
     assert len(list_actual_parameters(stage.id, db)) == 1
-    delete_actual_parameter(actual.id, db)
-    delete_production_stage_run(stage.id, db)
-    delete_production_run(run.id, db)
-    delete_material_batch(batch.id, db)
-    delete_program_version(version.id, db)
-    delete_spray_program(program.id, db)
+    assert_delete_disabled(delete_actual_parameter, actual.id, db)
+    assert_delete_disabled(delete_production_stage_run, stage.id, db)
+    assert_delete_disabled(delete_production_run, run.id, db)
+    assert_delete_disabled(delete_material_batch, batch.id, db)
+    assert_delete_disabled(delete_program_version, version.id, db)
+    assert_delete_disabled(delete_spray_program, program.id, db)
     db.close()

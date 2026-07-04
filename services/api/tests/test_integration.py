@@ -176,7 +176,7 @@ def test_integration_inbox_processes_business_events_and_enforces_idempotency() 
 
     with pytest.raises(HTTPException) as conflict:
         delete_endpoint(endpoint.id, db)
-    assert conflict.value.status_code == 409
+    assert conflict.value.status_code == 405
     assert update_endpoint(endpoint.id, IntegrationEndpointUpdate(is_active=False), db).is_active is False
     db.close()
 

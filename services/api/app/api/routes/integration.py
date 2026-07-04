@@ -3,9 +3,9 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.delete_policy import reject_physical_delete
 from app.db.session import get_db
 from app.models.domain import IntegrationEndpoint, IntegrationEvent
 from app.schemas.integration import (
@@ -97,14 +97,8 @@ def update_endpoint(
 
 @router.delete("/endpoints/{endpoint_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_endpoint(endpoint_id: str, db: Session = Depends(get_db)) -> Response:
-    endpoint = _required(db, IntegrationEndpoint, endpoint_id, "集成端点")
-    try:
-        db.delete(endpoint)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="端点已有集成事件，请停用而不是删除") from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    _required(db, IntegrationEndpoint, endpoint_id, "集成端点")
+    reject_physical_delete("集成端点")
 
 
 @router.get("/events", response_model=list[IntegrationEventRead])

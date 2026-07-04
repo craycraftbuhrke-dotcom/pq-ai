@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.delete_policy import reject_physical_delete
 from app.db.session import get_db
 from app.domain.scope_policy import (
     APPROVED_QUALITY_TYPES,
@@ -104,17 +104,8 @@ def _update_resource(
 
 
 def _delete_resource(db: Session, model: type, resource_id: str, label: str) -> Response:
-    resource = _get_resource(db, model, resource_id, label)
-    try:
-        db.delete(resource)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail=f"{label}已被业务数据引用，请先解除关联后再删除",
-        ) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    _get_resource(db, model, resource_id, label)
+    reject_physical_delete(label)
 
 
 @router.get("/master-data/summary", response_model=MasterDataSummary)

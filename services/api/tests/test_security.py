@@ -3,7 +3,15 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.core.security import authenticate_api_key, hash_api_key, required_permission
+from app.core.security import (
+    authenticate_api_key,
+    authenticate_session_token,
+    hash_api_key,
+    hash_password,
+    login_with_password,
+    required_permission,
+    revoke_session_token,
+)
 from tests.schema_guard import create_transient_test_schema
 from app.models.domain import ApiKey, AppUser, Permission, Role, RolePermission, UserRole
 
@@ -48,6 +56,47 @@ def test_api_key_authentication_resolves_roles_and_permissions() -> None:
     db.close()
 
 
+def test_password_login_issues_and_revokes_user_session() -> None:
+    db, _raw_key = build_security_session()
+    user = db.query(AppUser).one()
+    user.password_hash = hash_password("valid-password")
+    db.commit()
+
+    login = login_with_password(
+        db,
+        "quality.user",
+        "valid-password",
+        user_agent="pytest",
+        client_ip="127.0.0.1",
+    )
+
+    assert login is not None
+    actor, raw_token, expires_at = login
+    assert actor.username == "quality.user"
+    assert raw_token.startswith("pqs_")
+    assert expires_at > datetime.now(UTC)
+
+    session_actor = authenticate_session_token(db, raw_token)
+    assert session_actor is not None
+    assert session_actor.can("quality.write")
+
+    assert revoke_session_token(db, raw_token)
+    assert authenticate_session_token(db, raw_token) is None
+    db.close()
+
+
+def test_failed_password_login_increments_counter() -> None:
+    db, _raw_key = build_security_session()
+    user = db.query(AppUser).one()
+    user.password_hash = hash_password("valid-password")
+    db.commit()
+
+    assert login_with_password(db, "quality.user", "wrong-password") is None
+    db.refresh(user)
+    assert user.failed_login_count == 1
+    db.close()
+
+
 def test_expired_api_key_is_rejected() -> None:
     db, raw_key = build_security_session()
     api_key = db.query(ApiKey).one()
@@ -58,10 +107,17 @@ def test_expired_api_key_is_rejected() -> None:
 
 
 def test_endpoint_permissions_cover_security_and_closed_loop_actions() -> None:
+    assert required_permission("POST", "/api/v1/auth/login") is None
+    assert required_permission("POST", "/api/v1/auth/logout") is None
     assert required_permission("GET", "/api/v1/security/users") == "security.manage"
     assert required_permission("GET", "/api/v1/audit/logs") == "audit.read"
     assert required_permission("POST", "/api/v1/quality/measurements") == "quality.write"
     assert required_permission("POST", "/api/v1/integrations/events") == "integration.manage"
+    assert required_permission("POST", "/api/v1/engineering/issue-tasks") == "engineering.manage"
+    assert (
+        required_permission("POST", "/api/v1/bulk/engineering.issue-tasks/import")
+        == "engineering.manage"
+    )
     assert required_permission("PATCH", "/api/v1/ai/models/model-1/status") == "ai.train"
     assert required_permission("POST", "/api/v1/ai/models/datasets") == "ai.train"
     assert required_permission("POST", "/api/v1/ai/models/model-1/acceptance") == "ai.train"

@@ -31,6 +31,12 @@ Explicitly excluded: pretreatment, e-coat, sealing, booth temperature/humidity, 
 13. Every production model must satisfy a versioned, source-backed, active factory acceptance policy for every applicable factory and target metric. Demo thresholds never qualify as factory approval.
 14. MySQL schema changes are controlled production operations. Code, scripts, Docker entrypoints, and CI must not create, migrate, alter, or drop MySQL schema objects automatically.
 15. Every database-structure change requires an approval ticket, forward SQL, rollback SQL or rollback limitation, risk assessment, database-owner approval, manual execution, and execution record.
+16. Physical foreign keys are forbidden. All references must be represented as logical `*_id` fields and enforced in application logic.
+17. Runtime application SQL must not execute physical `DELETE`, `CREATE`, `DROP`, `ALTER`, `TRUNCATE`, `REPLACE`, or application-authored `SET` statements against MySQL.
+18. Business removal must be implemented as disable, archive, status transition, or version replacement; official HTTP `DELETE` requests remain rejected.
+19. Human users authenticate with personal username/password sessions stored as HttpOnly cookies; external systems use API Keys. Never expose session tokens or API Keys to browser JavaScript.
+20. Every domain CRUD surface must support governed Excel/CSV template download, bulk export, and bulk import where the underlying resource is editable. Templates are the contract for field names, data types, required fields, and business keys.
+21. Bulk import must call existing application services/routes, enforce the same logical reference checks as manual CRUD, and use create/upsert semantics only. Import files must never trigger schema creation, schema migration, unsafe SQL, or physical deletion.
 
 ## Development Gate
 
@@ -45,3 +51,6 @@ Every new feature must pass:
 - Robot execution check: approved configuration/trajectory, actual checksum, path-segment facts, target-family contribution version, and mismatch blocking are represented.
 - Material governance check: definition, canonical unit, method, specification source/effective period, stage/target-family applicability, production-time gate, reliability, and lineage are represented.
 - Database governance check: no automatic MySQL DDL; schema changes have an approved manual SQL ticket and are documented in release evidence.
+- MySQL standards check: no physical foreign keys, no runtime physical deletes, no unsupported data types, compliant table/field/index naming, and DBA-reviewed DDL only.
+- Authentication check: user sessions, API Keys, RBAC permission checks, and write-operation audit evidence are present for protected workflows.
+- Bulk data check: editable domain resources provide templates, export, import validation, row-level errors, idempotent upsert behavior, and post-import UI refresh.

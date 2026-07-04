@@ -31,10 +31,10 @@ export async function proxyMasterDataRequest(
 
   const target = `${apiUrl}${basePath}${id ? `/${encodeURIComponent(id)}` : ""}`;
   const method = request.method;
-  const headers = new Headers(apiRequestHeaders());
+  const headers = new Headers(await apiRequestHeaders(request));
   let body: string | undefined;
 
-  if (method !== "GET" && method !== "DELETE") {
+  if (method !== "GET") {
     headers.set("Content-Type", "application/json");
     body = await request.text();
   }
