@@ -273,7 +273,7 @@ def test_durr_trajectory_lineage_and_target_family_contribution_gate() -> None:
         ),
         db,
     )
-    assert result["feature_values"]["clearcoat_2.clearcoat_2_spray_flow"] == 320
+    assert result["feature_values"]["clearcoat_2.spray_flow"] == 320
     assert result["feature_values"]["clearcoat_2.trajectory_path_speed"] == 820
     assert result["contribution_count"] == 1
     assert result["lineage"]["legacy_contribution_fallback"] is False

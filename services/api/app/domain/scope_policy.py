@@ -21,13 +21,12 @@ OUT_OF_SCOPE_NAME_TOKENS = (
     "paint_mix_room",
     "paint_mixing_room",
     "thickness_ed",
-    "e_coat",
-    "ecoat",
     "electrophoresis",
     "gloss",
     "tempc",
     "tempf",
 )
+OUT_OF_SCOPE_BOUNDARY_TOKENS = ("e_coat", "ecoat")
 
 
 class ScopeViolation(ValueError):
@@ -40,7 +39,10 @@ def _normalized(value: str) -> str:
 
 def is_out_of_scope_name(value: str) -> bool:
     normalized = _normalized(value)
-    return any(token in normalized for token in OUT_OF_SCOPE_NAME_TOKENS)
+    padded = f"_{normalized}_"
+    return any(f"_{token}_" in padded for token in OUT_OF_SCOPE_BOUNDARY_TOKENS) or any(
+        token in normalized for token in OUT_OF_SCOPE_NAME_TOKENS
+    )
 
 
 def require_approved_quality_type(quality_type: str) -> None:

@@ -256,7 +256,7 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
     assert "clearcoat_2.material_viscosity" not in result["feature_values"]
     assert "clearcoat_2.material_solid_ratio" not in result["feature_values"]
     assert "clearcoat_2.coa.density" not in result["feature_values"]
-    assert result["feature_values"]["clearcoat_2.clearcoat_2_outer_air"] == 410.0
+    assert result["feature_values"]["clearcoat_2.outer_air"] == 410.0
     assert "clearcoat_2.booth_temperature" not in result["feature_values"]
     assert "context.booth_humidity" not in result["feature_values"]
     assert result["quality_labels"]["doi"] == 80.5
@@ -281,3 +281,158 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
     summary = quality_summary(db)
     assert summary["measurements"] == 1
     assert summary["metric_values"] == 1
+
+
+def test_point_feature_pipeline_links_five_3c3b_stages_to_one_measurement_point(
+    db: Session,
+) -> None:
+    now = datetime.now(UTC)
+    factory = create_factory(FactoryCreate(code="FIVE", name="五工段工厂"), db)
+    vehicle_model = create_vehicle_model(VehicleModelCreate(code="M3C3B", name="3C3B 车型"), db)
+    color = create_color(ColorCreate(code="R-01", name="红色", color_type="BASECOAT"), db)
+    part = create_part(PartCreate(code="FENDER", name="翼子板", material="钢"), db)
+    bind_factory_vehicle_model(
+        FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle_model.id), db
+    )
+    bind_vehicle_model_color(
+        VehicleModelColorCreate(vehicle_model_id=vehicle_model.id, color_id=color.id), db
+    )
+    point = create_measurement_point(
+        MeasurementPointCreate(
+            code="P-FENDER-01",
+            name="翼子板点位 01",
+            vehicle_model_id=vehicle_model.id,
+            part_id=part.id,
+            quality_types=["ORANGE_PEEL", "COLOR_DIFFERENCE", "THICKNESS"],
+        ),
+        db,
+    )
+    group = create_measurement_group(
+        MeasurementGroupCreate(
+            code="G-FIVE-01",
+            name="五工段点位编组",
+            vehicle_model_id=vehicle_model.id,
+            quality_type="ORANGE_PEEL",
+            expected_point_count=1,
+        ),
+        db,
+    )
+    add_measurement_group_point(
+        group.id, MeasurementGroupPointCreate(measurement_point_id=point.id, sequence_no=1), db
+    )
+
+    production_run = create_production_run(
+        ProductionRunCreate(
+            run_no="RUN-FIVE-001",
+            body_no="BODY-001",
+            factory_id=factory.id,
+            vehicle_model_id=vehicle_model.id,
+            color_id=color.id,
+            started_at=now,
+        ),
+        db,
+    )
+    stage_specs = [
+        ("MIDCOAT_EXT", "midcoat_spray_flow", 100.0, "中涂外喷"),
+        ("BASECOAT_1", "basecoat_1_spray_flow", 210.0, "色漆一站"),
+        ("BASECOAT_2", "basecoat_2_spray_flow", 230.0, "色漆二站"),
+        ("CLEARCOAT_1", "clearcoat_1_spray_flow", 310.0, "清漆一站"),
+        ("CLEARCOAT_2", "clearcoat_2_spray_flow", 330.0, "清漆二站"),
+    ]
+    for index, (stage, parameter_code, configured_value, stage_name) in enumerate(
+        stage_specs,
+        start=1,
+    ):
+        program = create_spray_program(
+            SprayProgramCreate(
+                program_code=f"PRG-FIVE-{index}",
+                name=stage_name,
+                factory_id=factory.id,
+                process_stage=stage,
+                station_code=f"ST-{index}",
+                station_name=stage_name,
+            ),
+            db,
+        )
+        version = create_program_version(
+            program.id,
+            SprayProgramVersionCreate(
+                version="V1",
+                status="ACTIVE",
+                vehicle_model_ids=[vehicle_model.id],
+                color_ids=[color.id],
+            ),
+            db,
+        )
+        brush = create_brush(
+            version.id,
+            BrushCreate(
+                brush_no=f"B-{index:03d}",
+                brush_table_no=f"BT-{index:03d}",
+                spray_position=stage_name,
+                part_id=part.id,
+            ),
+            db,
+        )
+        create_brush_parameter(
+            brush.id,
+            BrushParameterCreate(
+                parameter_code=parameter_code,
+                parameter_name="喷涂流量",
+                configured_value=configured_value,
+                unit="ml/min",
+            ),
+            db,
+        )
+        upsert_brush_point_contribution(
+            brush.id,
+            point.id,
+            BrushPointContributionUpsert(
+                overlap_ratio=1.0,
+                contribution_weight=1.0,
+                is_approved=True,
+            ),
+            db,
+        )
+        create_production_stage_run(
+            production_run.id,
+            ProductionStageRunCreate(
+                process_stage=stage,
+                program_version_id=version.id,
+            ),
+            db,
+        )
+
+    measurement = create_quality_measurement(
+        QualityMeasurementCreate(
+            data_no="QM-FIVE-001",
+            production_run_id=production_run.id,
+            measurement_group_id=group.id,
+            measurement_point_id=point.id,
+            quality_type="ORANGE_PEEL",
+            measured_at=now,
+            metrics=[QualityMetricInput(metric_code="doi", metric_name="DOI", raw_value=82.0)],
+        ),
+        db,
+    )
+    db.get(QualityMeasurement, measurement["id"]).reliability_status = "VERIFIED"
+    db.commit()
+
+    result = build_point_snapshot(
+        PointFeatureBuildRequest(
+            production_run_id=production_run.id,
+            measurement_point_id=point.id,
+        ),
+        db,
+    )
+
+    assert result["completeness_score"] == 1.0
+    assert set(result["stage_coverage"]) == {stage for stage, *_ in stage_specs}
+    assert result["quality_labels"]["doi"] == 82.0
+    assert result["feature_values"]["midcoat.spray_flow"] == 100.0
+    assert result["feature_values"]["basecoat_1.spray_flow"] == 210.0
+    assert result["feature_values"]["basecoat_2.spray_flow"] == 230.0
+    assert result["feature_values"]["clearcoat_1.spray_flow"] == 310.0
+    assert result["feature_values"]["clearcoat_2.spray_flow"] == 330.0
+    assert "midcoat.midcoat_spray_flow" not in result["feature_values"]
+    assert "clearcoat_2.clearcoat_2_spray_flow" not in result["feature_values"]

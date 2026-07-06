@@ -14,6 +14,7 @@ from app.domain.scope_policy import (
     CURRENT_FEATURE_SET_VERSION,
     ScopeViolation,
     approved_numeric_values,
+    is_out_of_scope_name,
     require_scope_safe_model,
 )
 from app.models.domain import Color, VehicleModel
@@ -30,6 +31,10 @@ def build_session() -> Session:
 
 
 def test_scope_policy_filters_legacy_features_and_rejects_legacy_models() -> None:
+    assert not is_out_of_scope_name("basecoat_1_spray_flow")
+    assert not is_out_of_scope_name("basecoat_2_outer_air")
+    assert is_out_of_scope_name("ecoat_voltage")
+    assert is_out_of_scope_name("thickness_ed")
     assert approved_numeric_values(
         {
             "clearcoat_2_spray_flow": 320.0,
@@ -44,7 +49,7 @@ def test_scope_policy_filters_legacy_features_and_rejects_legacy_models() -> Non
     require_scope_safe_model(
         "doi",
         CURRENT_FEATURE_SET_VERSION,
-        ["clearcoat_2.clearcoat_2_spray_flow"],
+        ["clearcoat_2.spray_flow"],
     )
 
 

@@ -19,6 +19,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ValidationChart } from "@/components/validation-chart";
 
+const DEFAULT_FEATURE_SET_VERSION = "point-features-v4-material-governed";
+
 type ModelVersion = {
   id: string;
   model_code: string;
@@ -75,12 +77,26 @@ type DatasetSnapshot = {
   train_group_count: number;
   validation_group_count: number;
   cutoff_at?: string | null;
+  feature_names: string[];
   leakage_check: {
     passed: boolean;
     group_overlap_count: number;
     snapshot_overlap_count: number;
     temporal_order_valid: boolean;
   };
+};
+type DatasetMember = {
+  id: string;
+  dataset_snapshot_id: string;
+  point_feature_snapshot_id: string;
+  production_run_id: string;
+  measurement_point_id: string;
+  target_measurement_id: string;
+  group_value: string;
+  split: string;
+  target_value: number;
+  feature_values: Record<string, number>;
+  occurred_at: string;
 };
 type AcceptanceDecision = {
   id: string;
@@ -156,6 +172,7 @@ type Snapshot = {
   measurement_point_code: string;
   measurement_point_name: string;
   feature_set_version: string;
+  target_family: string;
   feature_count: number;
   completeness_score: number;
 };
@@ -284,10 +301,27 @@ type Measurement = {
   data_no: string;
   production_run_id: string;
   measurement_point_id: string;
+  measurement_point_code: string;
+  measurement_point_name: string;
+  quality_type: string;
+  reliability_status: string;
+  is_valid: boolean;
   measured_at: string;
   metrics: { metric_code: string; raw_value: number; corrected_value?: number | null }[];
 };
 type MetricDefinition = { code: string; name: string; quality_type: string; is_primary: boolean };
+type PointFeatureResult = {
+  snapshot_id: string;
+  production_run_id: string;
+  measurement_point_id: string;
+  feature_set_version: string;
+  target_family: string;
+  feature_values: Record<string, number>;
+  quality_labels: Record<string, number>;
+  completeness_score: number;
+  stage_coverage: string[];
+  contribution_count: number;
+};
 type FeatureDrift = {
   feature: string;
   training_mean: number;
@@ -457,6 +491,7 @@ export function AiWorkbench() {
   const [validationFolds, setValidationFolds] = useState<ModelValidationFold[]>([]);
   const [modelArtifacts, setModelArtifacts] = useState<ModelArtifact[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [datasetMembers, setDatasetMembers] = useState<DatasetMember[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -469,6 +504,7 @@ export function AiWorkbench() {
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedDatasetId, setSelectedDatasetId] = useState("");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState("");
+  const [selectedBuildMeasurementId, setSelectedBuildMeasurementId] = useState("");
   const [selectedPredictionId, setSelectedPredictionId] = useState("");
   const [selectedRecommendationId, setSelectedRecommendationId] = useState("");
   const [query, setQuery] = useState("");
@@ -480,6 +516,7 @@ export function AiWorkbench() {
   const [defaultDatasetCode] = useState(() => `PQ-DATASET-${Date.now().toString().slice(-6)}`);
   const [defaultPolicyCode] = useState(() => `FACTORY-POLICY-${Date.now().toString().slice(-6)}`);
   const [loading, setLoading] = useState(true);
+  const [membersLoading, setMembersLoading] = useState(false);
   const [driftLoading, setDriftLoading] = useState(false);
   const [governanceLoading, setGovernanceLoading] = useState(false);
   const [submitting, setSubmitting] = useState("");
@@ -528,6 +565,11 @@ export function AiWorkbench() {
       setSelectedModelId((current) => current || nextModels[0]?.id || "");
       setSelectedDatasetId((current) => current || nextDatasets[0]?.id || "");
       setSelectedSnapshotId((current) => current || nextSnapshots[0]?.id || "");
+      setSelectedBuildMeasurementId((current) =>
+        nextMeasurements.some((measurement) => measurement.id === current)
+          ? current
+          : nextMeasurements[0]?.id || "",
+      );
       setSelectedPredictionId((current) => current || nextPredictions[0]?.id || "");
       setSelectedRecommendationId((current) => current || nextRecommendations[0]?.id || "");
     } catch (loadError) {
@@ -546,6 +588,24 @@ export function AiWorkbench() {
       setError(loadError instanceof Error ? loadError.message : "模型漂移报告加载失败");
     } finally {
       setDriftLoading(false);
+    }
+  }, []);
+
+  const loadDatasetMembers = useCallback(async (datasetId: string) => {
+    if (!datasetId) {
+      setDatasetMembers([]);
+      return;
+    }
+    setMembersLoading(true);
+    try {
+      setDatasetMembers(
+        await request<DatasetMember[]>(`/api/ai/models/datasets/${datasetId}/members`),
+      );
+    } catch (loadError) {
+      setDatasetMembers([]);
+      setError(loadError instanceof Error ? loadError.message : "训练矩阵样本加载失败");
+    } finally {
+      setMembersLoading(false);
     }
   }, []);
 
@@ -579,9 +639,29 @@ export function AiWorkbench() {
     return () => window.clearTimeout(timer);
   }, [loadDrift, selectedModelId]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadDatasetMembers(selectedDatasetId), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadDatasetMembers, selectedDatasetId]);
+
   const selectedModel = models.find((item) => item.id === selectedModelId);
   const selectedDataset = datasets.find((item) => item.id === selectedDatasetId);
   const modelDataset = datasets.find((item) => item.id === selectedModel?.dataset_snapshot_id);
+  const featureSetVersions = useMemo(() => {
+    const versions = Array.from(new Set(snapshots.map((item) => item.feature_set_version)));
+    return versions.length ? versions : [DEFAULT_FEATURE_SET_VERSION];
+  }, [snapshots]);
+  const featureBuildMeasurements = measurements.filter(
+    (measurement) =>
+      measurement.is_valid &&
+      ["ORANGE_PEEL", "COLOR_DIFFERENCE", "THICKNESS"].includes(measurement.quality_type),
+  );
+  const selectedBuildMeasurement =
+    featureBuildMeasurements.find((item) => item.id === selectedBuildMeasurementId) ??
+    featureBuildMeasurements[0];
+  const selectedDatasetMembers = datasetMembers.filter(
+    (member) => member.dataset_snapshot_id === selectedDatasetId,
+  );
   const selectedAcceptance = acceptanceDecisions.find((item) => item.model_version_id === selectedModelId);
   const selectedAcceptancePolicies = acceptancePolicies.filter(
     (item) => !selectedModel || item.target_metric === selectedModel.target_metric,
@@ -724,6 +804,37 @@ export function AiWorkbench() {
       });
       showSuccess("基础模型训练完成，已保存为待验收草稿版本");
       event.currentTarget.reset();
+      await reload();
+    } catch (operationError) {
+      showError(operationError);
+    } finally {
+      setSubmitting("");
+    }
+  }
+
+  async function buildPointFeatureSnapshot(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedBuildMeasurement) {
+      showError(new Error("请先维护至少一条有效质量测量记录"));
+      return;
+    }
+    const data = new FormData(event.currentTarget);
+    setSubmitting("feature-snapshot");
+    try {
+      const result = await request<PointFeatureResult>("/api/features/point-snapshots/build", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          production_run_id: selectedBuildMeasurement.production_run_id,
+          measurement_point_id: selectedBuildMeasurement.measurement_point_id,
+          target_family: selectedBuildMeasurement.quality_type,
+          feature_set_version: String(data.get("feature_set_version") || DEFAULT_FEATURE_SET_VERSION),
+        }),
+      });
+      setSelectedSnapshotId(result.snapshot_id);
+      showSuccess(
+        `点位特征快照已生成：${result.stage_coverage.length}/5 工段，${Object.keys(result.feature_values).length} 个特征，${Object.keys(result.quality_labels).length} 个质量标签`,
+      );
       await reload();
     } catch (operationError) {
       showError(operationError);
@@ -1159,13 +1270,36 @@ export function AiWorkbench() {
         {tab === "models" ? (
           <div className="ai-split">
             <div className="ai-control-panel ai-governed-training">
+              <form onSubmit={buildPointFeatureSnapshot}>
+                <div className="program-subheading"><div><span className="eyebrow">Point Feature Matrix</span><h3>生成点位特征快照</h3></div><Activity /></div>
+                <div className="ai-form-stack">
+                  <label className="form-field">
+                    <span>质量测量记录</span>
+                    <select
+                      value={selectedBuildMeasurement?.id ?? ""}
+                      onChange={(event) => setSelectedBuildMeasurementId(event.target.value)}
+                      disabled={!featureBuildMeasurements.length}
+                    >
+                      {featureBuildMeasurements.map((measurement) => (
+                        <option key={measurement.id} value={measurement.id}>
+                          {measurement.data_no} · {measurement.measurement_point_code} · {measurement.quality_type}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="form-field"><span>特征集版本</span><select name="feature_set_version">{featureSetVersions.map((value) => <option key={value}>{value}</option>)}</select></label>
+                  <div className="ai-context-box"><span>生产事件</span><strong>{selectedBuildMeasurement?.production_run_id.slice(0, 8) ?? "—"}</strong><span>测量点</span><strong>{selectedBuildMeasurement ? `${selectedBuildMeasurement.measurement_point_code} / ${selectedBuildMeasurement.measurement_point_name}` : "—"}</strong><span>质量类型</span><strong>{selectedBuildMeasurement?.quality_type ?? "—"}</strong><span>可靠性</span><strong>{selectedBuildMeasurement ? statusLabel(selectedBuildMeasurement.reliability_status) : "—"}</strong></div>
+                  <p className="ai-hint">该操作会按生产事件和测量点聚合五工段刷子贡献、程序参数、实际参数、材料特性和质量标签，形成后续训练矩阵样本。</p>
+                  <button className="button button-secondary" disabled={!selectedBuildMeasurement || submitting === "feature-snapshot"}>{submitting === "feature-snapshot" ? <LoaderCircle className="spin" /> : <Activity />} 生成/刷新点位快照</button>
+                </div>
+              </form>
               <form onSubmit={buildDataset}>
                 <div className="program-subheading"><div><span className="eyebrow">Dataset Governance</span><h3>构建无泄漏数据集</h3></div><ShieldCheck /></div>
                 <div className="ai-form-stack">
                   <label className="form-field"><span>数据集代码 <b>*</b></span><input name="dataset_code" required defaultValue={defaultDatasetCode} /></label>
                   <div className="ai-two-fields"><label className="form-field"><span>版本</span><input name="version" required defaultValue="1.0" /></label><label className="form-field"><span>时间留出比例</span><input name="holdout_ratio" type="number" min="0.1" max="0.5" step="0.05" defaultValue="0.25" /></label></div>
                   <label className="form-field"><span>目标质量指标</span><select name="target_metric" required>{metrics.filter((item) => item.is_primary).map((item) => <option key={`${item.quality_type}-${item.code}`} value={item.code}>{item.name} / {item.code}</option>)}</select></label>
-                  <label className="form-field"><span>特征集版本</span><select name="feature_set_version">{Array.from(new Set(snapshots.map((item) => item.feature_set_version))).map((value) => <option key={value}>{value}</option>)}</select></label>
+                  <label className="form-field"><span>特征集版本</span><select name="feature_set_version">{featureSetVersions.map((value) => <option key={value}>{value}</option>)}</select></label>
                   <div className="ai-two-fields"><label className="form-field"><span>最少训练分组</span><input name="min_train_groups" type="number" min="2" defaultValue="3" /></label><label className="form-field"><span>最少验证分组</span><input name="min_validation_groups" type="number" min="1" defaultValue="2" /></label></div>
                   <button className="button button-secondary" disabled={submitting === "dataset"}>{submitting === "dataset" ? <LoaderCircle className="spin" /> : <ShieldCheck />} 固化数据集快照</button>
                 </div>
@@ -1188,6 +1322,24 @@ export function AiWorkbench() {
               </form>
             </div>
             <div className="ai-record-list">
+              <article className="ai-model-card">
+                <div><span className="record-status status-on">训练矩阵</span><strong>{selectedDataset ? `${selectedDataset.dataset_code}:${selectedDataset.version}` : "未选择数据集"}</strong><small>{selectedDataset ? `${selectedDataset.sample_count} 行样本 · ${selectedDataset.feature_names.length} 个共同特征` : "先构建数据集快照"}</small></div>
+                {selectedDataset ? (
+                  <div className="compact-table">
+                    <div className="production-actual-row compact-head"><span>分组</span><span>切分</span><span>目标值</span><span>特征数</span><span>时间</span></div>
+                    {selectedDatasetMembers.slice(0, 6).map((member) => (
+                      <div className="production-actual-row" key={member.id}>
+                        <span><strong>{member.group_value}</strong><small>{member.measurement_point_id.slice(0, 8)} · {member.production_run_id.slice(0, 8)}</small></span>
+                        <span>{member.split}</span>
+                        <span>{formatNumber(member.target_value)}</span>
+                        <span>{Object.keys(member.feature_values ?? {}).length}</span>
+                        <span>{new Date(member.occurred_at).toLocaleString("zh-CN", { hour12: false })}</span>
+                      </div>
+                    ))}
+                    {!selectedDatasetMembers.length ? <div className="program-empty">{membersLoading ? "训练矩阵样本加载中..." : "暂无矩阵成员，请重新构建数据集"}</div> : null}
+                  </div>
+                ) : null}
+              </article>
               {filteredModels.map((model) => (
                 <article className={`ai-model-card ${model.id === selectedModelId ? "selected" : ""}`} key={model.id} onClick={() => setSelectedModelId(model.id)}>
                   <div><span className={`record-status ${model.status === "ACTIVE" ? "status-on" : "status-off"}`}>{statusLabel(model.status)}</span><strong>{model.model_code}:{model.version}</strong><small>{model.model_type}</small></div>

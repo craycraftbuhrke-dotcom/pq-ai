@@ -27,8 +27,8 @@ This audit reviews the PQ-AI database model, generated MySQL DDL, runtime databa
 
 ## Static Checks Passed
 
-- Tables: 74.
-- Logical references: 123.
+- Tables: 90.
+- Logical references: 156.
 - Physical foreign keys in SQLAlchemy metadata: 0.
 - Table names, field names, model index names, and model unique names are within 32 characters.
 - Single-table field counts are within the 50-column limit.

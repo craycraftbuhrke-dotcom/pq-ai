@@ -1464,8 +1464,8 @@ def seed_demo(db: Session) -> dict:
         db, run.id, points["P-ROOF-03"].id, target_family="ORANGE_PEEL"
     )
     base_features = snapshot["feature_values"]
-    flow_key = "clearcoat_2.clearcoat_2_spray_flow"
-    outer_air_key = "clearcoat_2.clearcoat_2_outer_air"
+    flow_key = "clearcoat_2.spray_flow"
+    outer_air_key = "clearcoat_2.outer_air"
     for index in range(1, 8):
         historical_run = ProductionRun(
             run_no=f"DEMO-TRAIN-RUN-{index:02d}",

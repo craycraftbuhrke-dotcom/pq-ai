@@ -118,6 +118,6 @@ This document transcribes the company MySQL rules supplied in the June 2026 scre
 ## PQ-AI Schema Notes
 
 - Current approved schema material is [docs/sql/pq_ai_mysql_schema.sql](sql/pq_ai_mysql_schema.sql).
-- It contains 74 domain tables, no physical foreign keys, no unsupported numeric/string storage types, and 123 documented logical references.
+- It contains 90 domain tables, no physical foreign keys, no unsupported numeric/string storage types, and 156 documented logical references.
 - It uses `VARCHAR(36)` UUID primary keys for current application compatibility. Moving to unsigned auto-increment surrogate keys is a major planned refactor and must be approved separately.
 - It preserves meaningful nullable fields where business absence is distinct from zero or empty string. Each nullable field must be reviewed before production hardening.

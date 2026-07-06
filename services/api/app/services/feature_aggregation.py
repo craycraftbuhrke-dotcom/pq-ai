@@ -37,6 +37,30 @@ from app.models.domain import (
     TrajectoryProgram,
 )
 
+STAGE_FEATURE_PREFIXES = {
+    "MIDCOAT_EXT": "midcoat",
+    "BASECOAT_1": "basecoat_1",
+    "BASECOAT_2": "basecoat_2",
+    "CLEARCOAT_1": "clearcoat_1",
+    "CLEARCOAT_2": "clearcoat_2",
+}
+
+
+def _stage_feature_prefix(process_stage: str) -> str:
+    return STAGE_FEATURE_PREFIXES.get(process_stage, process_stage.lower())
+
+
+def _canonical_parameter_code(stage_prefix: str, parameter_code: str) -> str:
+    code = parameter_code.strip()
+    candidate_prefixes = [stage_prefix]
+    if stage_prefix == "midcoat":
+        candidate_prefixes.append("midcoat_ext")
+    for prefix in candidate_prefixes:
+        scoped_prefix = f"{prefix}_"
+        if code.startswith(scoped_prefix):
+            return code[len(scoped_prefix) :]
+    return code
+
 
 def build_point_feature_snapshot(
     db: Session,
@@ -85,7 +109,7 @@ def build_point_feature_snapshot(
         )
     )
     for stage_run in stage_runs:
-        stage_prefix = stage_run.process_stage.lower()
+        stage_prefix = _stage_feature_prefix(stage_run.process_stage)
         stage_has_features = False
         weighted_sums: dict[str, float] = defaultdict(float)
         weight_sums: dict[str, float] = defaultdict(float)
@@ -187,19 +211,30 @@ def build_point_feature_snapshot(
                     )
                 )
             )
-            actual_by_code = {parameter.parameter_code: parameter for parameter in actual_parameters}
-            parameter_codes = {parameter.parameter_code for parameter in configured_parameters} | set(
-                actual_by_code
-            )
             configured_by_code = {
-                parameter.parameter_code: parameter for parameter in configured_parameters
+                _canonical_parameter_code(stage_prefix, parameter.parameter_code): parameter
+                for parameter in configured_parameters
             }
+            actual_by_code = {
+                _canonical_parameter_code(stage_prefix, parameter.parameter_code): parameter
+                for parameter in actual_parameters
+            }
+            parameter_codes = set(configured_by_code) | set(actual_by_code)
 
             for parameter_code in parameter_codes:
                 if is_out_of_scope_name(parameter_code):
                     continue
                 actual = actual_by_code.get(parameter_code)
                 configured = configured_by_code.get(parameter_code)
+                source_code = (
+                    actual.parameter_code
+                    if actual
+                    else configured.parameter_code
+                    if configured
+                    else parameter_code
+                )
+                if is_out_of_scope_name(source_code):
+                    continue
                 value = actual.actual_value if actual else configured.configured_value
                 weighted_sums[parameter_code] += value * contribution_weight
                 weight_sums[parameter_code] += contribution_weight
@@ -219,13 +254,15 @@ def build_point_feature_snapshot(
             )
         )
         for parameter in stage_actuals:
-            if is_out_of_scope_name(parameter.parameter_code):
+            parameter_code = _canonical_parameter_code(stage_prefix, parameter.parameter_code)
+            if is_out_of_scope_name(parameter.parameter_code) or is_out_of_scope_name(parameter_code):
                 continue
-            feature_values[f"{stage_prefix}.{parameter.parameter_code}"] = parameter.actual_value
+            feature_values[f"{stage_prefix}.{parameter_code}"] = parameter.actual_value
             stage_has_features = True
 
         for key, value in approved_numeric_values(stage_run.actual_parameters).items():
-            feature_values[f"{stage_prefix}.{key}"] = value
+            parameter_code = _canonical_parameter_code(stage_prefix, key)
+            feature_values[f"{stage_prefix}.{parameter_code}"] = value
             stage_has_features = True
 
         material = (
