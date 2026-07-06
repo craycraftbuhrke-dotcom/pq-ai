@@ -73,7 +73,7 @@ export default function RegisterPage() {
               required
               value={displayName}
               onChange={(event) => setDisplayName(event.target.value)}
-              placeholder="例如：陈工"
+              placeholder="请输入显示名称"
             />
           </label>
           <label className="form-field">

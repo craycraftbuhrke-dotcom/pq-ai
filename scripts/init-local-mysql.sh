@@ -10,6 +10,4 @@ export PYTHONPATH="$ROOT_DIR/services/api/.runtime/site-packages:$ROOT_DIR/servi
 
 cd "$ROOT_DIR/services/api"
 echo "数据库结构变更已禁用自动执行；建库、建表、改表、索引、约束、触发器等必须走审批工单并由人工执行 SQL。"
-python3 -m app.db.seed_demo
-
-echo "pq_ai 数据初始化完成。"
+echo "内置业务数据加载已禁用。请通过受治理导入流程或 DBA 审批 SQL 写入批准数据。"

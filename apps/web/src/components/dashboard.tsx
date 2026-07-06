@@ -15,7 +15,7 @@ type DashboardProps = {
 };
 
 export function Dashboard({ snapshot }: DashboardProps) {
-  const [selectedPoint, setSelectedPoint] = useState(snapshot.diagnosis.pointCode);
+  const [selectedPoint, setSelectedPoint] = useState(snapshot.diagnosis.pointCode || "");
   const [refreshed, setRefreshed] = useState(
     new Date(snapshot.context.refreshedAt).toLocaleTimeString("zh-CN", { hour12: false }),
   );
@@ -25,7 +25,9 @@ export function Dashboard({ snapshot }: DashboardProps) {
       <header className="page-header">
         <div>
           <span className="page-kicker">
-            {snapshot.context.factory} · {snapshot.context.vehicleModel} · {snapshot.context.color}
+            {[snapshot.context.factory, snapshot.context.vehicleModel, snapshot.context.color]
+              .filter(Boolean)
+              .join(" · ") || "未选择生产上下文"}
           </span>
           <h1>工艺质量驾驶舱</h1>
           <p>基于生产事件与测量点，监控三个涂层体系、五个喷涂执行阶段和 AI 闭环任务。</p>
@@ -34,7 +36,7 @@ export function Dashboard({ snapshot }: DashboardProps) {
           <button className="context-button">
             当前车型与颜色
             <strong>
-              {snapshot.context.vehicleModel} · {snapshot.context.color}
+              {[snapshot.context.vehicleModel, snapshot.context.color].filter(Boolean).join(" · ") || "待选择"}
             </strong>
             <ChevronDown aria-hidden="true" />
           </button>
@@ -49,7 +51,7 @@ export function Dashboard({ snapshot }: DashboardProps) {
       </header>
       <div className="freshness">
         <span className="live-dot" /> 数据更新时间 {refreshed} ·
-        {snapshot.source === "api" ? " API 实时数据" : " 演示快照"}
+        {snapshot.source === "api" ? " API 实时数据" : " 空状态"}
       </div>
       {snapshot.error ? (
         <div className="message-banner message-error" role="alert">

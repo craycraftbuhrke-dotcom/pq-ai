@@ -73,14 +73,14 @@ def assert_delete_disabled(callable_, *args) -> None:
 def test_quality_measurement_and_standard_crud() -> None:
     db = build_session()
     now = datetime.now(UTC)
-    factory = create_factory(FactoryCreate(code="F1", name="一号工厂"), db)
-    vehicle = create_vehicle_model(VehicleModelCreate(code="M1", name="车型一"), db)
-    color = create_color(ColorCreate(code="C1", name="珍珠白", color_type="BASECOAT"), db)
-    part = create_part(PartCreate(code="P1", name="车顶"), db)
+    factory = create_factory(FactoryCreate(code="F1", name="TEST_FACTORY_ONE"), db)
+    vehicle = create_vehicle_model(VehicleModelCreate(code="M1", name="TEST_MODEL_ONE"), db)
+    color = create_color(ColorCreate(code="C1", name="TEST_COLOR_ONE", color_type="BASECOAT"), db)
+    part = create_part(PartCreate(code="P1", name="TEST_PART_ONE"), db)
     point = create_measurement_point(
         MeasurementPointCreate(
             code="PT1",
-            name="测量点一",
+            name="TEST_POINT_ONE",
             vehicle_model_id=vehicle.id,
             part_id=part.id,
             quality_types=["ORANGE_PEEL"],

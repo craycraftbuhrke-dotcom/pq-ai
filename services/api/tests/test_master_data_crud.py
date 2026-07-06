@@ -81,15 +81,15 @@ def assert_delete_disabled(callable_, *args) -> None:
 def test_factory_crud_and_duplicate_code_validation() -> None:
     db = build_session()
     factory = create_factory(
-        FactoryCreate(code="F01", name="一号工厂", site_owner="陈工"),
+        FactoryCreate(code="F01", name="TEST_FACTORY_ONE", site_owner="TEST_OWNER"),
         db,
     )
-    assert get_factory(factory.id, db).site_owner == "陈工"
-    updated = update_factory(factory.id, FactoryUpdate(name="一号涂装工厂", is_active=False), db)
-    assert updated.name == "一号涂装工厂"
+    assert get_factory(factory.id, db).site_owner == "TEST_OWNER"
+    updated = update_factory(factory.id, FactoryUpdate(name="TEST_FACTORY_ONE_UPDATED", is_active=False), db)
+    assert updated.name == "TEST_FACTORY_ONE_UPDATED"
     assert updated.is_active is False
 
-    create_factory(FactoryCreate(code="F02", name="二号工厂"), db)
+    create_factory(FactoryCreate(code="F02", name="TEST_FACTORY_TWO"), db)
     with pytest.raises(HTTPException) as error:
         update_factory(factory.id, FactoryUpdate(code="F02"), db)
     assert error.value.status_code == 409
@@ -101,28 +101,28 @@ def test_factory_crud_and_duplicate_code_validation() -> None:
 
 def test_vehicle_color_and_part_crud() -> None:
     db = build_session()
-    vehicle = create_vehicle_model(VehicleModelCreate(code="M01", name="车型一"), db)
+    vehicle = create_vehicle_model(VehicleModelCreate(code="M01", name="TEST_MODEL_ONE"), db)
     color = create_color(
         ColorCreate(
             code="C01",
-            name="珍珠白",
+            name="TEST_COLOR_ONE",
             color_type="BASECOAT",
-            supplier="供应商 A",
+            supplier="TEST_SUPPLIER_A",
             tds_uri="https://docs.local/tds/c01",
             digital_standard={"dE45": 0.8},
         ),
         db,
     )
-    part = create_part(PartCreate(code="P01", name="机盖", material="钢"), db)
+    part = create_part(PartCreate(code="P01", name="TEST_PART_ONE", material="TEST_MATERIAL"), db)
 
     assert get_vehicle_model(vehicle.id, db).code == "M01"
-    assert get_color(color.id, db).supplier == "供应商 A"
+    assert get_color(color.id, db).supplier == "TEST_SUPPLIER_A"
     assert get_color(color.id, db).tds_uri == "https://docs.local/tds/c01"
-    assert get_part(part.id, db).material == "钢"
+    assert get_part(part.id, db).material == "TEST_MATERIAL"
 
-    assert update_vehicle_model(vehicle.id, VehicleModelUpdate(name="车型一改款"), db).name == "车型一改款"
-    assert update_color(color.id, ColorUpdate(supplier="供应商 B"), db).supplier == "供应商 B"
-    assert update_part(part.id, PartUpdate(region="前部"), db).region == "前部"
+    assert update_vehicle_model(vehicle.id, VehicleModelUpdate(name="TEST_MODEL_ONE_UPDATED"), db).name == "TEST_MODEL_ONE_UPDATED"
+    assert update_color(color.id, ColorUpdate(supplier="TEST_SUPPLIER_B"), db).supplier == "TEST_SUPPLIER_B"
+    assert update_part(part.id, PartUpdate(region="TEST_REGION"), db).region == "TEST_REGION"
 
     assert_delete_disabled(delete_vehicle_model, vehicle.id, db)
     assert_delete_disabled(delete_color, color.id, db)
@@ -132,12 +132,12 @@ def test_vehicle_color_and_part_crud() -> None:
 
 def test_measurement_group_and_point_crud() -> None:
     db = build_session()
-    vehicle = create_vehicle_model(VehicleModelCreate(code="M02", name="车型二"), db)
-    part = create_part(PartCreate(code="P02", name="车顶", material="钢"), db)
+    vehicle = create_vehicle_model(VehicleModelCreate(code="M02", name="TEST_MODEL_TWO"), db)
+    part = create_part(PartCreate(code="P02", name="TEST_PART_TWO", material="TEST_MATERIAL"), db)
     group = create_measurement_group(
         MeasurementGroupCreate(
             code="G-OP",
-            name="橘皮编组",
+            name="TEST_GROUP",
             vehicle_model_id=vehicle.id,
             quality_type="ORANGE_PEEL",
             expected_point_count=1,
@@ -146,16 +146,16 @@ def test_measurement_group_and_point_crud() -> None:
     )
     point = create_measurement_point(
         MeasurementPointCreate(
-            code="P-ROOF-01",
-            name="车顶测量点",
+            code="TEST-POINT-01",
+            name="TEST_POINT_ONE",
             vehicle_model_id=vehicle.id,
             part_id=part.id,
-            region="水平面",
+            region="TEST_REGION",
             quality_types=["ORANGE_PEEL"],
         ),
         db,
     )
-    factory = create_factory(FactoryCreate(code="F04", name="四号工厂"), db)
+    factory = create_factory(FactoryCreate(code="F04", name="TEST_FACTORY_FOUR"), db)
     factory_relation = bind_factory_vehicle_model(
         FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle.id),
         db,

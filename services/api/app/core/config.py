@@ -6,13 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "PQ-AI API"
     api_prefix: str = "/api/v1"
-    database_url: str = (
-        "mysql+pymysql://pq_ai:pq_ai_dev_password@localhost:3306/pq_ai?charset=utf8mb4"
-    )
+    database_url: str
     api_cors_origins: str = "http://localhost:3000"
-    api_auth_enabled: bool = False
-    bootstrap_api_key: str = "pq-ai-demo-key"
-    bootstrap_admin_password: str = "pq-ai-demo-password"
+    api_auth_enabled: bool = True
     session_ttl_minutes: int = 12 * 60
     login_lockout_threshold: int = 5
     login_lockout_minutes: int = 15

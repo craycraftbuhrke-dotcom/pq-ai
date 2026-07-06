@@ -18,6 +18,7 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ValidationChart } from "@/components/validation-chart";
+import { useAuth } from "@/lib/auth-context";
 
 const DEFAULT_FEATURE_SET_VERSION = "point-features-v4-material-governed";
 
@@ -481,6 +482,8 @@ function shortHash(value?: string | null): string {
 }
 
 export function AiWorkbench() {
+  const { actor } = useAuth();
+  const actorName = actor.isAuthenticated ? actor.displayName : "";
   const [tab, setTab] = useState<Tab>("models");
   const [models, setModels] = useState<ModelVersion[]>([]);
   const [datasets, setDatasets] = useState<DatasetSnapshot[]>([]);
@@ -699,8 +702,7 @@ export function AiWorkbench() {
       (policy) =>
         policy.factory_id === scope.factory_id &&
         policy.status === "ACTIVE" &&
-        (policy.policy_type === "FACTORY_APPROVED" ||
-          (selectedModel?.model_code.startsWith("DEMO-") && policy.policy_type === "DEMO")),
+        policy.policy_type === "FACTORY_APPROVED",
     ),
   );
   const selectedModelFeatureSetVersion = selectedModel?.feature_set_version;
@@ -1116,7 +1118,7 @@ export function AiWorkbench() {
           risk_assessment: "单次调整值保持在参数硬边界内；执行后必须由质量工程师复测确认。",
           rollback_plan: "若复测未改善或出现副作用，恢复推荐前刷子/程序参数版本并记录原因。",
           sustained_observation_plan: "至少跟踪后续 3 台同车型同色同点位质量结果，确认改善稳定。",
-          requested_by: "陈工",
+          requested_by: actorName,
         }),
       });
       showSuccess("受控试验计划已创建，需工艺负责人批准后才能批准推荐");
@@ -1136,7 +1138,7 @@ export function AiWorkbench() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           approved,
-          approved_by: "工艺负责人",
+          approved_by: actorName,
           comment: approved ? "假设、风险和回滚方案完整，同意进入推荐审批。" : "试验方案不满足现场执行要求。",
         }),
       });
@@ -1157,7 +1159,7 @@ export function AiWorkbench() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           rollback_reason: trial.completion_summary ?? "复测未达预期，按受控试验回滚方案执行。",
-          executed_by: "机器人程序员",
+          executed_by: actorName,
           execution_note: trial.rollback_plan,
         }),
       });
@@ -1176,7 +1178,7 @@ export function AiWorkbench() {
       await request(`/api/ai/recommendations/${recommendation.id}/approval`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved, approved_by: "陈工", comment: approved ? "受控试验批准" : "人工评审驳回" }),
+        body: JSON.stringify({ approved, approved_by: actorName, comment: approved ? "受控试验批准" : "人工评审驳回" }),
       });
       showSuccess(approved ? "推荐已批准，可填写实际执行值" : "推荐已驳回");
       await reload();

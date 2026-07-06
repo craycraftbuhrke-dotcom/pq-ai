@@ -4,6 +4,7 @@ import { Check, LockKeyhole, Sparkles } from "lucide-react";
 import { useState } from "react";
 
 import type { DashboardSnapshot } from "@/lib/dashboard-data";
+import { useAuth } from "@/lib/auth-context";
 
 type RecommendationPanelProps = {
   recommendation: DashboardSnapshot["recommendation"];
@@ -14,6 +15,7 @@ function formatPrediction(value: number): string {
 }
 
 export function RecommendationPanel({ recommendation }: RecommendationPanelProps) {
+  const { actor } = useAuth();
   const initialStatus = recommendation.status.toLowerCase();
   const [status, setStatus] = useState<
     "pending" | "submitting" | "approved" | "executed" | "verified"
@@ -33,7 +35,7 @@ export function RecommendationPanel({ recommendation }: RecommendationPanelProps
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          approvedBy: "陈工",
+          approvedBy: actor.isAuthenticated ? actor.displayName : "",
           comment: "通过工艺质量驾驶舱审批",
         }),
       });

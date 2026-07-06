@@ -78,7 +78,7 @@ from app.schemas.modeling import (
     ModelStatusUpdate,
     ModelTrainingRequest,
 )
-from app.services.demo import dashboard_snapshot
+from app.services.dashboard_snapshot import dashboard_snapshot
 
 
 def test_train_predict_and_diagnose_real_point_snapshots() -> None:
@@ -515,7 +515,7 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         with pytest.raises(HTTPException, match="受控试验计划"):
             approve_recommendation(
                 recommendation["recommendation_id"],
-                RecommendationApproval(approved=True, approved_by="陈工", comment="缺少试验计划"),
+                RecommendationApproval(approved=True, approved_by="TEST_ACTOR", comment="missing controlled trial"),
                 db,
             )
         trial = create_controlled_trial(
@@ -527,7 +527,7 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
                 risk_assessment="调整幅度受单步比例和参数硬边界约束，需关注橘皮副作用。",
                 rollback_plan="若复测未改善，恢复推荐前刷子参数版本并复测确认。",
                 sustained_observation_plan="连续跟踪后续 3 台同车型同色点位质量结果。",
-                requested_by="陈工",
+                requested_by="TEST_ACTOR",
             ),
             db,
         )
@@ -536,7 +536,7 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             trial["id"],
             ControlledTrialApproval(
                 approved=True,
-                approved_by="工艺负责人",
+                approved_by="TEST_APPROVER",
                 comment="假设、风险和回滚方案完整。",
             ),
             db,
@@ -546,14 +546,14 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
 
         approval = approve_recommendation(
             recommendation["recommendation_id"],
-            RecommendationApproval(approved=True, approved_by="陈工", comment="受控试验"),
+            RecommendationApproval(approved=True, approved_by="TEST_ACTOR", comment="controlled trial"),
             db,
         )
         assert approval["status"] == "APPROVED"
         execution = execute_recommendation(
             recommendation["recommendation_id"],
             RecommendationExecution(
-                executed_by="机器人程序员",
+                executed_by="TEST_EXECUTOR",
                 actions=[
                     RecommendationExecutionAction(
                         action_id=action["id"], executed_value=action["recommended_value"]
@@ -567,7 +567,7 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert list_controlled_trials(db)[0]["status"] == "RUNNING"
         db.expire_all()
         persisted_recommendation = db.get(Recommendation, recommendation["recommendation_id"])
-        assert persisted_recommendation.executed_by == "机器人程序员"
+        assert persisted_recommendation.executed_by == "TEST_EXECUTOR"
         assert persisted_recommendation.executed_at is not None
         pre_execution_measurement = QualityMeasurement(
             data_no="QM-PRE-EXECUTION",
@@ -777,7 +777,7 @@ def test_ineffective_controlled_trial_records_rollback_snapshot() -> None:
             sustained_observation_plan="连续跟踪 3 台",
             constraint_evidence={},
             status="RUNNING",
-            requested_by="陈工",
+            requested_by="TEST_ACTOR",
             requested_at=now,
         )
         db.add(trial)
@@ -785,7 +785,7 @@ def test_ineffective_controlled_trial_records_rollback_snapshot() -> None:
         with pytest.raises(HTTPException) as error:
             record_trial_rollback(
                 trial.id,
-                RollbackExecutionCreate(rollback_reason="尚未判定失败", executed_by="陈工"),
+                RollbackExecutionCreate(rollback_reason="trial not ineffective", executed_by="TEST_ACTOR"),
                 db,
             )
         assert error.value.status_code == 409
@@ -795,7 +795,7 @@ def test_ineffective_controlled_trial_records_rollback_snapshot() -> None:
             trial.id,
             RollbackExecutionCreate(
                 rollback_reason="复测未改善，按试验计划回滚",
-                executed_by="机器人程序员",
+                executed_by="TEST_EXECUTOR",
                 execution_note="恢复推荐前参数",
             ),
             db,

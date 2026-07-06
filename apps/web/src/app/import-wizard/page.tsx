@@ -61,10 +61,7 @@ const QUALITY_COLUMNS = [
   "data_type",
 ];
 
-const SAMPLE_CSV = `data_no,production_run_no,measurement_point_code,quality_type,measured_at,measured_by,metric_codes,metric_values,metric_units,data_type
-QM-001,RUN-001,P-ROOF-03,ORANGE_PEEL,2026-06-16T08:00:00,陈工,"doi,lw,sw","82.5,4.2,18.1","","TEST"
-QM-002,RUN-001,P-HOOD-06,THICKNESS,2026-06-16T08:01:00,李工,"thickness_total","128.6","μm","TEST"
-QM-003,RUN-001,P-LD-02,COLOR_DIFFERENCE,2026-06-16T08:02:00,王工,"de45","0.71","","TEST"`;
+const TEMPLATE_CSV = `${QUALITY_COLUMNS.join(",")}\n`;
 
 type PreviewRow = Record<string, string>;
 
@@ -154,7 +151,7 @@ export default function ImportWizardPage() {
   }
 
   function downloadSample() {
-    const blob = new Blob(["\uFEFF" + SAMPLE_CSV], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob(["\uFEFF" + TEMPLATE_CSV], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -224,15 +221,15 @@ export default function ImportWizardPage() {
           <div className="import-field-guide">
             <h4>必填列说明</h4>
             <table className="master-table compact-table">
-              <thead><tr><th>列名</th><th>说明</th><th>示例</th></tr></thead>
+              <thead><tr><th>列名</th><th>说明</th><th>填写要求</th></tr></thead>
               <tbody>
-                <tr><td className="mono">data_no</td><td>测量编号（唯一）</td><td>QM-001</td></tr>
-                <tr><td className="mono">production_run_no</td><td>生产事件编号</td><td>RUN-001</td></tr>
-                <tr><td className="mono">measurement_point_code</td><td>点位编号</td><td>P-ROOF-03</td></tr>
+                <tr><td className="mono">data_no</td><td>测量编号（唯一）</td><td>填写批准数据</td></tr>
+                <tr><td className="mono">production_run_no</td><td>生产事件编号</td><td>填写批准数据</td></tr>
+                <tr><td className="mono">measurement_point_code</td><td>点位编号</td><td>填写批准数据</td></tr>
                 <tr><td className="mono">quality_type</td><td>质量类型</td><td>ORANGE_PEEL / THICKNESS / COLOR_DIFFERENCE</td></tr>
-                <tr><td className="mono">measured_at</td><td>测量时间（ISO格式）</td><td>2026-06-16T08:00:00</td></tr>
-                <tr><td className="mono">metric_codes</td><td>指标编码（逗号分隔）</td><td>doi,lw,sw</td></tr>
-                <tr><td className="mono">metric_values</td><td>指标值（逗号分隔）</td><td>82.5,4.2,18.1</td></tr>
+                <tr><td className="mono">measured_at</td><td>测量时间（ISO格式）</td><td>填写实际测量时间</td></tr>
+                <tr><td className="mono">metric_codes</td><td>指标编码（逗号分隔）</td><td>填写批准指标</td></tr>
+                <tr><td className="mono">metric_values</td><td>指标值（逗号分隔）</td><td>填写实际测量值</td></tr>
               </tbody>
             </table>
           </div>

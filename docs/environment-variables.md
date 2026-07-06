@@ -11,12 +11,10 @@
 | `DATABASE_URL` | 是 | 是 | SQLAlchemy 数据库连接串，包含数据库用户名和密码。 |
 | `API_CORS_ORIGINS` | 是 | 否 | 允许访问 API 的前端源，多个值用逗号分隔。 |
 | `API_AUTH_ENABLED` | 是 | 否 | 是否启用 API Key 鉴权；生产必须为 `true`。 |
-| `BOOTSTRAP_API_KEY` | 是 | 是 | 首次引导/管理用 API Key；生产必须使用高熵值并在正式密钥创建后轮换。 |
-| `SEED_DEMO_DATA` | 是 | 否 | 是否初始化演示数据；生产通常为 `false`。 |
 | `API_HOST` | 是 | 否 | Uvicorn 监听地址，由容器运行时注入。 |
 | `API_PORT` | 是 | 否 | Uvicorn 监听端口，由容器运行时注入。 |
 
-说明：生产镜像启动时不会执行任何自动数据库迁移、建库、建表或改表动作。所有 DDL、建库、建表和表结构变更必须按公司工单审批流程手动执行；如果数据库不可连接、权限不足或表结构不匹配，后端会继续启动，并在对应 API 返回明确的数据库错误，前端会展示告警。
+说明：生产镜像启动时不会执行任何自动数据库迁移、建库、建表、改表或内置业务数据加载动作。所有 DDL、建库、建表和表结构变更必须按公司工单审批流程手动执行；如果数据库不可连接、权限不足或表结构不匹配，后端会继续启动，并在对应 API 返回明确的数据库错误，前端会展示告警。
 
 ## 2. 前端运行时变量
 
@@ -58,7 +56,7 @@
 
 | 变量 | 必填 | 敏感 | 来源/用途 |
 | --- | --- | --- | --- |
-| `PROJECT_GIT_REPOSITORY` | 是 | 否 | 固定为 `git@git.n.xiaomi.com:adili/pq-ai.git`，用于标识扫描与构建来源仓库。 |
+| `PROJECT_GIT_REPOSITORY` | 是 | 否 | 由 CI/CD 注入的项目仓库地址，用于标识扫描与构建来源仓库。 |
 | `CI_REGISTRY` | 构建镜像必填 | 否 | GitLab 容器镜像仓库地址，GitLab 自动提供。 |
 | `CI_REGISTRY_IMAGE` | 构建镜像必填 | 否 | 当前项目镜像命名空间，GitLab 自动提供。 |
 | `CI_REGISTRY_USER` | 构建镜像必填 | 是 | 镜像仓库登录用户名，GitLab 自动提供或由 CI 注入。 |
@@ -75,6 +73,6 @@
 
 - 本地开发：复制 `.env.example` 为 `.env`，把所有 `<replace-with-...>` 占位符替换为本地值。
 - GitLab CI：在 CI/CD Variables 中配置 `NEXT_PUBLIC_API_URL` 和镜像仓库登录变量；如需替换 CI 执行镜像，可覆盖 `NODE_IMAGE`、`PYTHON_IMAGE`，密钥类变量必须 masked/protected。
-- 容器运行：用容器平台环境变量或 Secret 注入 `DATABASE_URL`、`BOOTSTRAP_API_KEY`、`API_KEY`、数据库密码等敏感信息。
+- 容器运行：用容器平台环境变量或 Secret 注入 `DATABASE_URL`、`API_KEY`、数据库密码等敏感信息。
 - 前端安全：只有 `NEXT_PUBLIC_` 前缀变量会暴露给浏览器；`API_KEY` 必须只存在于 Next.js 服务端运行环境。
-- 生产安全：`API_AUTH_ENABLED` 必须为 `true`，`SEED_DEMO_DATA` 通常为 `false`，不得使用示例或测试密钥；生产环境不得在服务启动时自动执行 Alembic 或任何 DDL。
+- 生产安全：`API_AUTH_ENABLED` 必须为 `true`，不得使用测试密钥；生产环境不得在服务启动时自动执行 Alembic、任何 DDL 或内置业务数据加载。

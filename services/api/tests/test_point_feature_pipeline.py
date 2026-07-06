@@ -73,13 +73,13 @@ def db() -> Session:
 
 def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Session) -> None:
     now = datetime.now(UTC)
-    factory = create_factory(FactoryCreate(code="M9", name="M9 工厂"), db)
-    vehicle_model = create_vehicle_model(VehicleModelCreate(code="MX11", name="MX11"), db)
+    factory = create_factory(FactoryCreate(code="TEST-FACTORY", name="TEST_FACTORY"), db)
+    vehicle_model = create_vehicle_model(VehicleModelCreate(code="TEST-MODEL", name="TEST_MODEL"), db)
     color = create_color(
-        ColorCreate(code="C-01", name="珍珠白", color_type="BASECOAT", supplier="供应商 A"),
+        ColorCreate(code="TEST-COLOR", name="TEST_COLOR", color_type="BASECOAT", supplier="TEST_SUPPLIER"),
         db,
     )
-    part = create_part(PartCreate(code="ROOF", name="车顶", material="钢"), db)
+    part = create_part(PartCreate(code="TEST-PART", name="TEST_PART", material="TEST_MATERIAL"), db)
     bind_factory_vehicle_model(
         FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle_model.id), db
     )
@@ -88,8 +88,8 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
     )
     point = create_measurement_point(
         MeasurementPointCreate(
-            code="P-ROOF-03",
-            name="车顶中部 03",
+            code="TEST-POINT",
+            name="TEST_POINT",
             vehicle_model_id=vehicle_model.id,
             part_id=part.id,
             quality_types=["ORANGE_PEEL"],
@@ -175,9 +175,9 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
 
     material = create_material_batch(
         MaterialBatchCreate(
-            batch_no="CC-20260610-01",
-            material_code="CC-01",
-            material_name="清漆",
+            batch_no="TEST-BATCH",
+            material_code="TEST-MATERIAL-CODE",
+            material_name="TEST_MATERIAL_NAME",
             material_type="CLEARCOAT",
             viscosity=22.5,
             solid_ratio=0.48,
@@ -187,7 +187,7 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
     )
     production_run = create_production_run(
         ProductionRunCreate(
-            run_no="RUN-001",
+            run_no="TEST-RUN",
             factory_id=factory.id,
             vehicle_model_id=vehicle_model.id,
             color_id=color.id,
@@ -221,7 +221,7 @@ def test_point_feature_pipeline_aggregates_process_material_and_quality(db: Sess
     )
     measurement = create_quality_measurement(
         QualityMeasurementCreate(
-            data_no="QM-001",
+            data_no="TEST-MEASUREMENT",
             production_run_id=production_run.id,
             measurement_group_id=group.id,
             measurement_point_id=point.id,
@@ -323,8 +323,8 @@ def test_point_feature_pipeline_links_five_3c3b_stages_to_one_measurement_point(
 
     production_run = create_production_run(
         ProductionRunCreate(
-            run_no="RUN-FIVE-001",
-            body_no="BODY-001",
+            run_no="TEST-RUN-FIVE",
+            body_no="TEST-BODY",
             factory_id=factory.id,
             vehicle_model_id=vehicle_model.id,
             color_id=color.id,

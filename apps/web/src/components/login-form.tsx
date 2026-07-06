@@ -15,8 +15,8 @@ export function LoginForm() {
     const candidate = searchParams.get("next");
     return candidate && candidate.startsWith("/") && !candidate.startsWith("//") ? candidate : "/";
   }, [searchParams]);
-  const [username, setUsername] = useState("chen.gong");
-  const [password, setPassword] = useState("pq-ai-demo-password");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 

@@ -14,7 +14,7 @@ The company MySQL standards from the supplied screenshots are transcribed in [my
 - HTTP `DELETE` requests are rejected. Business removal must be implemented as disable, archive, status transition, or version replacement.
 - Every database-structure change requires a human approval ticket and manual execution by the database owner or approved DBA.
 - Schema changes include `CREATE DATABASE`, `CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`, `CREATE/DROP INDEX`, constraints, foreign keys, views, triggers, stored procedures, partitions, character set/collation changes, and any operation that changes table or column definitions.
-- Data seed or demo-data loading may run only after the approved schema already exists. Seed scripts must be idempotent and must not hide missing schema by creating tables.
+- Built-in business data loading is disabled. Approved operational data must enter through governed import workflows or manually executed DBA-approved SQL.
 - Tests may create transient SQLite in-memory schemas only through `tests.schema_guard.create_transient_test_schema`; this exception is for isolated unit tests and must never target MySQL.
 
 ## Required Approval Package
@@ -46,7 +46,6 @@ Each database-structure change must have a ticket containing:
 Local scripts assume the `pq_ai` database and required tables already exist. They may:
 
 - Check connectivity.
-- Load or refresh idempotent demo data.
 - Start the API and frontend.
 
 They must not:

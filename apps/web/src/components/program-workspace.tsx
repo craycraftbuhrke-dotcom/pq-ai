@@ -19,6 +19,7 @@ import { BulkDataActions } from "@/components/bulk-data-actions";
 import { DurrTrajectoryPanel } from "@/components/durr-trajectory-panel";
 import { VersionDiffPanel } from "@/components/version-diff-panel";
 import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
+import { useAuth } from "@/lib/auth-context";
 
 type Resource = { id: string; code: string; name: string };
 type Factory = Resource;
@@ -125,6 +126,8 @@ function relationName(resources: Resource[], id?: string | null): string {
 }
 
 export function ProgramWorkspace() {
+  const { actor } = useAuth();
+  const actorName = actor.isAuthenticated ? actor.displayName : "";
   const [workspaceTab, setWorkspaceTab] = useState<"programs" | "durr" | "diff">("programs");
   const [programs, setPrograms] = useState<Program[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
@@ -409,9 +412,9 @@ export function ProgramWorkspace() {
       version.status === "DRAFT"
         ? { status: "PENDING" }
         : version.status === "PENDING"
-          ? { status: "APPROVED", approved_by: "陈工" }
-          : version.status === "APPROVED"
-            ? { status: "ACTIVE", approved_by: version.approved_by ?? "陈工" }
+          ? { status: "APPROVED", approved_by: actorName }
+        : version.status === "APPROVED"
+            ? { status: "ACTIVE", approved_by: version.approved_by ?? actorName }
             : null;
     if (!next) return;
     setSubmitting(true);

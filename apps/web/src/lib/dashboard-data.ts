@@ -1,11 +1,4 @@
-import {
-  recommendationActions,
-  riskPoints,
-  stages,
-  type ProcessStage,
-  type RecommendationAction,
-  type RiskPoint,
-} from "@/lib/demo-data";
+import type { ProcessStage, RecommendationAction, RiskPoint } from "@/lib/ui-data";
 import { apiRequestHeaders } from "@/lib/auth-data";
 
 export type DiagnosisFactor = {
@@ -97,36 +90,32 @@ type ApiDashboard = {
 export const fallbackDashboard: DashboardSnapshot = {
   source: "fallback",
   context: {
-    factory: "M9 总装涂装工厂",
-    vehicleModel: "MX11",
-    color: "珍珠白",
-    shift: "白班",
-    refreshedAt: "2026-06-10T08:42:16-07:00",
+    factory: "",
+    vehicleModel: "",
+    color: "",
+    shift: "",
+    refreshedAt: new Date(0).toISOString(),
   },
-  healthScore: 92.4,
-  qualityPassRate: 98.7,
-  activeRuns: 126,
-  openRisks: 7,
-  pendingRecommendations: 3,
-  stages,
-  riskPoints,
+  healthScore: 0,
+  qualityPassRate: 0,
+  activeRuns: 0,
+  openRisks: 0,
+  pendingRecommendations: 0,
+  stages: [],
+  riskPoints: [],
   diagnosis: {
-    pointCode: "P-ROOF-03",
-    summary: "清漆二站成型空气偏高，且材料粘度接近上限，是 DOI 下降的主要相关因素。",
-    confidence: 0.87,
-    factors: [
-      { name: "清漆二站外成型空气", impact: 0.34, direction: "negative" },
-      { name: "清漆粘度", impact: 0.26, direction: "negative" },
-      { name: "清漆二站喷涂流量", impact: 0.18, direction: "positive" },
-    ],
+    pointCode: "",
+    summary: "暂无诊断结果",
+    confidence: 0,
+    factors: [],
   },
   recommendation: {
-    id: "rec-20260609-003",
-    status: "PENDING",
-    currentPrediction: 78.2,
-    expectedPrediction: 83.6,
-    predictedImprovement: 5.4,
-    actions: recommendationActions,
+    id: "",
+    status: "NONE",
+    currentPrediction: 0,
+    expectedPrediction: 0,
+    predictedImprovement: 0,
+    actions: [],
   },
 };
 
@@ -215,7 +204,7 @@ function mapApiDashboard(data: ApiDashboard): DashboardSnapshot {
 export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
   const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
   if (!apiUrl) {
-    return cloneFallbackDashboard("后端 API 地址未配置，当前展示演示快照。");
+    return cloneFallbackDashboard("后端 API 地址未配置，当前展示空状态。");
   }
 
   try {

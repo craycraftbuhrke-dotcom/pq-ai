@@ -21,7 +21,7 @@ def test_bulk_template_contains_import_headers() -> None:
 
 def test_bulk_import_csv_creates_and_upserts_factory() -> None:
     db = build_session()
-    csv_content = "\ufeffid,code,name,site_owner,remark,is_active\n,F99,九十九号工厂,陈工,初始,true\n"
+    csv_content = "\ufeffid,code,name,site_owner,remark,is_active\n,F99,TEST_FACTORY_99,TEST_OWNER,TEST_REMARK,true\n"
 
     created = import_resource(
         "master.factories",
@@ -32,9 +32,9 @@ def test_bulk_import_csv_creates_and_upserts_factory() -> None:
     )
     assert created["created"] == 1
     factory = db.query(Factory).filter_by(code="F99").one()
-    assert factory.name == "九十九号工厂"
+    assert factory.name == "TEST_FACTORY_99"
 
-    update_content = f"id,code,name,site_owner,remark,is_active\n{factory.id},F99,九十九号涂装工厂,李工,更新,false\n"
+    update_content = f"id,code,name,site_owner,remark,is_active\n{factory.id},F99,TEST_FACTORY_99_UPDATED,TEST_OWNER_2,TEST_REMARK_UPDATED,false\n"
     updated = import_resource(
         "master.factories",
         update_content.encode("utf-8"),
@@ -44,14 +44,14 @@ def test_bulk_import_csv_creates_and_upserts_factory() -> None:
     )
     assert updated["updated"] == 1
     db.refresh(factory)
-    assert factory.name == "九十九号涂装工厂"
+    assert factory.name == "TEST_FACTORY_99_UPDATED"
     assert factory.is_active is False
     db.close()
 
 
 def test_bulk_import_reports_row_errors_without_stopping_batch() -> None:
     db = build_session()
-    csv_content = "id,code,name,site_owner,remark,is_active\n,F98,九十八号工厂,陈工,,true\n,F,坏,陈工,,maybe\n"
+    csv_content = "id,code,name,site_owner,remark,is_active\n,F98,TEST_FACTORY_98,TEST_OWNER,,true\n,F,INVALID_FACTORY,TEST_OWNER,,maybe\n"
 
     result = import_resource(
         "master.factories",
@@ -71,7 +71,7 @@ def test_bulk_export_returns_excel_workbook() -> None:
     db = build_session()
     import_resource(
         "master.factories",
-        "id,code,name,site_owner,remark,is_active\n,F97,九十七号工厂,陈工,,true\n".encode(),
+        "id,code,name,site_owner,remark,is_active\n,F97,TEST_FACTORY_97,TEST_OWNER,,true\n".encode(),
         filename="factories.csv",
         mode="upsert",
         db=db,

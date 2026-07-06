@@ -67,29 +67,29 @@ def integration_event(endpoint_id: str, source_event_id: str, event_type: str, p
 def test_integration_inbox_processes_business_events_and_enforces_idempotency() -> None:
     db = build_session()
     factory = Factory(code="F01", name="一号工厂")
-    vehicle = VehicleModel(code="M01", name="车型一")
-    color = Color(code="C01", name="珍珠白", color_type="BASECOAT")
+    vehicle = VehicleModel(code="M01", name="TEST_MODEL_ONE")
+    color = Color(code="C01", name="TEST_COLOR_ONE", color_type="BASECOAT")
     db.add_all([factory, vehicle, color])
     db.commit()
     endpoint = create_endpoint(
         IntegrationEndpointCreate(
             code="MES-01",
-            name="MES 生产事件",
+            name="TEST_MES_ENDPOINT",
             system_type="MES",
         ),
         db,
     )
     payload = {
-        "run_no": "RUN-INT-001",
-        "body_no": "BODY-001",
+        "run_no": "TEST-RUN-INT-001",
+        "body_no": "TEST_BODY_ID",
         "factory_code": factory.code,
         "vehicle_model_code": vehicle.code,
         "color_code": color.code,
         "shift": "DAY",
         "started_at": datetime.now(UTC).isoformat(),
     }
-    processed = create_event(integration_event(endpoint.id, "MES-EVT-001", "MES_PRODUCTION_RUN_UPSERT", payload), db)
-    duplicate = create_event(integration_event(endpoint.id, "MES-EVT-001", "MES_PRODUCTION_RUN_UPSERT", payload), db)
+    processed = create_event(integration_event(endpoint.id, "TEST-MES-EVT-001", "MES_PRODUCTION_RUN_UPSERT", payload), db)
+    duplicate = create_event(integration_event(endpoint.id, "TEST-MES-EVT-001", "MES_PRODUCTION_RUN_UPSERT", payload), db)
     assert processed.status == "SUCCEEDED"
     assert duplicate.id == processed.id
     assert db.scalar(select(func.count()).select_from(ProductionRun)) == 1
@@ -217,7 +217,7 @@ def test_qms_robot_events_and_failed_event_replay() -> None:
         source_type="MANUAL",
     )
     run = ProductionRun(
-        run_no="RUN-INT-002",
+        run_no="TEST-RUN-INT-002",
         factory_id=factory.id,
         vehicle_model_id=vehicle.id,
         color_id=color.id,

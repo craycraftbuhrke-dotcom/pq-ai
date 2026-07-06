@@ -31,7 +31,6 @@ from app.schemas.common import (
     RecommendationVerification,
     RollbackExecutionCreate,
 )
-from app.services.demo import demo_recommendation, prediction_result
 
 router = APIRouter(prefix="/ai", tags=["ai-closed-loop"])
 
@@ -169,7 +168,10 @@ def _serialize_rollback_execution(rollback: ProgramRollbackExecution) -> dict:
 @router.post("/predictions")
 def predict(payload: PredictionRequest) -> dict:
     _validate_target_metrics(payload.target_metrics)
-    return prediction_result(payload.model_dump())
+    raise HTTPException(
+        status_code=410,
+        detail="旧版预测接口已禁用；请使用 /ai/models/{model_version_id}/predict 受治理模型接口",
+    )
 
 
 @router.get("/predictions")
@@ -214,19 +216,10 @@ def list_predictions(db: Session = Depends(get_db)) -> list[dict]:
 @router.post("/diagnoses")
 def diagnose(payload: DiagnosisRequest) -> dict:
     _validate_target_metrics([payload.observed_metric])
-    return {
-        "production_run_no": payload.production_run_no,
-        "measurement_point_code": payload.measurement_point_code,
-        "metric": payload.observed_metric,
-        "observed_value": payload.observed_value,
-        "confidence": 0.87,
-        "summary": "清漆二站外成型空气和材料粘度是本次质量风险的主要相关因素。",
-        "factors": [
-            {"parameter": "clearcoat_2_outer_air", "impact": 0.34, "direction": "negative"},
-            {"parameter": "clearcoat_viscosity", "impact": 0.26, "direction": "negative"},
-        ],
-        "is_demo_model": True,
-    }
+    raise HTTPException(
+        status_code=410,
+        detail="旧版诊断接口已禁用；请使用受治理模型产生的预测结果诊断接口",
+    )
 
 
 @router.get("/diagnoses")
@@ -254,11 +247,10 @@ def list_diagnoses(db: Session = Depends(get_db)) -> list[dict]:
 @router.post("/recommendations")
 def recommend(payload: RecommendationRequest) -> dict:
     _validate_target_metrics([payload.target_metric])
-    result = demo_recommendation()
-    result["production_run_no"] = payload.production_run_no
-    result["point_code"] = payload.measurement_point_code
-    result["target_metric"] = payload.target_metric
-    return result
+    raise HTTPException(
+        status_code=410,
+        detail="旧版推荐接口已禁用；请使用 /ai/models/{model_version_id}/recommend 受治理推荐接口",
+    )
 
 
 @router.get("/recommendations")
@@ -495,13 +487,6 @@ def approve_recommendation(
     payload: RecommendationApproval,
     db: Session = Depends(get_db),
 ) -> dict:
-    if recommendation_id == "rec-20260609-003":
-        result = demo_recommendation()
-        result["status"] = "APPROVED" if payload.approved else "REJECTED"
-        result["approved_by"] = payload.approved_by
-        result["approval_comment"] = payload.comment
-        return result
-
     check_fk(db, Recommendation, recommendation_id, label="推荐任务")
     recommendation = db.get(Recommendation, recommendation_id)
     if not recommendation:

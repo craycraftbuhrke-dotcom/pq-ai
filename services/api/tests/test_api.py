@@ -1,7 +1,10 @@
-from app.api.routes.ai import approve_recommendation, diagnose, predict
+from fastapi import HTTPException
+import pytest
+
+from app.api.routes.ai import diagnose, predict
 from app.api.routes.dashboard import get_dashboard
 from app.api.routes.health import health
-from app.schemas.common import DiagnosisRequest, PredictionRequest, RecommendationApproval
+from app.schemas.common import DiagnosisRequest, PredictionRequest
 
 
 def test_health_endpoint() -> None:
@@ -11,32 +14,28 @@ def test_health_endpoint() -> None:
 def test_dashboard_contract() -> None:
     payload = get_dashboard()
     assert len(payload["stages"]) == 5
-    assert payload["stages"][0]["station"] == "P1F1A1"
-    assert payload["recommendation"]["constraints_checked"] is True
+    assert payload["stages"][0]["station"] == ""
+    assert payload["recommendation"]["constraints_checked"] is False
 
 
-def test_prediction_diagnosis_and_approval_flow() -> None:
-    prediction = predict(
-        PredictionRequest(
-            production_run_no="RUN-001",
-            measurement_point_code="P-ROOF-03",
-            target_metrics=["doi"],
+def test_legacy_prediction_diagnosis_and_approval_routes_are_retired() -> None:
+    with pytest.raises(HTTPException) as prediction_error:
+        predict(
+            PredictionRequest(
+                production_run_no="TEST-RUN",
+                measurement_point_code="TEST-POINT",
+                target_metrics=["doi"],
+            )
         )
-    )
-    assert prediction["predictions"]["doi"]["value"] > 0
+    assert prediction_error.value.status_code == 410
 
-    diagnosis = diagnose(
-        DiagnosisRequest(
-            production_run_no="RUN-001",
-            measurement_point_code="P-ROOF-03",
-            observed_metric="doi",
-            observed_value=78.2,
+    with pytest.raises(HTTPException) as diagnosis_error:
+        diagnose(
+            DiagnosisRequest(
+                production_run_no="TEST-RUN",
+                measurement_point_code="TEST-POINT",
+                observed_metric="doi",
+                observed_value=78.2,
+            )
         )
-    )
-    assert diagnosis["confidence"] > 0.8
-
-    approval = approve_recommendation(
-        "rec-20260609-003",
-        RecommendationApproval(approved=True, approved_by="陈工", comment="受控试验批准"),
-    )
-    assert approval["status"] == "APPROVED"
+    assert diagnosis_error.value.status_code == 410

@@ -72,7 +72,7 @@ export function ModulePage({
       {source ? (
         <div className="freshness">
           <span className="live-dot" />
-          {source === "api" ? " API 实时数据" : " 演示快照"}
+          {source === "api" ? " API 实时数据" : " 空状态"}
         </div>
       ) : null}
       {notice ? (

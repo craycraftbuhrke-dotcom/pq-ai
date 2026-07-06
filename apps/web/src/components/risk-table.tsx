@@ -3,7 +3,7 @@
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 
-import type { RiskPoint } from "@/lib/demo-data";
+import type { RiskPoint } from "@/lib/ui-data";
 
 type RiskTableProps = {
   riskPoints: RiskPoint[];
@@ -11,7 +11,7 @@ type RiskTableProps = {
 };
 
 export function RiskTable({ riskPoints, onSelect }: RiskTableProps) {
-  const [selected, setSelected] = useState(riskPoints[0].code);
+  const [selected, setSelected] = useState(riskPoints[0]?.code ?? "");
 
   return (
     <section className="panel risk-panel">
@@ -20,7 +20,7 @@ export function RiskTable({ riskPoints, onSelect }: RiskTableProps) {
           <span className="eyebrow">POINT RISK</span>
           <h2>点位质量风险</h2>
         </div>
-        <button className="text-button">查看全部 38 个点位</button>
+        <button className="text-button">查看全部点位</button>
       </div>
       <div className="risk-table" role="table" aria-label="点位风险">
         <div className="risk-row risk-head" role="row">
@@ -30,7 +30,7 @@ export function RiskTable({ riskPoints, onSelect }: RiskTableProps) {
           <span>风险</span>
           <span />
         </div>
-        {riskPoints.map((point) => (
+        {riskPoints.length ? riskPoints.map((point) => (
           <button
             className={`risk-row ${selected === point.code ? "risk-row-selected" : ""}`}
             key={point.code}
@@ -59,7 +59,7 @@ export function RiskTable({ riskPoints, onSelect }: RiskTableProps) {
             </span>
             <ChevronRight aria-hidden="true" />
           </button>
-        ))}
+        )) : <div className="master-empty">暂无点位风险数据</div>}
       </div>
     </section>
   );

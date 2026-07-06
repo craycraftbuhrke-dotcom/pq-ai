@@ -8,7 +8,7 @@ import { useState, type ReactNode } from "react";
 import { navigationIcons } from "@/components/icons";
 import { ContextSelector } from "@/components/context-selector";
 import { useAuth } from "@/lib/auth-context";
-import { navItems } from "@/lib/demo-data";
+import { navItems } from "@/lib/ui-data";
 
 type AppShellProps = {
   children: ReactNode;

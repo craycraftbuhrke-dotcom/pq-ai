@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from secrets import token_urlsafe
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -31,7 +32,7 @@ def build_security_session() -> tuple[Session, str]:
             RolePermission(role_id=role.id, permission_id=permission.id),
         ]
     )
-    raw_key = "pq-test-quality-key"
+    raw_key = f"pq_{token_urlsafe(32)}"
     db.add(
         ApiKey(
             user_id=user.id,
@@ -46,26 +47,28 @@ def build_security_session() -> tuple[Session, str]:
 
 def test_api_key_authentication_resolves_roles_and_permissions() -> None:
     db, raw_key = build_security_session()
+    invalid_key = f"pq_{token_urlsafe(32)}"
     actor = authenticate_api_key(db, raw_key)
     assert actor is not None
     assert actor.username == "quality.user"
     assert actor.roles == ("QUALITY_ENGINEER",)
     assert actor.can("quality.write")
     assert not actor.can("security.manage")
-    assert authenticate_api_key(db, "wrong-key") is None
+    assert authenticate_api_key(db, invalid_key) is None
     db.close()
 
 
 def test_password_login_issues_and_revokes_user_session() -> None:
     db, _raw_key = build_security_session()
     user = db.query(AppUser).one()
-    user.password_hash = hash_password("valid-password")
+    raw_password = token_urlsafe(32)
+    user.password_hash = hash_password(raw_password)
     db.commit()
 
     login = login_with_password(
         db,
         "quality.user",
-        "valid-password",
+        raw_password,
         user_agent="pytest",
         client_ip="127.0.0.1",
     )
@@ -88,10 +91,12 @@ def test_password_login_issues_and_revokes_user_session() -> None:
 def test_failed_password_login_increments_counter() -> None:
     db, _raw_key = build_security_session()
     user = db.query(AppUser).one()
-    user.password_hash = hash_password("valid-password")
+    raw_password = token_urlsafe(32)
+    invalid_password = token_urlsafe(32)
+    user.password_hash = hash_password(raw_password)
     db.commit()
 
-    assert login_with_password(db, "quality.user", "wrong-password") is None
+    assert login_with_password(db, "quality.user", invalid_password) is None
     db.refresh(user)
     assert user.failed_login_count == 1
     db.close()

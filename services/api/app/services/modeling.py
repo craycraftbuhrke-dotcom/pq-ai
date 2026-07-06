@@ -795,11 +795,9 @@ def _factory_acceptance_evidence(
                     ModelApplicabilityScope.status != "INACTIVE",
                 )
             )
-        )
+    )
     dataset = db.get(DatasetSnapshot, model.dataset_snapshot_id) if model.dataset_snapshot_id else None
     allowed_types = ["FACTORY_APPROVED"]
-    if model.model_code.startswith("DEMO-"):
-        allowed_types.append("DEMO")
     details = []
     for factory_id in sorted({scope.factory_id for scope in scopes}):
         policy = db.scalar(

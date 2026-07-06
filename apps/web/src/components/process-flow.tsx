@@ -1,7 +1,7 @@
 import { ArrowRight, Gauge } from "lucide-react";
 
 import { StatusBadge } from "@/components/status-badge";
-import type { ProcessStage } from "@/lib/demo-data";
+import type { ProcessStage } from "@/lib/ui-data";
 
 type ProcessFlowProps = {
   stages: ProcessStage[];

@@ -98,14 +98,14 @@ def assert_delete_disabled(callable_, *args) -> None:
 
 def test_program_version_brush_parameter_and_contribution_crud() -> None:
     db = build_session()
-    factory = create_factory(FactoryCreate(code="F01", name="一号工厂"), db)
-    vehicle = create_vehicle_model(VehicleModelCreate(code="M01", name="车型一"), db)
-    color = create_color(ColorCreate(code="C01", name="珍珠白", color_type="BASECOAT"), db)
-    part = create_part(PartCreate(code="ROOF", name="车顶"), db)
+    factory = create_factory(FactoryCreate(code="F01", name="TEST_FACTORY_ONE"), db)
+    vehicle = create_vehicle_model(VehicleModelCreate(code="M01", name="TEST_MODEL_ONE"), db)
+    color = create_color(ColorCreate(code="C01", name="TEST_COLOR_ONE", color_type="BASECOAT"), db)
+    part = create_part(PartCreate(code="ROOF", name="TEST_PART_ONE"), db)
     point = create_measurement_point(
         MeasurementPointCreate(
             code="P01",
-            name="点位一",
+            name="TEST_POINT_ONE",
             vehicle_model_id=vehicle.id,
             part_id=part.id,
             quality_types=["ORANGE_PEEL"],

@@ -4,7 +4,7 @@ Assessment date: 2026-06-16. This is an engineering assessment against the appro
 
 ## Executive Conclusion
 
-PQ-AI is a functional, connected demonstration and a useful foundation for factory-data onboarding. Application-layer referential integrity, measurement reliability, explicit probes/MSA, 3C3B route governance, engineering issue tasks, Dürr trajectory/device lineage, governed material-result gates, supplier material submissions, contribution validation, model explanations, leakage-safe model acceptance, multi-axis validation evidence, model artifact registration, controlled-trial gating, approved constraint-source versions, rollback execution records, complete user authentication, CSV import wizard, model comparison, and program version diff tooling now protect the AI lifecycle, but the system is not yet ready for production process recommendations because real device/material file validation, validated deposition contribution, factory-specific configuration, automatic program rollback publishing, and sustained verification remain incomplete.
+PQ-AI is a functional, connected engineering prototype and a useful foundation for factory-data onboarding. Application-layer referential integrity, measurement reliability, explicit probes/MSA, 3C3B route governance, engineering issue tasks, Dürr trajectory/device lineage, governed material-result gates, supplier material submissions, contribution validation, model explanations, leakage-safe model acceptance, multi-axis validation evidence, model artifact registration, controlled-trial gating, approved constraint-source versions, rollback execution records, complete user authentication, CSV import wizard, model comparison, and program version diff tooling now protect the AI lifecycle, but the system is not yet ready for production process recommendations because real device/material file validation, validated deposition contribution, factory-specific configuration, automatic program rollback publishing, and sustained verification remain incomplete.
 
 Estimated overall maturity: **90% - governed engineering prototype / factory-data onboarding preparation**.
 
@@ -14,7 +14,7 @@ Estimated overall maturity: **90% - governed engineering prototype / factory-dat
 | --- | ---: | --- | --- |
 | Scope/domain model | 90% | Approved quality/process scope is enforced from API and integration ingress through 3C3B route versions, engineering tasks, v4 target-family feature snapshots and models | Broader governed feature registry and full legacy-data administration remain |
 | Program/robot/application | 82% | Governed robot/controller/atomizer identity, program-device configurations, trajectory checksums, path segments, actual executions, trajectory geometry records, target-family contribution versions/validations, program version diff, and rollback execution records | Real DXQ/PLC file adapters, real coordinates/orientation/trigger facts, deposition validation, trajectory/contribution visualization, and automatic program rollback publishing remain |
-| Materials | 76% | Governed characteristic definitions, method versions, units, specifications/effective periods, stage/target applicability, batch results, supplier submissions/issues, reliability, integration, UI, and feature lineage | Replace demo methods/units/specifications with approved factory/TDS/COA facts; add real pigment/effect/levelling fields and file adapters |
+| Materials | 76% | Governed characteristic definitions, method versions, units, specifications/effective periods, stage/target applicability, batch results, supplier submissions/issues, reliability, integration, UI, and feature lineage | Replace local placeholders with approved factory/TDS/COA facts; add real pigment/effect/levelling fields and file adapters |
 | Quality/instruments | 80% | Governed BYK/Fischer instruments, explicit probes, methods, references, calibrations, import profiles, repeats, MSA/GRR records, CSV batch import wizard and automatic reliability gate | Real device-file validation, uncertainty propagation and measurement-plan execution remain |
 | Data lineage/flow | 87% | Production run/point backbone, verified measurement/material gates, target-family contribution, trajectory execution, material result/specification lineage, and application-layer FK integrity on write endpoints | Real external-file lineage and validated contribution evidence remain |
 | AI modeling | 84% | Immutable datasets, independent validation, multi-axis grouped validation folds, registered model artifact hashes, versioned factory acceptance policies, exact applicability, statistical OOD blocking, model comparison, persisted inference evidence, prediction/diagnosis/recommendation and drift | Real factory policy configuration, richer uncertainty, stronger models, governed external artifact storage, and causal evidence |
@@ -27,7 +27,7 @@ Estimated overall maturity: **90% - governed engineering prototype / factory-dat
 
 - Catalog, API, integrations, seed data, feature aggregation, UI, and tests now enforce the approved boundary.
 - New approved snapshots use `point-features-v4-material-governed`; production-event context is retained for traceability but does not enter AI features.
-- Existing `point-features-v1` models are retained for lineage and retired; local demo data is safely converted and retrained.
+- Existing `point-features-v1` models are retained for lineage and retired; local validation data must be regenerated from approved inputs.
 - Runtime model guards prevent legacy or out-of-scope models from activation, prediction, diagnosis, and recommendation.
 - Residual work: add an administrator-facing legacy-data inventory and replace generic allowed JSON fields with a governed feature registry.
 
@@ -44,7 +44,7 @@ Estimated overall maturity: **90% - governed engineering prototype / factory-dat
 - All point rows for the same body/run remain in one split; the newest independent groups form the validation holdout. Models fit only `TRAIN`, report separate training and validation metrics, and use validation RMSE as the online effect-drift baseline.
 - New models remain `DRAFT`; activation is blocked until a human records an accepted decision after reviewing independent-validation evidence.
 - Training derives exact factory/model/color applicability contexts from the governed dataset and creates a statistical OOD blocking policy. Both remain pending until human acceptance; activation requires approved scope and policy.
-- Factory acceptance policies are versioned and source-backed. Acceptance and activation require every applicable factory to have an active target-metric policy and require the model to satisfy validation RMSE, validation R², and independent-group thresholds. Demo policies can authorize only demo models.
+- Factory acceptance policies are versioned and source-backed. Acceptance and activation require every applicable factory to have an active target-metric policy and require the model to satisfy validation RMSE, validation R², and independent-group thresholds.
 - Prediction and recommendation are blocked for unsupported contexts, missing model features, or excessive standardized feature shifts. Accepted predictions persist applicability and OOD evidence for diagnosis and audit.
 - Residual work: configure real factory-approved policies, add richer uncertainty, governed external artifact storage, stronger model families, and real factory-run acceptance.
 
@@ -76,13 +76,13 @@ Estimated overall maturity: **90% - governed engineering prototype / factory-dat
 
 - Characteristic definitions, method versions, canonical units, material specifications/effective periods, material-type/stage/target-family applicability, batch results, source lineage, and derived reliability are represented.
 - Only `VERIFIED` results measured no later than production start can enter approved features; missing required results block snapshot generation. Legacy viscosity/solids/free-form COA fields remain compatible but no longer bypass governance.
-- Residual work: replace demo placeholder methods, units, and specifications with approved factory/TDS/COA facts; add real pigment/effect/levelling characteristic mappings and material-system file adapters.
+- Residual work: replace local placeholder methods, units, and specifications with approved factory/TDS/COA facts; add real pigment/effect/levelling characteristic mappings and material-system file adapters.
 
 ## Completeness By System Layer
 
 ### Frontend And User Interaction
 
-The current frontend supports real CRUD and a demonstrable closed loop, but the interaction model is still data-table oriented. Production use requires:
+The current frontend supports real CRUD and a locally verifiable closed loop, but the interaction model is still data-table oriented. Production use requires:
 
 - A 3C2B context selector that always shows coating system, execution stage, factory/model/color, program/path version, material batch, and device.
 - Real device-file import wizard, field-profile preview, measurement-plan execution, uncertainty/MSA review, and expired-calibration work queue.
