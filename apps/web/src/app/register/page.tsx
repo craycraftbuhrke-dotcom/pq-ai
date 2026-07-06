@@ -62,7 +62,7 @@ export default function RegisterPage() {
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               placeholder="英文字母、数字、下划线"
-              pattern="^[A-Za-z0-9_.-]+$"
+              pattern="^[A-Za-z0-9_.\-]+$"
             />
           </label>
           <label className="form-field">

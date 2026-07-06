@@ -2,7 +2,8 @@ FROM comfyui-local:latest
 
 WORKDIR /app
 ENV NODE_ENV=production
-ENV PORT=3000
+# 前端容器监听端口，默认 80（nginx 惯例）
+ENV PORT=80
 ENV LISTEN_HOST=0.0.0.0
 COPY .runtime/node /usr/local/bin/node
 COPY .next/standalone ./
@@ -10,5 +11,5 @@ COPY .next/static ./apps/web/.next/static
 COPY public ./apps/web/public
 
 ENTRYPOINT []
-EXPOSE 3000
-CMD ["sh", "-c", "HOSTNAME=\"${LISTEN_HOST:-0.0.0.0}\" PORT=\"${PORT:-3000}\" node apps/web/server.js"]
+EXPOSE 80
+CMD ["sh", "-c", "HOSTNAME=\"${LISTEN_HOST:-0.0.0.0}\" PORT=\"${PORT:-80}\" node apps/web/server.js"]

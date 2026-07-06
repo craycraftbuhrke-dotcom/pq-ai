@@ -11,15 +11,20 @@ COPY --from=deps /workspace/node_modules ./node_modules
 COPY . .
 ARG NEXT_PUBLIC_API_URL=
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+# 认证总开关（build-time）：Next.js 会把 NEXT_PUBLIC_* 内联到浏览器 bundle。
+# 默认 false（测试期直接进入系统），未来测试通过后改为 true 恢复完整登录流程。
+ARG NEXT_PUBLIC_AUTH_ENABLED=false
+ENV NEXT_PUBLIC_AUTH_ENABLED=${NEXT_PUBLIC_AUTH_ENABLED}
 RUN npm run build:web
 
 FROM node:22-alpine AS runner
 WORKDIR /workspace
 ENV NODE_ENV=production
-ENV PORT=3000
+# 前端容器监听端口，默认 80（nginx 惯例）；K8s Deployment 可通过 env PORT 覆盖为 8080 等
+ENV PORT=80
 ENV LISTEN_HOST=0.0.0.0
 COPY --from=builder /workspace/apps/web/.next/standalone ./
 COPY --from=builder /workspace/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /workspace/apps/web/public ./apps/web/public
-EXPOSE 3000
-CMD ["sh", "-c", "HOSTNAME=\"${LISTEN_HOST:-0.0.0.0}\" PORT=\"${PORT:-3000}\" node apps/web/server.js"]
+EXPOSE 80
+CMD ["sh", "-c", "HOSTNAME=\"${LISTEN_HOST:-0.0.0.0}\" PORT=\"${PORT:-80}\" node apps/web/server.js"]

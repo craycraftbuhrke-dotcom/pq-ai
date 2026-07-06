@@ -23,13 +23,29 @@ type ApiActor = {
   auth_enabled: boolean;
 };
 
+// 认证总开关：兼容 API_AUTH_ENABLED（服务端）与 NEXT_PUBLIC_AUTH_ENABLED（客户端）。
+// 默认关闭 —— 测试期直接进入系统，未来正式投用改为 true 即可恢复完整登录流程。
+const authEnabledEnv =
+  process.env.API_AUTH_ENABLED === "true" ||
+  process.env.NEXT_PUBLIC_AUTH_ENABLED === "true";
+
 export const fallbackActor: CurrentActor = {
   userId: null,
   username: "anonymous",
   displayName: "未登录",
   roles: [],
   permissions: [],
-  authEnabled: process.env.API_AUTH_ENABLED === "true",
+  authEnabled: authEnabledEnv,
+};
+
+// 认证关闭时服务端组件展示的占位身份（避免"未登录"字样出现）
+const authDisabledActor: CurrentActor = {
+  userId: null,
+  username: "system",
+  displayName: "测试模式（认证已关闭）",
+  roles: ["SYSTEM"],
+  permissions: ["*"],
+  authEnabled: false,
 };
 
 type ApiErrorPayload = {
@@ -98,6 +114,10 @@ export async function apiRequestHeaders(request?: Request): Promise<HeadersInit>
 }
 
 export async function getCurrentActor(): Promise<CurrentActor> {
+  // 认证关闭：直接返回占位身份，不再请求后端 /auth/me，避免测试期无网络也能进入系统。
+  if (!authEnabledEnv) {
+    return authDisabledActor;
+  }
   const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
   if (!apiUrl) {
     return withConnectionError("后端 API 地址未配置");

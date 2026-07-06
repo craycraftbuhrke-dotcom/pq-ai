@@ -46,6 +46,20 @@ const ANON_ACTOR: AuthActor = {
   isAuthenticated: false,
 };
 
+// 认证总开关：与后端 API_AUTH_ENABLED / 前端 middleware 保持一致。
+// 关闭时前端不再请求 /auth/me、不再要求 pq_api_key cookie，直接以"测试模式"身份放行。
+const authEnabled = process.env.NEXT_PUBLIC_AUTH_ENABLED === "true";
+
+// 认证关闭时的"占位身份"，让 UI 里所有 isAuthenticated 判断视为已登录，展示"测试模式"字样。
+const AUTH_DISABLED_ACTOR: AuthActor = {
+  userId: null,
+  username: "system",
+  displayName: "测试模式（认证已关闭）",
+  roles: ["SYSTEM"],
+  permissions: ["*"],
+  isAuthenticated: true,
+};
+
 function getApiKeyFromCookie(): string {
   if (typeof document === "undefined") return "";
   const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
@@ -94,8 +108,9 @@ async function fetchActor(apiKey: string): Promise<AuthActor> {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [actor, setActor] = useState<AuthActor>(ANON_ACTOR);
-  const [loading, setLoading] = useState(true);
+  // 认证关闭时直接以 AUTH_DISABLED_ACTOR 初始化，跳过首屏 /auth/me 请求（避免加载卡顿）
+  const [actor, setActor] = useState<AuthActor>(authEnabled ? ANON_ACTOR : AUTH_DISABLED_ACTOR);
+  const [loading, setLoading] = useState(authEnabled);
   const [error, setError] = useState<string | null>(null);
 
   const setApiKey = useCallback(async (key: string) => {
@@ -217,6 +232,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // 认证关闭：不请求 /auth/me，保持 AUTH_DISABLED_ACTOR，直接结束加载。
+    if (!authEnabled) {
+      setLoading(false);
+      return;
+    }
     const apiKey = getApiKeyFromCookie();
     if (!apiKey) {
       const timer = window.setTimeout(() => setLoading(false), 0);

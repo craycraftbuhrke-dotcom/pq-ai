@@ -3,9 +3,12 @@
 import { Eye, EyeOff, LoaderCircle, LogIn } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { useAuth } from "@/lib/auth-context";
+
+// 认证总开关：与后端 API_AUTH_ENABLED / middleware / auth-context 保持一致
+const authEnabled = process.env.NEXT_PUBLIC_AUTH_ENABLED === "true";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,6 +17,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+
+  // 认证关闭时，直接跳回首页（避免用户手动访问 /login 卡在无用页面）
+  useEffect(() => {
+    if (!authEnabled) {
+      router.replace("/");
+    }
+  }, [router]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();

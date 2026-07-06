@@ -55,7 +55,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-- 管理端：http://localhost:3000
+- 管理端：http://localhost（默认 80 端口）
 - API：http://localhost:8000
 - OpenAPI：http://localhost:8000/docs
 
@@ -141,7 +141,7 @@ docker build -f dockerfile.frontend -t your-registry/pq-ai-frontend:TAG .
 docker build -f dockerfile.backend -t your-registry/pq-ai-backend:TAG .
 ```
 
-前端容器监听 `3000`，后端容器监听 `8000`。两个镜像启动时不会执行建库、建表、迁移或 seed；
+前端容器监听 `80`（nginx 惯例，如与宿主机冲突可通过 `FRONTEND_PORT=8080` 覆盖），后端容器监听 `8000`。两个镜像启动时不会执行建库、建表、迁移或 seed；
 MySQL schema 仍必须按 DBA 审批 SQL 人工执行。
 
 生产环境必须启用 `API_AUTH_ENABLED=true`。网页登录使用用户名/密码换取后端会话令牌，

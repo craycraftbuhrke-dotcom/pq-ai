@@ -22,7 +22,7 @@
 | --- | --- | --- | --- |
 | `NODE_ENV` | 是 | 否 | Node.js 运行模式，生产镜像应注入 `production`。 |
 | `LISTEN_HOST` | 否 | 否 | 前端容器监听地址，默认 `0.0.0.0`；启动时会映射为 Next.js standalone 读取的 `HOSTNAME`，避免容器平台自动 `HOSTNAME` 被解析成 Pod/容器名。 |
-| `PORT` | 是 | 否 | Next.js standalone server 监听端口。Compose 中由 `FRONTEND_PORT` 映射。 |
+| `PORT` | 是 | 否 | Next.js standalone server 监听端口，默认 `80`（nginx 惯例）；如与宿主机 80 冲突可设 `8080`。Compose 中由 `FRONTEND_PORT` 映射。 |
 | `API_URL` | 是 | 否 | 前端服务端访问 FastAPI 的内网地址，例如容器网络内的 API 地址。 |
 | `NEXT_PUBLIC_API_URL` | 是 | 否 | 浏览器可见的 API 地址；也会作为前端构建参数注入。不得包含密钥。 |
 | `API_KEY` | 是 | 是 | Next.js 服务端代理调用 FastAPI 的 API Key，不得使用 `NEXT_PUBLIC_` 前缀，不得下发到浏览器。 |
