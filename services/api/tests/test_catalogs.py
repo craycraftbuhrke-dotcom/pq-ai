@@ -2,8 +2,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.api.routes.process import seed_parameter_catalog
-from app.api.routes.quality import seed_quality_metric_catalog
+from app.services.catalog_seed import seed_parameter_catalog, seed_quality_metric_catalog
 from tests.schema_guard import create_transient_test_schema
 from app.domain.parameter_catalog import PARAMETER_CATALOG
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG

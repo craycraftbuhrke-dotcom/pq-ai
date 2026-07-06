@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.api.delete_policy import reject_physical_delete
 from app.core.referential_integrity import check_fk
 from app.db.session import get_db
-from app.domain.parameter_catalog import PARAMETER_CATALOG
 from app.domain.scope_policy import ScopeViolation, is_out_of_scope_name, require_approved_mapping
 from app.models.domain import (
     ActualParameter,
@@ -65,6 +64,7 @@ from app.schemas.process import (
     SprayProgramVersionRead,
     SprayProgramVersionUpdate,
 )
+from app.services.catalog_seed import seed_parameter_catalog
 
 router = APIRouter(tags=["process-data"])
 
@@ -158,20 +158,8 @@ def create_parameter_definition(
 
 
 @router.post("/parameter-definitions/seed-catalog")
-def seed_parameter_catalog(db: Session = Depends(get_db)) -> dict:
-    existing_codes = set(db.scalars(select(ParameterDefinition.code)))
-    resources = [
-        ParameterDefinition(**definition)
-        for definition in PARAMETER_CATALOG
-        if definition["code"] not in existing_codes
-    ]
-    db.add_all(resources)
-    db.commit()
-    return {
-        "catalog_size": len(PARAMETER_CATALOG),
-        "created": len(resources),
-        "existing": len(PARAMETER_CATALOG) - len(resources),
-    }
+def seed_parameter_catalog_endpoint(db: Session = Depends(get_db)) -> dict:
+    return seed_parameter_catalog(db)
 
 
 @router.get(

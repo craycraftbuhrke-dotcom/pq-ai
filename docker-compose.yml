@@ -31,6 +31,9 @@ services:
       API_CORS_ORIGINS: ${API_CORS_ORIGINS:?API_CORS_ORIGINS is required}
       # 认证总开关：默认 false（测试期直接放行）；正式投用前在 .env 中改为 true
       API_AUTH_ENABLED: ${API_AUTH_ENABLED:-false}
+      # 启动时自动预置系统级固定字典（质量指标定义 + 工艺参数定义）。默认开启，
+      # 幂等，失败不阻断进程；如需跳过（例如 DB 只读环境）显式设为 false。
+      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
       API_HOST: ${API_HOST:?API_HOST is required}
       API_PORT: ${API_PORT:?API_PORT is required}
     ports:

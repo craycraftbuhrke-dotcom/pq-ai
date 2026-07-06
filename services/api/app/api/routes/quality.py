@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from app.api.delete_policy import reject_physical_delete
 from app.core.referential_integrity import check_fk
 from app.db.session import get_db
-from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
 from app.domain.scope_policy import (
     APPROVED_METRIC_KEYS,
     APPROVED_QUALITY_TYPES,
@@ -39,6 +38,7 @@ from app.models.domain import (
     QualityStandard,
     VehicleModel,
 )
+from app.services.catalog_seed import seed_quality_metric_catalog
 from app.services.measurement_reliability import measurement_is_eligible
 from app.schemas.quality import (
     QualityMeasurementCreate,
@@ -520,24 +520,8 @@ def list_quality_metric_definitions(db: Session = Depends(get_db)) -> list[Quali
 
 
 @router.post("/metric-definitions/seed-catalog")
-def seed_quality_metric_catalog(db: Session = Depends(get_db)) -> dict:
-    existing = set(
-        db.execute(
-            select(QualityMetricDefinition.quality_type, QualityMetricDefinition.code)
-        ).all()
-    )
-    resources = [
-        QualityMetricDefinition(**definition)
-        for definition in QUALITY_METRIC_CATALOG
-        if (definition["quality_type"], definition["code"]) not in existing
-    ]
-    db.add_all(resources)
-    db.commit()
-    return {
-        "catalog_size": len(QUALITY_METRIC_CATALOG),
-        "created": len(resources),
-        "existing": len(QUALITY_METRIC_CATALOG) - len(resources),
-    }
+def seed_quality_metric_catalog_endpoint(db: Session = Depends(get_db)) -> dict:
+    return seed_quality_metric_catalog(db)
 
 
 @router.get("/measurements", response_model=list[QualityMeasurementRead])

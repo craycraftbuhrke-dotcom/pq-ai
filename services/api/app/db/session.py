@@ -5,7 +5,19 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 
-engine = create_engine(settings.database_url, pool_pre_ping=True, pool_recycle=1800)
+# MySQL 上给一个短的连接超时（3s），避免启动阶段 (lifespan/startup_seed) 因 MySQL
+# 尚未就绪而挂住 K8s startupProbe 的 failureThreshold 触发 CrashLoop。SQLite
+# 不支持该参数，因此按 URL scheme 条件添加。
+_connect_args: dict = {}
+if settings.database_url.startswith(("mysql", "mariadb")):
+    _connect_args["connect_timeout"] = 3
+
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    connect_args=_connect_args,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 FORBIDDEN_MYSQL_RUNTIME_PREFIXES = ("delete", "create", "drop", "alter", "truncate", "replace")

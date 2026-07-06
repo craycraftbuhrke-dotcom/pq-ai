@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     session_ttl_minutes: int = 12 * 60
     login_lockout_threshold: int = 5
     login_lockout_minutes: int = 15
+    # 启动时自动预置固定字典（质量指标定义 + 工艺参数定义）。默认开启；
+    # 若某次部署想跳过（例如 DB 只读、只做灰度），可通过环境变量 SEED_ON_STARTUP=false 关闭。
+    seed_on_startup: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
