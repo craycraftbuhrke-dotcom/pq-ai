@@ -21,3 +21,8 @@ build/
 .idea/
 .vscode/
 .DS_Store
+
+# 本地备份文件（SQL/ORM 审核合规改造过程的历史快照）
+*.bak
+*.bak2
+*.bak3

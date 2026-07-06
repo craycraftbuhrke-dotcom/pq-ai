@@ -136,7 +136,7 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
     request_id: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_user_id: Mapped[str | None] = logical_fk("app_user.id")
     actor_username: Mapped[str] = mapped_column(String(80), nullable=False)
-    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    action: Mapped[str] = mapped_column("action_type", String(100), nullable=False)
     http_method: Mapped[str] = mapped_column(String(12), nullable=False)
     path: Mapped[str] = mapped_column(String(500), nullable=False)
     resource_type: Mapped[str | None] = mapped_column(String(100))
@@ -278,7 +278,7 @@ class SprayProgramVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     spray_program_id: Mapped[str] = logical_fk("spray_program.id", nullable=False)
     version: Mapped[str] = mapped_column(String(32), nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default=VersionStatus.DRAFT, nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default=VersionStatus.DRAFT, nullable=False)
     source_type: Mapped[str] = mapped_column(String(24), default="MANUAL", nullable=False)
     is_master_sample: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(80))
@@ -310,7 +310,7 @@ class ProcessRoute(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "process_route"
     __table_args__ = (
         UniqueConstraint("factory_id", "route_code", "version", name="uk_process_route_ver"),
-        Index("idx_process_route_status", "factory_id", "status"),
+        Index("idx_process_route_status", "factory_id", "row_status"),
     )
 
     factory_id: Mapped[str] = logical_fk("factory.id", nullable=False)
@@ -318,7 +318,7 @@ class ProcessRoute(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     version: Mapped[str] = mapped_column(String(32), nullable=False)
     route_type: Mapped[str] = mapped_column(String(24), default="3C3B", nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     bake_strategy: Mapped[str | None] = mapped_column(String(120))
     source_uri: Mapped[str | None] = mapped_column(String(500))
     effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -359,13 +359,13 @@ class ProcessRouteApplicability(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "color_id",
             name="uk_route_model_color",
         ),
-        Index("idx_route_applicability_status", "process_route_id", "status"),
+        Index("idx_route_applicability_status", "process_route_id", "row_status"),
     )
 
     process_route_id: Mapped[str] = logical_fk("process_route.id", nullable=False)
     vehicle_model_id: Mapped[str | None] = logical_fk("vehicle_model.id")
     color_id: Mapped[str | None] = logical_fk("color.id")
-    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
     remark: Mapped[str | None] = mapped_column(Text)
 
 
@@ -393,7 +393,7 @@ class ParameterConstraintSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "parameter_definition_id",
             "factory_id",
             "process_stage",
-            "status",
+            "row_status",
         ),
     )
 
@@ -407,7 +407,7 @@ class ParameterConstraintSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     lower_limit: Mapped[float] = mapped_column(Float, nullable=False)
     upper_limit: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(String(24), nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     approved_by: Mapped[str | None] = mapped_column(String(80))
@@ -473,7 +473,7 @@ class DurrRobot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     model: Mapped[str] = mapped_column(String(120), nullable=False)
     serial_no: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     controller_software_version: Mapped[str | None] = mapped_column(String(80))
-    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
     source_uri: Mapped[str | None] = mapped_column(String(500))
     remark: Mapped[str | None] = mapped_column(Text)
 
@@ -490,7 +490,7 @@ class DurrApplicationController(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     model: Mapped[str] = mapped_column(String(120), nullable=False)
     serial_no: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     software_version: Mapped[str | None] = mapped_column(String(80))
-    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
     source_uri: Mapped[str | None] = mapped_column(String(500))
     remark: Mapped[str | None] = mapped_column(Text)
 
@@ -509,7 +509,7 @@ class DurrRotaryAtomizer(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     serial_no: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     bell_cup_type: Mapped[str | None] = mapped_column(String(120))
     bell_cup_code: Mapped[str | None] = mapped_column(String(120))
-    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
     source_uri: Mapped[str | None] = mapped_column(String(500))
     remark: Mapped[str | None] = mapped_column(Text)
 
@@ -529,7 +529,7 @@ class ProgramDeviceConfiguration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     atomizer_id: Mapped[str] = logical_fk("durr_rotary_atomizer.id", nullable=False)
     controller_id: Mapped[str] = logical_fk("durr_application_controller.id", nullable=False)
     configuration_version: Mapped[str] = mapped_column(String(32), nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     source_uri: Mapped[str | None] = mapped_column(String(500))
     approved_by: Mapped[str | None] = mapped_column(String(80))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -555,7 +555,7 @@ class TrajectoryProgram(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     checksum: Mapped[str] = mapped_column(String(128), nullable=False)
     coordinate_system: Mapped[str | None] = mapped_column(String(80))
     tcp_name: Mapped[str | None] = mapped_column(String(120))
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     source_uri: Mapped[str | None] = mapped_column(String(500))
     approved_by: Mapped[str | None] = mapped_column(String(80))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -603,8 +603,8 @@ class PointContributionVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     program_version_id: Mapped[str] = logical_fk("spray_program_version.id", nullable=False)
     target_family: Mapped[str] = mapped_column(String(32), nullable=False)
     version: Mapped[str] = mapped_column(String(32), nullable=False)
-    method: Mapped[str] = mapped_column(String(32), nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    method: Mapped[str] = mapped_column("method_code", String(32), nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     evidence_uri: Mapped[str | None] = mapped_column(String(500))
     approved_by: Mapped[str | None] = mapped_column(String(80))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -642,14 +642,14 @@ class ContributionValidationStudy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "contribution_validation"
     __table_args__ = (
         UniqueConstraint("contribution_version_id", "study_no", name="uk_contrib_val_study"),
-        Index("idx_contrib_val_status", "contribution_version_id", "status"),
+        Index("idx_contrib_val_status", "contribution_version_id", "row_status"),
     )
 
     contribution_version_id: Mapped[str] = logical_fk("point_contribution_version.id", nullable=False)
     study_no: Mapped[str] = mapped_column(String(64), nullable=False)
     target_family: Mapped[str] = mapped_column(String(32), nullable=False)
-    method: Mapped[str] = mapped_column(String(32), nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    method: Mapped[str] = mapped_column("method_code", String(32), nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     sample_count: Mapped[int | None] = mapped_column(Integer)
     validation_score: Mapped[float | None] = mapped_column(Float)
     evidence_uri: Mapped[str | None] = mapped_column(String(500))
@@ -663,7 +663,7 @@ class TrajectorySegmentGeometry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "trajectory_segment_geometry"
     __table_args__ = (
         UniqueConstraint("path_segment_id", "geometry_version", name="uk_path_segment_geometry"),
-        Index("idx_path_geometry_status", "path_segment_id", "status"),
+        Index("idx_path_geometry_status", "path_segment_id", "row_status"),
     )
 
     path_segment_id: Mapped[str] = logical_fk("trajectory_path_segment.id", nullable=False)
@@ -677,7 +677,7 @@ class TrajectorySegmentGeometry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     path_spacing: Mapped[float | None] = mapped_column(Float)
     overlap_ratio: Mapped[float | None] = mapped_column(Float)
     collision_risk_score: Mapped[float | None] = mapped_column(Float)
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     evidence_uri: Mapped[str | None] = mapped_column(String(500))
     remark: Mapped[str | None] = mapped_column(Text)
 
@@ -699,7 +699,7 @@ class FileImportProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "file_import_profile"
     __table_args__ = (
         UniqueConstraint("code", "version", name="uk_file_import_profile"),
-        Index("idx_file_import_profile_domain", "domain_type", "status"),
+        Index("idx_file_import_profile_domain", "domain_type", "row_status"),
     )
 
     code: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -711,7 +711,7 @@ class FileImportProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     field_mapping: Mapped[dict] = mapped_column(JSON, nullable=False)
     required_fields: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     validation_rules: Mapped[dict | None] = mapped_column(JSON)
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     source_uri: Mapped[str | None] = mapped_column(String(500))
     approved_by: Mapped[str | None] = mapped_column(String(80))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -722,7 +722,7 @@ class FileImportJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "file_import_job"
     __table_args__ = (
         UniqueConstraint("import_no", name="uk_file_import_job_no"),
-        Index("idx_file_import_job_status", "domain_type", "status", "submitted_at"),
+        Index("idx_file_import_job_status", "domain_type", "row_status", "submitted_at"),
     )
 
     import_no: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -731,7 +731,7 @@ class FileImportJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source_filename: Mapped[str] = mapped_column(String(240), nullable=False)
     source_uri: Mapped[str | None] = mapped_column(String(500))
     source_checksum: Mapped[str | None] = mapped_column(String(128))
-    status: Mapped[str] = mapped_column(String(24), default="PREVIEWED", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="PREVIEWED", nullable=False)
     row_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     valid_row_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     failed_row_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -748,7 +748,7 @@ class SupplierMaterialSubmission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "supplier_mat_submission"
     __table_args__ = (
         UniqueConstraint("submission_no", name="uk_supplier_mat_submission"),
-        Index("idx_supplier_mat_status", "supplier", "status", "submitted_at"),
+        Index("idx_supplier_mat_status", "supplier", "row_status", "submitted_at"),
     )
 
     submission_no: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -759,7 +759,7 @@ class SupplierMaterialSubmission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     document_type: Mapped[str] = mapped_column(String(32), nullable=False)
     source_uri: Mapped[str | None] = mapped_column(String(500))
     profile_id: Mapped[str | None] = logical_fk("file_import_profile.id")
-    status: Mapped[str] = mapped_column(String(24), default="SUBMITTED", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="SUBMITTED", nullable=False)
     submitted_by: Mapped[str] = mapped_column(String(80), nullable=False)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reviewed_by: Mapped[str | None] = mapped_column(String(80))
@@ -774,7 +774,7 @@ class SupplierMaterialIssue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "supplier_mat_issue"
     __table_args__ = (
         UniqueConstraint("issue_no", name="uk_supplier_mat_issue"),
-        Index("idx_supplier_issue_status", "status", "due_at"),
+        Index("idx_supplier_issue_status", "row_status", "due_at"),
     )
 
     issue_no: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -782,7 +782,7 @@ class SupplierMaterialIssue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     material_batch_id: Mapped[str | None] = logical_fk("material_batch.id")
     issue_type: Mapped[str] = mapped_column(String(48), nullable=False)
     severity: Mapped[str] = mapped_column(String(24), default="MEDIUM", nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="OPEN", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="OPEN", nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     containment_action: Mapped[str | None] = mapped_column(Text)
     supplier_response: Mapped[str | None] = mapped_column(Text)
@@ -801,7 +801,7 @@ class MaterialCharacteristicDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base
     canonical_unit: Mapped[str] = mapped_column(String(24), nullable=False)
     target_families: Mapped[list] = mapped_column(JSON, nullable=False)
     is_model_feature: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
 
 
@@ -819,7 +819,7 @@ class MaterialTestMethod(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     result_unit: Mapped[str] = mapped_column(String(24), nullable=False)
     procedure_uri: Mapped[str | None] = mapped_column(String(500))
     conditions: Mapped[dict | None] = mapped_column(JSON)
-    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
     remark: Mapped[str | None] = mapped_column(Text)
 
 
@@ -841,7 +841,7 @@ class MaterialSpecification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     version: Mapped[str] = mapped_column(String(32), nullable=False)
     lower_limit: Mapped[float | None] = mapped_column(Float)
     upper_limit: Mapped[float | None] = mapped_column(Float)
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     source_uri: Mapped[str | None] = mapped_column(String(500))
     effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -867,7 +867,7 @@ class MaterialCharacteristicApplicability(UUIDPrimaryKeyMixin, TimestampMixin, B
     process_stage: Mapped[str] = mapped_column(String(32), nullable=False)
     target_family: Mapped[str] = mapped_column(String(32), nullable=False)
     is_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(80))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     remark: Mapped[str | None] = mapped_column(Text)
@@ -932,7 +932,7 @@ class ProductionStageRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     program_version_id: Mapped[str] = logical_fk("spray_program_version.id", nullable=False)
     material_batch_id: Mapped[str | None] = logical_fk("material_batch.id")
     actual_parameters: Mapped[dict | None] = mapped_column(JSON)
-    status: Mapped[str] = mapped_column(String(24), default="COMPLETED", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="COMPLETED", nullable=False)
 
 
 class ProductionDeviceExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -947,7 +947,7 @@ class ProductionDeviceExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     executed_checksum: Mapped[str] = mapped_column(String(128), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    status: Mapped[str] = mapped_column(String(24), default="COMPLETED", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="COMPLETED", nullable=False)
     source_system: Mapped[str | None] = mapped_column(String(80))
     deviation_details: Mapped[dict | None] = mapped_column(JSON)
 
@@ -998,7 +998,7 @@ class MeasurementInstrument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     firmware_version: Mapped[str | None] = mapped_column(String(64))
     supported_quality_types: Mapped[list] = mapped_column(JSON, nullable=False)
     calibration_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
     remark: Mapped[str | None] = mapped_column(Text)
 
 
@@ -1006,7 +1006,7 @@ class MeasurementProbe(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "measurement_probe"
     __table_args__ = (
         UniqueConstraint("instrument_id", "code", name="uk_instrument_probe_code"),
-        Index("idx_measurement_probe_status", "instrument_id", "status"),
+        Index("idx_measurement_probe_status", "instrument_id", "row_status"),
     )
 
     instrument_id: Mapped[str] = logical_fk("measurement_instrument.id", nullable=False)
@@ -1017,7 +1017,7 @@ class MeasurementProbe(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     substrate_type: Mapped[str | None] = mapped_column(String(80))
     geometry_class: Mapped[str | None] = mapped_column(String(80))
     layer_scope: Mapped[str | None] = mapped_column(String(80))
-    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
     valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     remark: Mapped[str | None] = mapped_column(Text)
@@ -1055,7 +1055,7 @@ class MeasurementReferenceStandard(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reference_values: Mapped[dict | None] = mapped_column(JSON)
-    status: Mapped[str] = mapped_column(String(24), default="ACTIVE", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
     remark: Mapped[str | None] = mapped_column(Text)
 
 
@@ -1258,7 +1258,7 @@ class DatasetSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     split_strategy: Mapped[str] = mapped_column(String(48), nullable=False)
     group_key: Mapped[str] = mapped_column(String(32), nullable=False)
     holdout_ratio: Mapped[float] = mapped_column(Float, nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="BUILT", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="BUILT", nullable=False)
     sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
     group_count: Mapped[int] = mapped_column(Integer, nullable=False)
     train_sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -1312,7 +1312,7 @@ class ModelVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     evaluation_metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
     training_sample_count: Mapped[int] = mapped_column(default=0, nullable=False)
     trained_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    status: Mapped[str] = mapped_column(String(24), default=VersionStatus.DRAFT, nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default=VersionStatus.DRAFT, nullable=False)
 
 
 class ModelValidationFold(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -1324,7 +1324,7 @@ class ModelValidationFold(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "fold_key",
             name="uk_model_validation_fold",
         ),
-        Index("idx_model_validation_axis", "model_version_id", "validation_axis", "status"),
+        Index("idx_model_validation_axis", "model_version_id", "validation_axis", "row_status"),
     )
 
     model_version_id: Mapped[str] = logical_fk("model_version.id", nullable=False)
@@ -1336,7 +1336,7 @@ class ModelValidationFold(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     train_group_count: Mapped[int] = mapped_column(Integer, nullable=False)
     validation_group_count: Mapped[int] = mapped_column(Integer, nullable=False)
     metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(32), nullable=False)
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -1348,7 +1348,7 @@ class ModelArtifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "artifact_type",
             name="uk_model_artifact_type",
         ),
-        Index("idx_model_artifact_status", "model_version_id", "status"),
+        Index("idx_model_artifact_status", "model_version_id", "row_status"),
     )
 
     model_version_id: Mapped[str] = logical_fk("model_version.id", nullable=False)
@@ -1357,7 +1357,7 @@ class ModelArtifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     storage_backend: Mapped[str] = mapped_column(String(32), default="MYSQL", nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     metadata_payload: Mapped[dict] = mapped_column(JSON, nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="REGISTERED", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="REGISTERED", nullable=False)
     created_by: Mapped[str] = mapped_column(String(80), default="system", nullable=False)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     remark: Mapped[str | None] = mapped_column(Text)
@@ -1389,14 +1389,14 @@ class ModelApplicabilityScope(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "color_id",
             name="uk_model_applicability_context",
         ),
-        Index("idx_model_applicability_status", "model_version_id", "status"),
+        Index("idx_model_applicability_status", "model_version_id", "row_status"),
     )
 
     model_version_id: Mapped[str] = logical_fk("model_version.id", nullable=False)
     factory_id: Mapped[str] = logical_fk("factory.id", nullable=False)
     vehicle_model_id: Mapped[str] = logical_fk("vehicle_model.id", nullable=False)
     color_id: Mapped[str] = logical_fk("color.id", nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="PENDING", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="PENDING", nullable=False)
     source: Mapped[str] = mapped_column(String(32), default="DATASET_DERIVED", nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(80))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1413,8 +1413,8 @@ class ModelOodPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     max_abs_standardized_shift: Mapped[float] = mapped_column(Float, nullable=False)
     max_outlier_feature_ratio: Mapped[float] = mapped_column(Float, nullable=False)
     min_feature_completeness: Mapped[float] = mapped_column(Float, nullable=False)
-    action: Mapped[str] = mapped_column(String(24), default="BLOCK", nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="PENDING", nullable=False)
+    action: Mapped[str] = mapped_column("action_type", String(24), default="BLOCK", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="PENDING", nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(80))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     remark: Mapped[str | None] = mapped_column(Text)
@@ -1428,7 +1428,7 @@ class ModelAcceptancePolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "idx_model_accept_policy_match",
             "factory_id",
             "target_metric",
-            "status",
+            "row_status",
         ),
     )
 
@@ -1441,7 +1441,7 @@ class ModelAcceptancePolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     min_validation_r2: Mapped[float] = mapped_column(Float, nullable=False)
     min_train_groups: Mapped[int] = mapped_column(Integer, nullable=False)
     min_validation_groups: Mapped[int] = mapped_column(Integer, nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     source_uri: Mapped[str] = mapped_column(String(500), nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(80))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1489,7 +1489,7 @@ class DiagnosisResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class Recommendation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "recommendation"
-    __table_args__ = (Index("idx_recommendation_status", "status", "created_at"),)
+    __table_args__ = (Index("idx_recommendation_status", "row_status", "created_at"),)
 
     recommendation_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     production_run_id: Mapped[str] = logical_fk("production_run.id", nullable=False)
@@ -1499,7 +1499,7 @@ class Recommendation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     diagnosis_summary: Mapped[str] = mapped_column(Text, nullable=False)
     predicted_improvement: Mapped[float] = mapped_column(Float, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
-    status: Mapped[str] = mapped_column(
+    status: Mapped[str] = mapped_column("row_status", 
         String(24), default=RecommendationStatus.PENDING, nullable=False
     )
     model_version: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -1536,7 +1536,7 @@ class ControlledTrial(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("trial_no", name="uk_controlled_trial_no"),
         UniqueConstraint("recommendation_id", name="uk_trial_recommendation"),
-        Index("idx_controlled_trial_status", "status", "created_at"),
+        Index("idx_controlled_trial_status", "row_status", "created_at"),
     )
 
     recommendation_id: Mapped[str] = logical_fk("recommendation.id", nullable=False)
@@ -1544,22 +1544,132 @@ class ControlledTrial(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     production_run_id: Mapped[str] = logical_fk("production_run.id", nullable=False)
     measurement_point_id: Mapped[str] = logical_fk("measurement_point.id", nullable=False)
     target_metric: Mapped[str] = mapped_column(String(64), nullable=False)
-    hypothesis: Mapped[str] = mapped_column(Text, nullable=False)
     evidence_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    expected_outcome: Mapped[str] = mapped_column(Text, nullable=False)
-    risk_assessment: Mapped[str] = mapped_column(Text, nullable=False)
-    rollback_plan: Mapped[str] = mapped_column(Text, nullable=False)
-    sustained_observation_plan: Mapped[str] = mapped_column(Text, nullable=False)
+    # 计划阶段文档：合并 hypothesis / expected_outcome / risk_assessment / rollback_plan / sustained_observation_plan
+    plan_document: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     constraint_evidence: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="PLANNED", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="PLANNED", nullable=False)
     requested_by: Mapped[str] = mapped_column(String(80), nullable=False)
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(80))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    approval_comment: Mapped[str | None] = mapped_column(Text)
+    # 执行阶段文档：合并 approval_comment / completion_summary
+    execution_document: Mapped[dict | None] = mapped_column(JSON)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    completion_summary: Mapped[str | None] = mapped_column(Text)
+
+    # ---- 业务字段兼容层：把 plan_document / execution_document 展平为 7 个字段 ----
+    # 保持业务代码、Pydantic Schema、API 契约、前端字段名 100% 不变
+    _PLAN_FIELDS = (
+        "hypothesis",
+        "expected_outcome",
+        "risk_assessment",
+        "rollback_plan",
+        "sustained_observation_plan",
+    )
+    _EXECUTION_FIELDS = ("approval_comment", "completion_summary")
+
+    def __init__(self, **kwargs):
+        # 允许调用方以 hypothesis=... / expected_outcome=... 等平铺关键字构造对象，
+        # 内部合并到 plan_document / execution_document 两个 JSON 列。
+        plan_doc = dict(kwargs.pop("plan_document", None) or {})
+        for field in self._PLAN_FIELDS:
+            if field in kwargs:
+                value = kwargs.pop(field)
+                plan_doc[field] = value if value is not None else ""
+        exec_doc = dict(kwargs.pop("execution_document", None) or {})
+        for field in self._EXECUTION_FIELDS:
+            if field in kwargs:
+                value = kwargs.pop(field)
+                if value is None:
+                    exec_doc.pop(field, None)
+                else:
+                    exec_doc[field] = value
+        if plan_doc:
+            kwargs["plan_document"] = plan_doc
+        if exec_doc:
+            kwargs["execution_document"] = exec_doc
+        super().__init__(**kwargs)
+
+    def _plan_get(self, key: str) -> str:
+        doc = self.plan_document or {}
+        value = doc.get(key)
+        return value if value is not None else ""
+
+    def _plan_set(self, key: str, value: str | None) -> None:
+        doc = dict(self.plan_document or {})
+        doc[key] = value if value is not None else ""
+        self.plan_document = doc
+
+    def _exec_get(self, key: str) -> str | None:
+        doc = self.execution_document or {}
+        return doc.get(key)
+
+    def _exec_set(self, key: str, value: str | None) -> None:
+        doc = dict(self.execution_document or {})
+        if value is None:
+            doc.pop(key, None)
+        else:
+            doc[key] = value
+        self.execution_document = doc if doc else None
+
+    # 计划阶段 5 字段（NOT NULL 语义，缺失时返回 ""）
+    @property
+    def hypothesis(self) -> str:
+        return self._plan_get("hypothesis")
+
+    @hypothesis.setter
+    def hypothesis(self, value: str | None) -> None:
+        self._plan_set("hypothesis", value)
+
+    @property
+    def expected_outcome(self) -> str:
+        return self._plan_get("expected_outcome")
+
+    @expected_outcome.setter
+    def expected_outcome(self, value: str | None) -> None:
+        self._plan_set("expected_outcome", value)
+
+    @property
+    def risk_assessment(self) -> str:
+        return self._plan_get("risk_assessment")
+
+    @risk_assessment.setter
+    def risk_assessment(self, value: str | None) -> None:
+        self._plan_set("risk_assessment", value)
+
+    @property
+    def rollback_plan(self) -> str:
+        return self._plan_get("rollback_plan")
+
+    @rollback_plan.setter
+    def rollback_plan(self, value: str | None) -> None:
+        self._plan_set("rollback_plan", value)
+
+    @property
+    def sustained_observation_plan(self) -> str:
+        return self._plan_get("sustained_observation_plan")
+
+    @sustained_observation_plan.setter
+    def sustained_observation_plan(self, value: str | None) -> None:
+        self._plan_set("sustained_observation_plan", value)
+
+    # 执行阶段 2 字段（可空）
+    @property
+    def approval_comment(self) -> str | None:
+        return self._exec_get("approval_comment")
+
+    @approval_comment.setter
+    def approval_comment(self, value: str | None) -> None:
+        self._exec_set("approval_comment", value)
+
+    @property
+    def completion_summary(self) -> str | None:
+        return self._exec_get("completion_summary")
+
+    @completion_summary.setter
+    def completion_summary(self, value: str | None) -> None:
+        self._exec_set("completion_summary", value)
 
 
 class ProgramRollbackExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -1567,7 +1677,7 @@ class ProgramRollbackExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("controlled_trial_id", name="uk_rollback_controlled_trial"),
         UniqueConstraint("rollback_no", name="uk_program_rollback_no"),
-        Index("idx_program_rollback_status", "status", "executed_at"),
+        Index("idx_program_rollback_status", "row_status", "executed_at"),
     )
 
     rollback_no: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -1578,7 +1688,7 @@ class ProgramRollbackExecution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     execution_note: Mapped[str | None] = mapped_column(Text)
     executed_by: Mapped[str] = mapped_column(String(80), nullable=False)
     executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="EXECUTED", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="EXECUTED", nullable=False)
     action_snapshot: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     verified_by: Mapped[str | None] = mapped_column(String(80))
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1605,14 +1715,14 @@ class QualityIssueTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "quality_issue_task"
     __table_args__ = (
         UniqueConstraint("task_no", name="uk_quality_issue_task_no"),
-        Index("idx_quality_issue_status", "status", "severity", "created_at"),
+        Index("idx_quality_issue_status", "row_status", "severity", "created_at"),
         Index("idx_quality_issue_context", "factory_id", "vehicle_model_id", "color_id"),
     )
 
     task_no: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(String(180), nullable=False)
     task_type: Mapped[str] = mapped_column(String(32), default="QUALITY_ISSUE", nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="OPEN", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="OPEN", nullable=False)
     severity: Mapped[str] = mapped_column(String(24), default="MEDIUM", nullable=False)
     factory_id: Mapped[str | None] = logical_fk("factory.id")
     vehicle_model_id: Mapped[str | None] = logical_fk("vehicle_model.id")
@@ -1672,7 +1782,7 @@ class QualityIssueComment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     task_id: Mapped[str] = logical_fk("quality_issue_task.id", nullable=False)
     author: Mapped[str] = mapped_column(String(80), nullable=False)
-    role: Mapped[str | None] = mapped_column(String(64))
+    role: Mapped[str | None] = mapped_column("role_code", String(64))
     comment_type: Mapped[str] = mapped_column(String(32), default="COMMENT", nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -1681,7 +1791,7 @@ class EngineeringKnowledgeEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "eng_knowledge_entry"
     __table_args__ = (
         UniqueConstraint("entry_code", "version", name="uk_eng_knowledge_entry"),
-        Index("idx_eng_knowledge_target", "target_quality_type", "metric_code", "status"),
+        Index("idx_eng_knowledge_target", "target_quality_type", "metric_code", "row_status"),
     )
 
     entry_code: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -1695,7 +1805,7 @@ class EngineeringKnowledgeEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     recommended_checks: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     related_parameters: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     evidence_level: Mapped[str] = mapped_column(String(32), default="RULE", nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="DRAFT", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="DRAFT", nullable=False)
     source_uri: Mapped[str | None] = mapped_column(String(500))
     created_by: Mapped[str] = mapped_column(String(80), nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(80))
@@ -1739,7 +1849,7 @@ class IntegrationEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "integration_event"
     __table_args__ = (
         UniqueConstraint("endpoint_id", "source_event_id", name="uk_endpoint_source_event"),
-        Index("idx_integration_status_time", "status", "created_at"),
+        Index("idx_integration_status_time", "row_status", "created_at"),
     )
 
     event_no: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
@@ -1747,7 +1857,7 @@ class IntegrationEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source_event_id: Mapped[str] = mapped_column(String(160), nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     direction: Mapped[str] = mapped_column(String(24), default="INBOUND", nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="PENDING", nullable=False)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="PENDING", nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     mapped_payload: Mapped[dict | None] = mapped_column(JSON)
     attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
