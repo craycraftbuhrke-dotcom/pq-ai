@@ -20,6 +20,7 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
+import { useModalDismiss } from "@/lib/use-modal-dismiss";
 
 type TabKey =
   | "issues"
@@ -379,6 +380,12 @@ export function EngineeringWorkspace() {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  const closeModal = useCallback(() => {
+    if (submitting) return;
+    setModalOpen(false);
+  }, [submitting]);
+  useModalDismiss({ open: modalOpen, onClose: closeModal, busy: submitting });
+
   const config = tabs[active];
   const EmptyIcon = config.icon;
   const selectedTask = useMemo(() => data.issues.find((item) => item.id === selectedTaskId) ?? null, [data.issues, selectedTaskId]);
@@ -734,15 +741,15 @@ export function EngineeringWorkspace() {
       </section>
 
       {modalOpen ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => !submitting && setModalOpen(false)}>
+        <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}>
           <section className="modal-card quality-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-heading">
               <div>
                 <span className="eyebrow">ENGINEERING WORKFLOW</span>
                 <h2>新建{config.bulkLabel}</h2>
               </div>
-              <button className="icon-button" onClick={() => setModalOpen(false)} aria-label="关闭">
-                <X />
+              <button className="icon-button" onClick={closeModal} aria-label="关闭">
+                <X aria-hidden="true" />
               </button>
             </div>
             <form onSubmit={submit}>
@@ -755,10 +762,10 @@ export function EngineeringWorkspace() {
                 ))}
               </div>
               <div className="modal-actions">
-                <button type="button" className="button button-secondary" onClick={() => setModalOpen(false)}>取消</button>
+                <button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button>
                 <button className="button button-primary" disabled={submitting}>
-                  {submitting ? <LoaderCircle className="spin" /> : null}
-                  保存到 MySQL
+                  {submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}
+                  {submitting ? "正在保存" : "保存到 MySQL"}
                 </button>
               </div>
             </form>

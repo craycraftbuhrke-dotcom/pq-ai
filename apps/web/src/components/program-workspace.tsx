@@ -20,6 +20,7 @@ import { DurrTrajectoryPanel } from "@/components/durr-trajectory-panel";
 import { VersionDiffPanel } from "@/components/version-diff-panel";
 import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
 import { useAuth } from "@/lib/auth-context";
+import { useModalDismiss } from "@/lib/use-modal-dismiss";
 
 type Resource = { id: string; code: string; name: string };
 type Factory = Resource;
@@ -149,6 +150,12 @@ export function ProgramWorkspace() {
   const [notice, setNotice] = useState("");
   const [modal, setModal] = useState<ModalState | null>(null);
   const [form, setForm] = useState<FormState>({});
+
+  const closeModal = useCallback(() => {
+    if (submitting) return;
+    setModal(null);
+  }, [submitting]);
+  useModalDismiss({ open: modal !== null, onClose: closeModal, busy: submitting });
 
   const selectedProgram = programs.find((item) => item.id === selectedProgramId);
   const selectedVersion = versions.find((item) => item.id === selectedVersionId);
@@ -611,12 +618,12 @@ export function ProgramWorkspace() {
       </section> : workspaceTab === "durr" ? <section className="panel"><DurrTrajectoryPanel /></section> : <section className="panel"><VersionDiffPanel versions={versions} programId={selectedProgramId} /></section>}
 
       {modal ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => !submitting && setModal(null)}>
+        <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}>
           <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="program-modal-title" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-heading"><div><span className="eyebrow">{modal.record ? "EDIT" : "CREATE"}</span><h2 id="program-modal-title">{modal.record ? "编辑" : "新建"}{modalTitle(modal.kind)}</h2></div><button className="icon-button" onClick={() => setModal(null)} aria-label="关闭"><X /></button></div>
+            <div className="modal-heading"><div><span className="eyebrow">{modal.record ? "EDIT" : "CREATE"}</span><h2 id="program-modal-title">{modal.record ? "编辑" : "新建"}{modalTitle(modal.kind)}</h2></div><button className="icon-button" onClick={closeModal} aria-label="关闭"><X aria-hidden="true" /></button></div>
             <form onSubmit={(event) => void submitModal(event)}>
               <div className="form-grid">{renderFields(modal.kind, form, setForm, { factories, vehicleModels, colors, parts, points, definitions })}</div>
-              <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => setModal(null)} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div>
+              <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div>
             </form>
           </section>
         </div>

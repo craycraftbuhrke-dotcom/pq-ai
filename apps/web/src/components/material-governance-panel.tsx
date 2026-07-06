@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
 import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
+import { useModalDismiss } from "@/lib/use-modal-dismiss";
 
 type Kind = "definitions" | "methods" | "specifications" | "applicabilities" | "results";
 type FormState = Record<string, string | boolean>;
@@ -106,6 +107,12 @@ export function MaterialGovernancePanel() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
+
+  const closeModal = useCallback(() => {
+    if (submitting) return;
+    setModal(null);
+  }, [submitting]);
+  useModalDismiss({ open: modal !== null, onClose: closeModal, busy: submitting });
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -210,7 +217,7 @@ export function MaterialGovernancePanel() {
         </table>
         {!resources[kind].length ? <div className="large-empty"><FlaskConical />暂无{kindName(kind)}，自由 COA 字段不会进入批准 AI 特征。</div> : null}
       </div>
-      {modal ? <div className="modal-backdrop" onMouseDown={() => !submitting && setModal(null)}><section className="modal-card quality-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">GOVERNED MATERIAL CHARACTERISTICS</span><h2>{modal === "new" ? "新建" : "编辑"}{kindName(kind)}</h2></div><button className="icon-button" onClick={() => setModal(null)}><X /></button></div><form onSubmit={submit}><div className="form-grid">{renderFields(kind, form, setForm, resources, materials)}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setModal(null)}>取消</button><button className="button button-primary" disabled={submitting}>{submitting ? <LoaderCircle className="spin" /> : null}保存到 MySQL</button></div></form></section></div> : null}
+      {modal ? <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}><section className="modal-card quality-modal" role="dialog" aria-modal="true" aria-labelledby="material-governance-modal-title" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">GOVERNED MATERIAL CHARACTERISTICS</span><h2 id="material-governance-modal-title">{modal === "new" ? "新建" : "编辑"}{kindName(kind)}</h2></div><button className="icon-button" onClick={closeModal} aria-label="关闭"><X aria-hidden="true" /></button></div><form onSubmit={submit}><div className="form-grid">{renderFields(kind, form, setForm, resources, materials)}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div></form></section></div> : null}
     </div>
   );
 }

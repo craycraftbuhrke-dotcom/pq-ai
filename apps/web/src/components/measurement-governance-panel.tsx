@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
 import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
+import { useModalDismiss } from "@/lib/use-modal-dismiss";
 
 type Kind = "instruments" | "methods" | "references" | "calibrations" | "import-profiles";
 type FormState = Record<string, string | boolean>;
@@ -101,6 +102,12 @@ export function MeasurementGovernancePanel() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
+
+  const closeModal = useCallback(() => {
+    if (submitting) return;
+    setModal(null);
+  }, [submitting]);
+  useModalDismiss({ open: modal !== null, onClose: closeModal, busy: submitting });
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -199,7 +206,7 @@ export function MeasurementGovernancePanel() {
         </table>
         {!rows.length ? <div className="large-empty"><ShieldCheck />暂无{kindLabels[kind]}，可靠性门禁会将相关测量标记为未验证</div> : null}
       </div>
-      {modal ? <div className="modal-backdrop" role="presentation" onMouseDown={() => !submitting && setModal(null)}><section className="modal-card quality-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">MEASUREMENT GOVERNANCE</span><h2>{modal === "new" ? "新建" : "编辑"}{kindLabels[kind]}</h2></div><button className="icon-button" onClick={() => setModal(null)} aria-label="关闭"><X /></button></div><form onSubmit={submit}><div className="form-grid">{renderFields(kind, form, setForm, resources)}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setModal(null)}>取消</button><button className="button button-primary" disabled={submitting}>{submitting ? <LoaderCircle className="spin" /> : null}保存到 MySQL</button></div></form></section></div> : null}
+      {modal ? <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}><section className="modal-card quality-modal" role="dialog" aria-modal="true" aria-labelledby="measurement-governance-modal-title" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">MEASUREMENT GOVERNANCE</span><h2 id="measurement-governance-modal-title">{modal === "new" ? "新建" : "编辑"}{kindLabels[kind]}</h2></div><button className="icon-button" onClick={closeModal} aria-label="关闭"><X aria-hidden="true" /></button></div><form onSubmit={submit}><div className="form-grid">{renderFields(kind, form, setForm, resources)}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div></form></section></div> : null}
     </div>
   );
 }

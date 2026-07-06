@@ -13,6 +13,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
 import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
+import { useModalDismiss } from "@/lib/use-modal-dismiss";
 
 type ResourceKey =
   | "factories"
@@ -427,6 +428,8 @@ export function MasterDataWorkspace() {
     setEditing(null);
   }
 
+  useModalDismiss({ open: modalMode !== null, onClose: closeModal, busy: submitting });
+
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
@@ -610,7 +613,7 @@ export function MasterDataWorkspace() {
               const relation = relationConfigs[activeRelation];
               const leftId = record[relation.leftKey as keyof RelationRecord] as string | undefined;
               const rightId = record[relation.rightKey as keyof RelationRecord] as string | undefined;
-              return <div className="relation-row" key={record.id}><span>{relationName(relation.left, leftId)}</span><span>{relationName(relation.right, rightId)}</span><span>{activeRelation === "measurement-group-points" ? `顺序 ${record.sequence_no ?? 0}` : record.is_active ? "启用" : "停用"}</span><span><button className="icon-button icon-button-danger" onClick={() => void deleteRelation(record)}><Trash2 /></button></span></div>;
+              return <div className="relation-row" key={record.id}><span>{relationName(relation.left, leftId)}</span><span>{relationName(relation.right, rightId)}</span><span>{activeRelation === "measurement-group-points" ? `顺序 ${record.sequence_no ?? 0}` : record.is_active ? "启用" : "停用"}</span><span><button className="icon-button icon-button-danger" onClick={() => void deleteRelation(record)} aria-label="删除关系记录"><Trash2 aria-hidden="true" /></button></span></div>;
             })}
             {!relations[activeRelation].length ? <div className="master-empty">暂无关系，请从左侧建立。</div> : null}
           </div>

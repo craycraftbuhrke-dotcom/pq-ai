@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import pbkdf2_hmac
@@ -10,6 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.domain import ApiKey, AppUser, Permission, Role, RolePermission, UserRole, UserSession
+
+logger = logging.getLogger(__name__)
+
+# P0-7 未匹配路径的保守兜底：先前是 "process.write"，会让工艺工程师、AI 推荐等多个角色
+# 意外获得写权限；改为 "security.manage" 后仅 ADMIN 能通过，未匹配路径会 403 而不是静默放行。
+# 同时记录 warning 便于快速发现遗漏的路由映射。集合避免同一路径重复告警刷屏。
+_UNMAPPED_WRITE_ROUTES: set[str] = set()
 
 
 @dataclass(frozen=True)
@@ -351,7 +359,12 @@ def required_permission(method: str, path: str) -> str | None:
         )
     ):
         return "master.write"
-    return "process.write"
+    # 未匹配的写路径：保守兜底为 security.manage（仅 ADMIN 拥有）。
+    # 从前的 "process.write" 兜底会让工艺工程师无意中获得非工艺路由的写权限。
+    if path not in _UNMAPPED_WRITE_ROUTES:
+        _UNMAPPED_WRITE_ROUTES.add(path)
+        logger.warning("required_permission fallback: 未识别写路径 %s %s，暂按 security.manage 授权", method, path)
+    return "security.manage"
 
 
 def resource_from_path(path: str) -> tuple[str | None, str | None]:

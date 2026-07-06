@@ -1,7 +1,8 @@
 "use client";
 
-import { ChevronDown, RefreshCcw } from "lucide-react";
-import { useState } from "react";
+import { RefreshCcw } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 
 import { DiagnosisPanel } from "@/components/diagnosis-panel";
 import { MetricStrip } from "@/components/metric-strip";
@@ -15,10 +16,21 @@ type DashboardProps = {
 };
 
 export function Dashboard({ snapshot }: DashboardProps) {
+  const router = useRouter();
   const [selectedPoint, setSelectedPoint] = useState(snapshot.diagnosis.pointCode || "");
-  const [refreshed, setRefreshed] = useState(
-    new Date(snapshot.context.refreshedAt).toLocaleTimeString("zh-CN", { hour12: false }),
-  );
+  const [isRefreshing, startTransition] = useTransition();
+  // 展示的“数据更新时间”来自后端 snapshot.context.refreshedAt——每次 router.refresh() 触发
+  // Server Component 重跑后，props 会带回新的时间戳，无需在客户端手动 setState 维护。
+  const refreshedAt = new Date(snapshot.context.refreshedAt).toLocaleTimeString("zh-CN", { hour12: false });
+
+  function handleRefresh() {
+    // Server Component 数据源真正重新拉：router.refresh() 让当前路由的 RSC payload 全量重取，
+    // 页面 SSR 会重新执行 getDashboardSnapshot()，拿到最新指标/风险点/诊断。
+    startTransition(() => router.refresh());
+  }
+
+  const contextLabel =
+    [snapshot.context.vehicleModel, snapshot.context.color].filter(Boolean).join(" · ") || "待选择";
 
   return (
     <div className="page-stack">
@@ -33,24 +45,23 @@ export function Dashboard({ snapshot }: DashboardProps) {
           <p>基于生产事件与测量点，监控三个涂层体系、五个喷涂执行阶段和 AI 闭环任务。</p>
         </div>
         <div className="page-actions">
-          <button className="context-button">
+          {/* 展示当前生产上下文；实际切换通过左侧 <ContextSelector> 完成，此处仅只读展示，避免误导用户以为可以点击。 */}
+          <div className="context-button" role="status" aria-label={`当前车型与颜色：${contextLabel}`}>
             当前车型与颜色
-            <strong>
-              {[snapshot.context.vehicleModel, snapshot.context.color].filter(Boolean).join(" · ") || "待选择"}
-            </strong>
-            <ChevronDown aria-hidden="true" />
-          </button>
+            <strong>{contextLabel}</strong>
+          </div>
           <button
             className="icon-button icon-button-bordered"
-            aria-label="刷新数据"
-            onClick={() => setRefreshed(new Date().toLocaleTimeString("zh-CN", { hour12: false }))}
+            aria-label={isRefreshing ? "正在刷新数据" : "刷新数据"}
+            onClick={handleRefresh}
+            disabled={isRefreshing}
           >
-            <RefreshCcw />
+            <RefreshCcw className={isRefreshing ? "spin" : ""} aria-hidden="true" />
           </button>
         </div>
       </header>
       <div className="freshness">
-        <span className="live-dot" /> 数据更新时间 {refreshed} ·
+        <span className="live-dot" /> 数据更新时间 {refreshedAt} ·
         {snapshot.source === "api" ? " API 实时数据" : " 空状态"}
       </div>
       {snapshot.error ? (

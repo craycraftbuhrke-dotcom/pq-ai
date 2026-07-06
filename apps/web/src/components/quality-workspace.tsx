@@ -17,6 +17,7 @@ import { BulkDataActions } from "@/components/bulk-data-actions";
 import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
 import { SpcChart } from "@/components/spc-chart";
 import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
+import { useModalDismiss } from "@/lib/use-modal-dismiss";
 
 type Resource = { id: string; code: string; name: string };
 type ProductionRun = { id: string; run_no: string; body_no?: string | null; started_at: string };
@@ -243,6 +244,12 @@ export function QualityWorkspace() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  const closeModal = useCallback(() => {
+    if (submitting) return;
+    setModal(null);
+  }, [submitting]);
+  useModalDismiss({ open: modal !== null, onClose: closeModal, busy: submitting });
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -614,16 +621,16 @@ export function QualityWorkspace() {
       </section>
 
       {modal ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => !submitting && setModal(null)}>
+        <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}>
           <section className="modal-card quality-modal" role="dialog" aria-modal="true" aria-labelledby="quality-modal-title" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-heading"><div><span className="eyebrow">{modal.record ? "EDIT" : "CREATE"}</span><h2 id="quality-modal-title">{modal.record ? "编辑" : "新建"}{modal.kind === "measurement" ? "质量测量" : "质量标准"}</h2></div><button className="icon-button" onClick={() => setModal(null)} aria-label="关闭"><X /></button></div>
+            <div className="modal-heading"><div><span className="eyebrow">{modal.record ? "EDIT" : "CREATE"}</span><h2 id="quality-modal-title">{modal.record ? "编辑" : "新建"}{modal.kind === "measurement" ? "质量测量" : "质量标准"}</h2></div><button className="icon-button" onClick={closeModal} aria-label="关闭"><X /></button></div>
             <form onSubmit={(event) => void submit(event)}>
               <div className="form-grid">
                 {modal.kind === "measurement"
                   ? renderMeasurementForm(form, setForm, metricRows, setMetricRows, repeatRows, setRepeatRows, { runs, groups, points, definitions, instruments, methods, calibrations, references, importProfiles })
                   : renderStandardForm(form, setForm, { vehicleModels, colors, parts, points, definitions })}
               </div>
-              <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => setModal(null)}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" /> : null}保存到 MySQL</button></div>
+              <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div>
             </form>
           </section>
         </div>
