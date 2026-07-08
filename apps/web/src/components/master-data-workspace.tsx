@@ -11,7 +11,11 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
-import { useModalDismiss } from "@/lib/use-modal-dismiss";
+import { FilterToolbar } from "@/components/filter-toolbar";
+import { ModalShell } from "@/components/modal-shell";
+import { JsonObjectEditor } from "@/components/structured-json-editor";
+import { SectionHeader } from "@/components/section-header";
+import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 
 type ResourceKey =
   | "factories"
@@ -189,8 +193,8 @@ const resourceConfigs: Record<ResourceKey, ResourceConfig> = {
         ],
       },
       { key: "supplier", label: "供应商" },
-      { key: "feature_values", label: "颜色特征值 JSON", type: "json" },
-      { key: "digital_standard", label: "色差数字标准 JSON", type: "json" },
+      { key: "feature_values", label: "颜色特征明细", type: "json" },
+      { key: "digital_standard", label: "色差数字标准明细", type: "json" },
       { key: "tds_uri", label: "TDS 文档地址" },
       { key: "msds_uri", label: "MSDS 文档地址" },
       { key: "coa_uri", label: "COA 文档地址" },
@@ -426,8 +430,6 @@ export function MasterDataWorkspace() {
     setEditing(null);
   }
 
-  useModalDismiss({ open: modalMode !== null, onClose: closeModal, busy: submitting });
-
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
@@ -561,15 +563,18 @@ export function MasterDataWorkspace() {
         </div>
         <div className="relation-grid">
           <form className="relation-form" onSubmit={bindRelation}>
-            <div>
-              <span className="eyebrow">RELATION MAINTENANCE</span>
-              <h2>建立{relationConfigs[activeRelation].label}关系</h2>
-              <p>关系写入 MySQL，并用于程序适用范围、生产事件和测量编组校验。</p>
-            </div>
+            <SectionHeader
+              eyebrow="RELATION MAINTENANCE"
+              title={`建立${relationConfigs[activeRelation].label}关系`}
+              description="关系写入 MySQL，并用于程序适用范围、生产事件和测量编组校验。"
+            />
             {!data[activeRelationConfig.left].length || !data[activeRelationConfig.right].length ? (
-              <div className="master-empty">
-                请先维护{resourceConfigs[activeRelationConfig.left].singular}和{resourceConfigs[activeRelationConfig.right].singular}，再建立关系。
-              </div>
+              <WorkspaceEmptyState
+                icon={Plus}
+                title="请先补齐关系两侧主数据"
+                description={`请先维护${resourceConfigs[activeRelationConfig.left].singular}和${resourceConfigs[activeRelationConfig.right].singular}，再建立关系。`}
+                compact
+              />
             ) : null}
             <label className="form-field">
               <span>{resourceConfigs[relationConfigs[activeRelation].left].singular}</span>
@@ -606,7 +611,7 @@ export function MasterDataWorkspace() {
               const rightId = record[relation.rightKey as keyof RelationRecord] as string | undefined;
               return <div className="relation-row" key={record.id}><span>{relationName(relation.left, leftId)}</span><span>{relationName(relation.right, rightId)}</span><span>{activeRelation === "measurement-group-points" ? `顺序 ${record.sequence_no ?? 0}` : record.is_active ? "启用" : "停用"}</span><span>关系数据采用停用或替换治理</span></div>;
             })}
-            {!relations[activeRelation].length ? <div className="master-empty">暂无关系，请从左侧建立。</div> : null}
+            {!relations[activeRelation].length ? <WorkspaceEmptyState icon={Plus} title="暂无关系记录" description="可在左侧选择主对象和关联对象后建立第一条关系。" compact /> : null}
           </div>
         </div>
       </section>
@@ -639,12 +644,7 @@ export function MasterDataWorkspace() {
           ))}
         </div>
 
-        <div className="master-toolbar">
-          <div>
-            <span className="eyebrow">CRUD WORKSPACE</span>
-            <h2>{config.label}清单</h2>
-            <p>{config.description}</p>
-          </div>
+        <FilterToolbar eyebrow="CRUD WORKSPACE" title={`${config.label}清单`} description={config.description} className="master-toolbar">
           <div className="master-toolbar-actions">
             <label className="master-search">
               <Search aria-hidden="true" />
@@ -669,7 +669,7 @@ export function MasterDataWorkspace() {
               }}
             />
           </div>
-        </div>
+        </FilterToolbar>
         <div className="freshness">该页面不提供物理删除；如需停用，请编辑记录并调整启用状态或改走替换流程。</div>
 
         <div className="master-table-wrap">
@@ -714,43 +714,43 @@ export function MasterDataWorkspace() {
             </div>
           ) : null}
           {!loading && filteredRecords.length === 0 ? (
-            <div className="master-empty">暂无匹配数据，请新建记录或调整搜索条件。</div>
+            <WorkspaceEmptyState icon={Search} title="暂无匹配数据" description="请调整搜索条件，或直接新建主数据记录后再继续维护。" compact />
           ) : null}
         </div>
       </section>
 
       {modalMode ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}>
-          <section
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="master-modal-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="modal-heading">
-              <div>
-                <span className="eyebrow">{modalMode === "create" ? "CREATE" : "EDIT"}</span>
-                <h2 id="master-modal-title">{modalMode === "create" ? "新建" : "编辑"}{config.singular}</h2>
-              </div>
-              <button className="icon-button" onClick={closeModal} aria-label="关闭">
-                <X aria-hidden="true" />
-              </button>
-            </div>
-            <form onSubmit={(event) => void submitForm(event)}>
-              <div className="form-grid">
+        <ModalShell
+          eyebrow={modalMode === "create" ? "CREATE" : "EDIT"}
+          title={`${modalMode === "create" ? "新建" : "编辑"}${config.singular}`}
+          description={config.description}
+          onClose={closeModal}
+          busy={submitting}
+        >
+          <form onSubmit={(event) => void submitForm(event)}>
+            <div className="form-grid">
                 {config.fields.map((field) => (
-                  <label className={field.type === "textarea" ? "form-field form-field-wide" : "form-field"} key={field.key}>
+                  <label className={field.type === "textarea" || field.type === "json" ? "form-field form-field-wide" : "form-field"} key={field.key}>
                     <span>
                       {field.label}
                       {field.required ? <b>*</b> : null}
                     </span>
                     {field.type === "textarea" || field.type === "json" ? (
-                      <textarea
-                        value={String(form[field.key] ?? "")}
-                        onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))}
-                        rows={field.type === "json" ? 7 : 4}
-                      />
+                      field.type === "json" ? (
+                        <JsonObjectEditor
+                          value={String(form[field.key] ?? "")}
+                          onChange={(value) => setForm((current) => ({ ...current, [field.key]: value }))}
+                          keyLabel={field.key === "feature_values" ? "特征项" : "标准项"}
+                          valueLabel={field.key === "feature_values" ? "特征值" : "目标值"}
+                          addLabel={field.key === "feature_values" ? "新增特征项" : "新增标准项"}
+                        />
+                      ) : (
+                        <textarea
+                          value={String(form[field.key] ?? "")}
+                          onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))}
+                          rows={4}
+                        />
+                      )
                     ) : field.type === "select" ? (
                       <select
                         value={String(form[field.key] ?? "")}
@@ -787,19 +787,18 @@ export function MasterDataWorkspace() {
                     )}
                   </label>
                 ))}
-              </div>
-              <div className="modal-actions">
-                <button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>
-                  取消
-                </button>
-                <button className="button button-primary" type="submit" disabled={submitting}>
-                  {submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}
-                  {submitting ? "正在保存" : "保存到 MySQL"}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
+            </div>
+            <div className="modal-actions">
+              <button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>
+                取消
+              </button>
+              <button className="button button-primary" type="submit" disabled={submitting}>
+                {submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}
+                {submitting ? "正在保存" : "保存到 MySQL"}
+              </button>
+            </div>
+          </form>
+        </ModalShell>
       ) : null}
     </div>
   );

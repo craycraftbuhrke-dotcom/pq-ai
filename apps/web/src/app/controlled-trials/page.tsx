@@ -3,7 +3,6 @@
 import {
   ArrowRight,
   Check,
-  FileText,
   FlaskConical,
   LoaderCircle,
   Play,
@@ -15,7 +14,9 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { InfoGrid } from "@/components/info-grid";
 import { useAuth } from "@/lib/auth-context";
+import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 
 type ControlledTrial = {
   id: string;
@@ -134,11 +135,9 @@ export default function ControlledTrialsPage() {
         rolled_back: counts.ROLLED_BACK ?? 0,
       });
       setSelectedTrial((current) => {
-        if (current) {
-          const updated = data?.find((t) => t.id === current.id);
-          return updated ?? (data?.[0] ?? null);
-        }
-        return data?.[0] ?? null;
+        if (!current) return null;
+        const updated = data?.find((t) => t.id === current.id);
+        return updated ?? null;
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
@@ -165,6 +164,11 @@ export default function ControlledTrialsPage() {
     );
   }, [trials, query, statusFilter]);
 
+  const visibleSelectedTrial = useMemo(
+    () => (selectedTrial ? filtered.find((trial) => trial.id === selectedTrial.id) ?? null : null),
+    [filtered, selectedTrial],
+  );
+
   async function executeAction(trialId: string, action: string) {
     setSubmitting(action);
     setError("");
@@ -182,7 +186,12 @@ export default function ControlledTrialsPage() {
   if (!actor.isAuthenticated) {
     return (
       <div className="page-stack">
-        <div className="master-empty"><ShieldCheck /> 请先登录。</div>
+        <WorkspaceEmptyState
+          icon={ShieldCheck}
+          title="请先登录后查看受控试验"
+          description="受控试验中心包含高风险审批、执行和回滚动作，登录后才能查看完整闭环记录。"
+          compact
+        />
       </div>
     );
   }
@@ -241,103 +250,120 @@ export default function ControlledTrialsPage() {
               </button>
             ))}
             {!filtered.length ? (
-              <div className="master-empty"><FlaskConical /> 暂不受控试验记录</div>
+              <WorkspaceEmptyState
+                icon={FlaskConical}
+                title="暂无受控试验记录"
+                description="当前筛选条件下没有试验计划，可切换状态筛选或从 AI 推荐链路中创建新的受控试验。"
+                compact
+              />
             ) : null}
           </div>
-          {selectedTrial ? (
+          {visibleSelectedTrial ? (
             <div className="trial-detail">
               <div className="program-subheading">
                 <div>
                   <span className="eyebrow">TRIAL DETAIL</span>
-                  <h3>{selectedTrial.trial_no}</h3>
+                  <h3>{visibleSelectedTrial.trial_no}</h3>
                 </div>
-                <span className={`status-badge ${STATUS_TONES[selectedTrial.status] ?? "status-info"}`}>
-                  {STATUS_LABELS[selectedTrial.status] ?? selectedTrial.status}
+                <span className={`status-badge ${STATUS_TONES[visibleSelectedTrial.status] ?? "status-info"}`}>
+                  {STATUS_LABELS[visibleSelectedTrial.status] ?? visibleSelectedTrial.status}
                 </span>
               </div>
-              <div className="trial-detail-grid">
-                <div><span>关联推荐</span><strong className="mono">{selectedTrial.recommendation_no ?? selectedTrial.recommendation_id.slice(0, 12)}</strong></div>
-                <div><span>目标指标</span><strong>{selectedTrial.target_metric}</strong></div>
-                <div><span>涉及点位</span><strong>{selectedTrial.measurement_point_code ?? selectedTrial.measurement_point_name ?? "—"}</strong></div>
-                <div><span>证据类型</span><strong>{EVIDENCE_LABELS[selectedTrial.evidence_type] ?? selectedTrial.evidence_type}</strong></div>
-              </div>
+              <InfoGrid
+                className="trial-detail-grid"
+                items={[
+                  {
+                    label: "关联推荐",
+                    value: <span className="mono">{visibleSelectedTrial.recommendation_no ?? visibleSelectedTrial.recommendation_id.slice(0, 12)}</span>,
+                  },
+                  { label: "目标指标", value: visibleSelectedTrial.target_metric },
+                  { label: "涉及点位", value: visibleSelectedTrial.measurement_point_code ?? visibleSelectedTrial.measurement_point_name ?? "—" },
+                  { label: "证据类型", value: EVIDENCE_LABELS[visibleSelectedTrial.evidence_type] ?? visibleSelectedTrial.evidence_type },
+                ]}
+              />
               <div className="trial-section">
                 <h4>试验假设</h4>
-                <p>{selectedTrial.hypothesis}</p>
+                <p>{visibleSelectedTrial.hypothesis}</p>
               </div>
               <div className="trial-section">
                 <h4>预期结果</h4>
-                <p>{selectedTrial.expected_outcome}</p>
+                <p>{visibleSelectedTrial.expected_outcome}</p>
               </div>
               <div className="trial-section">
                 <h4>风险评估</h4>
-                <p>{selectedTrial.risk_assessment}</p>
+                <p>{visibleSelectedTrial.risk_assessment}</p>
               </div>
               <div className="trial-section">
                 <h4>回滚方案</h4>
-                <p>{selectedTrial.rollback_plan}</p>
+                <p>{visibleSelectedTrial.rollback_plan}</p>
               </div>
               <div className="trial-section">
                 <h4>持续观察方案</h4>
-                <p>{selectedTrial.sustained_observation_plan}</p>
+                <p>{visibleSelectedTrial.sustained_observation_plan}</p>
               </div>
               <div className="trial-timeline">
-                <div><span>创建人</span><strong>{selectedTrial.requested_by}</strong><small>{new Date(selectedTrial.requested_at).toLocaleString("zh-CN")}</small></div>
-                {selectedTrial.approved_by ? <ArrowRight className="flow-arrow" /> : null}
-                {selectedTrial.approved_by ? <div><span>审批人</span><strong>{selectedTrial.approved_by}</strong><small>{selectedTrial.approved_at ? new Date(selectedTrial.approved_at).toLocaleString("zh-CN") : "—"}</small></div> : null}
-                {selectedTrial.started_at ? <ArrowRight className="flow-arrow" /> : null}
-                {selectedTrial.started_at ? <div><span>试验开始</span><strong>{new Date(selectedTrial.started_at).toLocaleString("zh-CN")}</strong></div> : null}
+                <div><span>创建人</span><strong>{visibleSelectedTrial.requested_by}</strong><small>{new Date(visibleSelectedTrial.requested_at).toLocaleString("zh-CN")}</small></div>
+                {visibleSelectedTrial.approved_by ? <ArrowRight className="flow-arrow" /> : null}
+                {visibleSelectedTrial.approved_by ? <div><span>审批人</span><strong>{visibleSelectedTrial.approved_by}</strong><small>{visibleSelectedTrial.approved_at ? new Date(visibleSelectedTrial.approved_at).toLocaleString("zh-CN") : "—"}</small></div> : null}
+                {visibleSelectedTrial.started_at ? <ArrowRight className="flow-arrow" /> : null}
+                {visibleSelectedTrial.started_at ? <div><span>试验开始</span><strong>{new Date(visibleSelectedTrial.started_at).toLocaleString("zh-CN")}</strong></div> : null}
               </div>
-              {selectedTrial.evaluation ? (
+              {visibleSelectedTrial.evaluation ? (
                 <div className="trial-section">
-                  <h4>复测评价 {selectedTrial.evaluation.is_effective ? <span className="status-badge status-healthy">有效</span> : <span className="status-badge status-warning">未达预期</span>}</h4>
-                  <p>实际改善: {selectedTrial.evaluation.actual_improvement > 0 ? "+" : ""}{selectedTrial.evaluation.actual_improvement.toFixed(2)}</p>
-                  {selectedTrial.evaluation.conclusion ? <p>{selectedTrial.evaluation.conclusion}</p> : null}
+                  <h4>复测评价 {visibleSelectedTrial.evaluation.is_effective ? <span className="status-badge status-healthy">有效</span> : <span className="status-badge status-warning">未达预期</span>}</h4>
+                  <p>实际改善: {visibleSelectedTrial.evaluation.actual_improvement > 0 ? "+" : ""}{visibleSelectedTrial.evaluation.actual_improvement.toFixed(2)}</p>
+                  {visibleSelectedTrial.evaluation.conclusion ? <p>{visibleSelectedTrial.evaluation.conclusion}</p> : null}
                 </div>
               ) : null}
-              {selectedTrial.rollback ? (
+              {visibleSelectedTrial.rollback ? (
                 <div className="trial-section">
                   <h4>回滚记录 <span className="status-badge status-risk">ROLLED_BACK</span></h4>
-                  <p>回滚编号: {selectedTrial.rollback.rollback_no}</p>
-                  <p>执行时间: {selectedTrial.rollback.executed_at ? new Date(selectedTrial.rollback.executed_at).toLocaleString("zh-CN") : "—"}</p>
+                  <p>回滚编号: {visibleSelectedTrial.rollback.rollback_no}</p>
+                  <p>执行时间: {visibleSelectedTrial.rollback.executed_at ? new Date(visibleSelectedTrial.rollback.executed_at).toLocaleString("zh-CN") : "—"}</p>
                 </div>
               ) : null}
-              {selectedTrial.status === "PLANNED" ? (
+              {visibleSelectedTrial.status === "PLANNED" ? (
                 <div className="ai-workflow-actions">
-                  <button className="button button-primary" onClick={() => executeAction(selectedTrial.id, "approval")} disabled={submitting === "approval"}>
+                  <button className="button button-primary" onClick={() => executeAction(visibleSelectedTrial.id, "approval")} disabled={submitting === "approval"}>
                     {submitting === "approval" ? <LoaderCircle className="spin" /> : <Check />}
                     批准试验
                   </button>
                 </div>
-              ) : selectedTrial.status === "APPROVED" ? (
+              ) : visibleSelectedTrial.status === "APPROVED" ? (
                 <div className="ai-workflow-actions">
-                  <button className="button button-primary" onClick={() => executeAction(selectedTrial.id, "start")} disabled={submitting === "start"}>
+                  <button className="button button-primary" onClick={() => executeAction(visibleSelectedTrial.id, "start")} disabled={submitting === "start"}>
                     {submitting === "start" ? <LoaderCircle className="spin" /> : <Play />}
                     开始试验
                   </button>
                 </div>
-              ) : selectedTrial.status === "INEFFECTIVE" ? (
+              ) : visibleSelectedTrial.status === "INEFFECTIVE" ? (
                 <div className="ai-workflow-actions">
-                  <button className="button button-secondary" onClick={() => executeAction(selectedTrial.id, "rollback")} disabled={submitting === "rollback"}>
+                  <button className="button button-secondary" onClick={() => executeAction(visibleSelectedTrial.id, "rollback")} disabled={submitting === "rollback"}>
                     {submitting === "rollback" ? <LoaderCircle className="spin" /> : <RotateCcw />}
                     执行回滚
                   </button>
                 </div>
               ) : null}
-              {selectedTrial.completion_summary ? (
+              {visibleSelectedTrial.completion_summary ? (
                 <div className="trial-section">
                   <h4>试验总结</h4>
-                  <p>{selectedTrial.completion_summary}</p>
+                  <p>{visibleSelectedTrial.completion_summary}</p>
                 </div>
               ) : null}
-              {selectedTrial.approval_comment ? (
+              {visibleSelectedTrial.approval_comment ? (
                 <div className="trial-section">
                   <h4>审批意见</h4>
-                  <p>{selectedTrial.approval_comment}</p>
+                  <p>{visibleSelectedTrial.approval_comment}</p>
                 </div>
               ) : null}
             </div>
-          ) : null}
+          ) : (
+            <WorkspaceEmptyState
+              icon={ArrowRight}
+              title="请选择一条受控试验"
+              description="左侧列表不会再默认自动选中记录，请由你显式选择需要查看的试验详情，降低误操作风险。"
+            />
+          )}
         </div>
       </section>
     </div>

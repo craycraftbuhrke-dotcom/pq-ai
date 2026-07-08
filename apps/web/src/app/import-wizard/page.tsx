@@ -6,8 +6,6 @@ import {
   FileCode,
   FileSpreadsheet,
   LoaderCircle,
-  RefreshCw,
-  Search,
   ShieldCheck,
   Upload,
   X,
@@ -28,7 +26,8 @@ type ImportResult = {
   created: number;
   updated: number;
   skipped: number;
-  errors: string[];
+  failed: number;
+  errors: Array<{ row?: number; message: string }>;
 };
 
 function getApiKey(): string {
@@ -48,22 +47,25 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return payload;
 }
 
-const QUALITY_COLUMNS = [
+const CORE_COLUMNS = [
   "data_no",
   "production_run_no",
+  "measurement_group_code",
   "measurement_point_code",
   "quality_type",
   "measured_at",
   "measured_by",
-  "metric_codes",
-  "metric_values",
-  "metric_units",
   "data_type",
 ];
 
-const TEMPLATE_CSV = `${QUALITY_COLUMNS.join(",")}\n`;
-
 type PreviewRow = Record<string, string>;
+type QualityType = "ORANGE_PEEL" | "COLOR_DIFFERENCE" | "THICKNESS";
+
+const QUALITY_TYPE_OPTIONS: Array<{ value: QualityType; label: string; note: string }> = [
+  { value: "ORANGE_PEEL", label: "橘皮", note: "下载 DOI、LW、SW 等橘皮指标列模板" },
+  { value: "COLOR_DIFFERENCE", label: "色差", note: "下载 DET、DE45 等色差指标列模板" },
+  { value: "THICKNESS", label: "膜厚", note: "下载中涂/色漆/清漆/总膜厚指标列模板" },
+];
 
 export default function ImportWizardPage() {
   const { actor } = useAuth();
@@ -73,11 +75,11 @@ export default function ImportWizardPage() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [qualityType, setQualityType] = useState<QualityType>("ORANGE_PEEL");
 
   useEffect(() => {
     void (async () => {
@@ -100,12 +102,14 @@ export default function ImportWizardPage() {
     setError("");
     setResult(null);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const resp = await fetch("/api/quality/measurements/import-csv", {
+      const content = await file.text();
+      const resp = await fetch(`/api/bulk/quality.measurements/import?filename=${encodeURIComponent(file.name)}&mode=upsert`, {
         method: "POST",
-        headers: { "x-api-key": getApiKey() },
-        body: form,
+        headers: {
+          "x-api-key": getApiKey(),
+          "Content-Type": "text/csv; charset=utf-8",
+        },
+        body: content,
       });
       if (!resp.ok) {
         const body = (await resp.json().catch(() => ({}))) as { detail?: string };
@@ -113,7 +117,7 @@ export default function ImportWizardPage() {
       }
       const data = (await resp.json()) as ImportResult;
       setResult(data);
-      setNotice(`导入完成：创建 ${data.created}，更新 ${data.updated}，跳过 ${data.skipped}，错误 ${data.errors.length}`);
+      setNotice(`导入完成：创建 ${data.created}，更新 ${data.updated}，跳过 ${data.skipped}，失败 ${data.failed}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "导入失败");
     } finally {
@@ -151,13 +155,7 @@ export default function ImportWizardPage() {
   }
 
   function downloadSample() {
-    const blob = new Blob(["\uFEFF" + TEMPLATE_CSV], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "pq-ai-quality-import-template.csv";
-    anchor.click();
-    URL.revokeObjectURL(url);
+    window.location.href = `/api/bulk/quality.measurements/template?format=csv&quality_type=${encodeURIComponent(qualityType)}`;
   }
 
   const pointMap = useMemo(() => new Map(points.map((p) => [p.code, p])), [points]);
@@ -187,6 +185,16 @@ export default function ImportWizardPage() {
               <h2>选择 CSV 文件</h2>
             </div>
             <div className="page-actions">
+              <label className="form-field">
+                <span>模板质量类型</span>
+                <select value={qualityType} onChange={(event) => setQualityType(event.target.value as QualityType)}>
+                  {QUALITY_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button className="button button-secondary" onClick={downloadSample}>
                 <Download /> 下载模板
               </button>
@@ -213,25 +221,34 @@ export default function ImportWizardPage() {
               ) : (
                 <>
                   <strong>点击选择 CSV 文件</strong>
-                  <span>或拖拽文件到此区域</span>
+                  <span>建议先下载模板，再按模板列填写后上传</span>
                 </>
               )}
             </button>
+          </div>
+          <div className="import-field-guide">
+            <p className="panel-note">
+              当前模板会按所选质量类型自动带出测量编组、编组内点位和对应质量指标列。
+              用户只需要填写生产事件编号、测量时间和各项质量数值，无需再填写 `metrics` JSON。
+            </p>
           </div>
           <div className="import-field-guide">
             <h4>必填列说明</h4>
             <table className="master-table compact-table">
               <thead><tr><th>列名</th><th>说明</th><th>填写要求</th></tr></thead>
               <tbody>
-                <tr><td className="mono">data_no</td><td>测量编号（唯一）</td><td>填写批准数据</td></tr>
-                <tr><td className="mono">production_run_no</td><td>生产事件编号</td><td>填写批准数据</td></tr>
-                <tr><td className="mono">measurement_point_code</td><td>点位编号</td><td>填写批准数据</td></tr>
-                <tr><td className="mono">quality_type</td><td>质量类型</td><td>ORANGE_PEEL / THICKNESS / COLOR_DIFFERENCE</td></tr>
+                <tr><td className="mono">data_no</td><td>测量编号（唯一）</td><td>填写本次质量数据的业务编号</td></tr>
+                <tr><td className="mono">production_run_no</td><td>生产事件编号</td><td>填写系统中已有的生产事件编号</td></tr>
+                <tr><td className="mono">measurement_group_code</td><td>测量编组代码</td><td>模板已自动带出，通常无需改动</td></tr>
+                <tr><td className="mono">measurement_point_code</td><td>点位编号</td><td>模板已自动带出或填写系统中已有点位编号</td></tr>
+                <tr><td className="mono">quality_type</td><td>质量类型</td><td>模板已按当前下载类型预填</td></tr>
                 <tr><td className="mono">measured_at</td><td>测量时间（ISO格式）</td><td>填写实际测量时间</td></tr>
-                <tr><td className="mono">metric_codes</td><td>指标编码（逗号分隔）</td><td>填写批准指标</td></tr>
-                <tr><td className="mono">metric_values</td><td>指标值（逗号分隔）</td><td>填写实际测量值</td></tr>
+                <tr><td className="mono">metric__*</td><td>质量指标列</td><td>直接填写实际质量数值，后端自动转换</td></tr>
               </tbody>
             </table>
+            <p className="panel-note">
+              模板中的说明列如 `measurement_group_name`、`measurement_point_name`、`part_name` 用于辅助识别，可保留原值。
+            </p>
           </div>
         </section>
 
@@ -252,7 +269,7 @@ export default function ImportWizardPage() {
                 <thead>
                   <tr>
                     {columns.map((col) => (
-                      <th key={col} className={QUALITY_COLUMNS.includes(col) ? "" : "col-extra"}>
+                      <th key={col} className={CORE_COLUMNS.includes(col) || col.startsWith("metric__") ? "" : "col-extra"}>
                         {col}
                       </th>
                     ))}
@@ -284,12 +301,17 @@ export default function ImportWizardPage() {
                   <article className="result-item success"><strong>{result.created}</strong><span>新建</span></article>
                   <article className="result-item"><strong>{result.updated}</strong><span>更新</span></article>
                   <article className="result-item muted"><strong>{result.skipped}</strong><span>跳过</span></article>
-                  <article className={`result-item ${result.errors.length ? "error" : ""}`}><strong>{result.errors.length}</strong><span>错误</span></article>
+                  <article className={`result-item ${result.failed ? "error" : ""}`}><strong>{result.failed}</strong><span>失败</span></article>
                 </div>
                 {result.errors.length > 0 ? (
                   <div className="import-errors">
                     <h4>错误详情</h4>
-                    {result.errors.slice(0, 10).map((err, i) => <p key={i} className="error-line">{err}</p>)}
+                    {result.errors.slice(0, 10).map((err, i) => (
+                      <p key={i} className="error-line">
+                        {err.row ? `第 ${err.row} 行 · ` : ""}
+                        {err.message}
+                      </p>
+                    ))}
                     {result.errors.length > 10 ? <p>...共 {result.errors.length} 条错误</p> : null}
                   </div>
                 ) : null}

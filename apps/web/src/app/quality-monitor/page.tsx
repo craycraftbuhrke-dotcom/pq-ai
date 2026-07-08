@@ -7,13 +7,13 @@ import {
   CircleGauge,
   Clock,
   RefreshCw,
-  ShieldAlert,
   ShieldCheck,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { useAuth } from "@/lib/auth-context";
+import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 
 type QualityHealth = {
   overview: {
@@ -148,7 +148,16 @@ export default function QualityMonitorPage() {
   }, [reload]);
 
   if (!actor.isAuthenticated) {
-    return <div className="page-stack"><div className="master-empty"><ShieldCheck /> 请先登录。</div></div>;
+    return (
+      <div className="page-stack">
+        <WorkspaceEmptyState
+          icon={ShieldCheck}
+          title="请先登录后查看质量监控"
+          description="质量监控页面会展示测量完整率、验证率和仪器校准健康度，需要登录后再继续。"
+          compact
+        />
+      </div>
+    );
   }
 
   const healthColor = gaugeColor(data?.health_score ?? 0);
@@ -205,7 +214,7 @@ export default function QualityMonitorPage() {
                 </div>
               </div>
               <div className="reliability-bars">
-                {data.reliability_by_type.map((item) => {
+                {data.reliability_by_type.length ? data.reliability_by_type.map((item) => {
                   const verifiedPct = item.total ? (item.verified / item.total * 100).toFixed(1) : "0";
                   const failedPct = item.total ? (item.failed / item.total * 100).toFixed(1) : "0";
                   return (
@@ -224,7 +233,14 @@ export default function QualityMonitorPage() {
                       </div>
                     </div>
                   );
-                })}
+                }) : (
+                  <WorkspaceEmptyState
+                    icon={Activity}
+                    title="暂无质量类型统计数据"
+                    description="当前还没有可用于聚合的质量类型测量记录，录入测量数据后这里会自动形成统计。"
+                    compact
+                  />
+                )}
               </div>
             </section>
 
@@ -252,9 +268,12 @@ export default function QualityMonitorPage() {
                   ))}
                 </div>
               ) : (
-                <div className="master-empty" style={{padding: "2rem"}}>
-                  <CheckCircle2 style={{color: "var(--teal-500)"}} /> 所有需要校准的仪器均处于有效校准期内
-                </div>
+                <WorkspaceEmptyState
+                  icon={CheckCircle2}
+                  title="当前无需补做仪器校准"
+                  description="所有需要校准的仪器均处于有效校准期内，后续有到期记录时会自动出现在这里。"
+                  compact
+                />
               )}
             </section>
           </div>
@@ -310,7 +329,13 @@ export default function QualityMonitorPage() {
             </div>
           </section>
         </>
-      ) : null}
+      ) : (
+        <WorkspaceEmptyState
+          icon={ShieldCheck}
+          title="暂无质量监控数据"
+          description="系统还没有形成可用于监控的测量、校准或质量标准数据，补齐基础数据后这里会自动展示。"
+        />
+      )}
     </div>
   );
 }

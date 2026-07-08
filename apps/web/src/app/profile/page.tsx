@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyRound, LoaderCircle, Save, User } from "lucide-react";
+import { KeyRound, LoaderCircle, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 

@@ -1,17 +1,6 @@
 "use client";
 
-import {
-  Copy,
-  Key,
-  LoaderCircle,
-  Plus,
-  RefreshCw,
-  Shield,
-  Trash2,
-  UserPlus,
-  Users,
-  X,
-} from "lucide-react";
+import { Key, LoaderCircle, Plus, RefreshCw, Shield, UserPlus, Users, X } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { useAuth } from "@/lib/auth-context";
@@ -32,15 +21,6 @@ type RoleResource = {
   name: string;
   description: string | null;
   permission_codes: string[];
-};
-
-type ApiKeyResource = {
-  id: string;
-  name: string;
-  key_prefix: string;
-  expires_at: string | null;
-  last_used_at: string | null;
-  is_active: boolean;
 };
 
 type Tab = "users" | "roles" | "api-keys";
@@ -73,7 +53,6 @@ export default function SecurityAdminPage() {
   const [tab, setTab] = useState<Tab>("users");
   const [users, setUsers] = useState<UserResource[]>([]);
   const [roles, setRoles] = useState<RoleResource[]>([]);
-  const [apiKeys, setApiKeys] = useState<ApiKeyResource[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState("");
@@ -98,15 +77,6 @@ export default function SecurityAdminPage() {
       setLoading(false);
     }
   }, []);
-
-  async function loadApiKeys(userId: string) {
-    try {
-      const keys = await apiRequest<ApiKeyResource[]>(`/api/security/users/${userId}/api-keys/list`);
-      setApiKeys(keys || []);
-    } catch {
-      setApiKeys([]);
-    }
-  }
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -189,9 +159,8 @@ export default function SecurityAdminPage() {
           body: JSON.stringify({ name: `管理签发 ${new Date().toLocaleDateString("zh-CN")}` }),
         },
       );
-      setNotice(`API Key 已签发: ${result.raw_key}`);
+      setNotice(`API Key 已签发并复制到剪贴板：${result.name}`);
       await navigator.clipboard.writeText(result.raw_key);
-      await loadApiKeys(userId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "签发失败");
     } finally {
@@ -261,7 +230,7 @@ export default function SecurityAdminPage() {
               <button className="button button-primary" type="submit" disabled={submitting || !roleAssignForm.user_id}>{submitting ? <LoaderCircle className="spin" /> : <Plus />}分配</button>
             </form>
           </section>
-          <section className="panel" style={{ gridColumn: "1 / -1" }}>
+          <section className="panel security-full-span">
             <div className="panel-heading">
               <div>
                 <span className="eyebrow">USER LIST</span>
@@ -270,7 +239,7 @@ export default function SecurityAdminPage() {
             </div>
             <div className="master-table-wrap">
               <table className="master-table">
-                <thead><tr><th>用户名</th><th>显示名称</th><th>邮箱</th><th>部门</th><th>状态</th><th>操作</th></tr></thead>
+                <thead><tr><th>用户名</th><th>显示名称</th><th>邮箱</th><th>部门</th><th>状态</th><th className="table-actions-cell">操作</th></tr></thead>
                 <tbody>
                   {users.map((user) => (
                     <tr key={user.id}>
@@ -279,9 +248,12 @@ export default function SecurityAdminPage() {
                       <td>{user.email ?? "—"}</td>
                       <td>{user.department ?? "—"}</td>
                       <td><span className={`record-status ${user.is_active ? "status-on" : "status-off"}`}>{user.is_active ? "启用" : "停用"}</span></td>
-                      <td>
+                      <td className="table-actions-cell">
                         <div className="row-actions">
-                          <button className="icon-button" onClick={() => void issueApiKey(user.id)} title="签发 API Key"><Key /></button>
+                          <button className="button button-secondary" onClick={() => void issueApiKey(user.id)}>
+                            <Key />
+                            签发 API Key
+                          </button>
                         </div>
                       </td>
                     </tr>

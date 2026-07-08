@@ -20,7 +20,10 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
-import { useModalDismiss } from "@/lib/use-modal-dismiss";
+import { ModalShell } from "@/components/modal-shell";
+import { SectionHeader } from "@/components/section-header";
+import { JsonObjectEditor, JsonStringListEditor } from "@/components/structured-json-editor";
+import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 
 type TabKey =
   | "issues"
@@ -147,8 +150,8 @@ const tabs: Record<TabKey, TabConfig> = {
       { name: "row_count", label: "总行数", type: "number" },
       { name: "valid_row_count", label: "有效行数", type: "number" },
       { name: "failed_row_count", label: "失败行数", type: "number" },
-      { name: "preview_payload", label: "预览 JSON", type: "json" },
-      { name: "error_report", label: "错误报告 JSON", type: "json" },
+      { name: "preview_payload", label: "预览结果", type: "json" },
+      { name: "error_report", label: "错误清单", type: "json" },
       { name: "submitted_by", label: "提交人", required: true },
     ],
     table: [["import_no", "任务号"], ["domain_type", "文件域"], ["source_filename", "文件"], ["status", "状态"], ["row_count", "行数"]],
@@ -175,7 +178,7 @@ const tabs: Record<TabKey, TabConfig> = {
       { name: "result", label: "结论", type: "select", options: [["PENDING", "待定"], ["PASS", "通过"], ["FAIL", "失败"]] },
       { name: "study_at", label: "研究时间", type: "datetime-local", required: true },
       { name: "approved_by", label: "审批人" },
-      { name: "raw_results", label: "原始结果 JSON", type: "json" },
+      { name: "raw_results", label: "原始结果明细", type: "json" },
     ],
     table: [["study_no", "编号"], ["quality_type", "质量族"], ["metric_code", "指标"], ["result", "结论"], ["grr_percent", "GRR %"]],
   },
@@ -197,8 +200,8 @@ const tabs: Record<TabKey, TabConfig> = {
       { name: "status", label: "状态", type: "select", options: statusOptions.supplier },
       { name: "submitted_by", label: "提交人", required: true },
       { name: "reviewed_by", label: "审核人" },
-      { name: "field_values", label: "字段值 JSON", type: "json" },
-      { name: "validation_result", label: "校验结果 JSON", type: "json" },
+      { name: "field_values", label: "字段值明细", type: "json" },
+      { name: "validation_result", label: "校验结果", type: "json" },
       { name: "remark", label: "备注", type: "textarea" },
     ],
     table: [["submission_no", "编号"], ["supplier", "供应商"], ["material_code", "材料"], ["document_type", "类型"], ["status", "状态"]],
@@ -218,7 +221,7 @@ const tabs: Record<TabKey, TabConfig> = {
       { name: "sample_count", label: "样本数", type: "number" },
       { name: "validation_score", label: "验证分数", type: "number" },
       { name: "evidence_uri", label: "证据 URI" },
-      { name: "evidence_payload", label: "证据 JSON", type: "json" },
+      { name: "evidence_payload", label: "证据明细", type: "json" },
       { name: "approved_by", label: "审批人" },
       { name: "remark", label: "备注", type: "textarea" },
     ],
@@ -239,8 +242,8 @@ const tabs: Record<TabKey, TabConfig> = {
       { name: "metric_code", label: "指标代码" },
       { name: "symptom_pattern", label: "症状模式", type: "textarea", required: true },
       { name: "diagnosis_rule", label: "诊断规则", type: "textarea", required: true },
-      { name: "recommended_checks", label: "推荐检查 JSON", type: "json" },
-      { name: "related_parameters", label: "相关参数 JSON 数组", type: "json" },
+      { name: "recommended_checks", label: "推荐检查项", type: "json" },
+      { name: "related_parameters", label: "相关参数清单", type: "json" },
       { name: "evidence_level", label: "证据等级", type: "select", options: [["RULE", "规则"], ["SIMULATION", "仿真"], ["DOE", "DOE"], ["CONTROLLED_CHANGE", "受控变更"], ["VERIFIED_CAUSE", "验证原因"]] },
       { name: "status", label: "状态", type: "select", options: statusOptions.approval },
       { name: "created_by", label: "创建人", required: true },
@@ -259,9 +262,9 @@ const tabs: Record<TabKey, TabConfig> = {
       { name: "prediction_result_id", label: "预测结果 ID" },
       { name: "explanation_type", label: "解释类型", type: "select", options: [["SHAP", "SHAP"], ["SENSITIVITY", "敏感性"], ["UNCERTAINTY", "不确定度"], ["FEATURE_IMPORTANCE", "特征重要性"]] },
       { name: "target_metric", label: "目标指标", required: true },
-      { name: "feature_impacts", label: "特征影响 JSON", type: "json" },
-      { name: "sensitivity_grid", label: "敏感性 JSON", type: "json" },
-      { name: "uncertainty", label: "不确定度 JSON", type: "json" },
+      { name: "feature_impacts", label: "特征影响结果", type: "json" },
+      { name: "sensitivity_grid", label: "敏感性结果", type: "json" },
+      { name: "uncertainty", label: "不确定度结果", type: "json" },
       { name: "generated_by", label: "生成人", required: true },
     ],
     table: [["explanation_type", "类型"], ["target_metric", "指标"], ["generated_by", "生成人"], ["generated_at", "生成时间"], ["model_version_id", "模型 ID"]],
@@ -314,6 +317,17 @@ function displayValue(value: unknown): string {
     return new Date(String(value)).toLocaleString("zh-CN");
   }
   return String(value);
+}
+
+function isSystemGeneratedJsonField(fieldName: string): boolean {
+  return [
+    "preview_payload",
+    "error_report",
+    "validation_result",
+    "feature_impacts",
+    "sensitivity_grid",
+    "uncertainty",
+  ].includes(fieldName);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -384,7 +398,6 @@ export function EngineeringWorkspace() {
     if (submitting) return;
     setModalOpen(false);
   }, [submitting]);
-  useModalDismiss({ open: modalOpen, onClose: closeModal, busy: submitting });
 
   const config = tabs[active];
   const EmptyIcon = config.icon;
@@ -640,16 +653,17 @@ export function EngineeringWorkspace() {
               ))}
             </tbody>
           </table>
-          {!data[active].length ? <div className="large-empty"><EmptyIcon />暂无{config.bulkLabel}，可新建或通过模板批量导入</div> : null}
+          {!data[active].length ? <WorkspaceEmptyState icon={EmptyIcon} title={`暂无${config.bulkLabel}`} description="可直接新建，或先下载模板后批量导入数据。" compact /> : null}
         </div>
 
         {active === "issues" ? (
           <aside className="engineering-detail-card">
-            <div>
-              <span className="eyebrow">TASK EVIDENCE</span>
-              <h3>{selectedTask ? displayValue(selectedTask.title) : "选择左侧工单"}</h3>
-              <p>{selectedTask ? displayValue(selectedTask.problem_statement) : "选择工单后，可追加测量复核、Dürr 执行、材料批次、AI 诊断或人工判断证据。"}</p>
-            </div>
+            <SectionHeader
+              eyebrow="TASK EVIDENCE"
+              title={selectedTask ? displayValue(selectedTask.title) : "选择左侧工单"}
+              description={selectedTask ? displayValue(selectedTask.problem_statement) : "选择工单后，可追加测量复核、Dürr 执行、材料批次、AI 诊断或人工判断证据。"}
+              titleAs="h3"
+            />
             <div className="compact-list">
               <strong>证据</strong>
               {evidence.map((item) => <span key={item.id}>{displayValue(item.evidence_type)} · {displayValue(item.summary)}</span>)}
@@ -675,11 +689,12 @@ export function EngineeringWorkspace() {
 
         {active === "imports" ? (
           <aside className="engineering-detail-card">
-            <div>
-              <span className="eyebrow">FILE PREVIEW</span>
-              <h3>设备/材料文件预览校验</h3>
-              <p>选择已审批的导入 profile 后上传 CSV/XLSX。系统只生成预览、字段映射和错误报告，不会自动写入目标表。</p>
-            </div>
+            <SectionHeader
+              eyebrow="FILE PREVIEW"
+              title="设备/材料文件预览校验"
+              description="选择已审批的导入 profile 后上传 CSV/XLSX。系统只生成预览、字段映射和错误报告，不会自动写入目标表。"
+              titleAs="h3"
+            />
             <label>
               <span>导入 Profile</span>
               <select value={importProfileId} onChange={(event) => setImportProfileId(event.target.value)}>
@@ -724,7 +739,7 @@ export function EngineeringWorkspace() {
               <div className="compact-list">
                 <strong>预览行</strong>
                 {selectedImportPreviewRows.slice(0, 3).map((row, index) => (
-                  <span key={index}>{JSON.stringify(row)}</span>
+                  <span key={index}>{Object.entries(row).slice(0, 4).map(([key, entryValue]) => `${key}: ${displayValue(entryValue)}`).join(" · ")}</span>
                 ))}
               </div>
             ) : null}
@@ -741,36 +756,40 @@ export function EngineeringWorkspace() {
       </section>
 
       {modalOpen ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}>
-          <section className="modal-card quality-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-heading">
-              <div>
-                <span className="eyebrow">ENGINEERING WORKFLOW</span>
-                <h2>新建{config.bulkLabel}</h2>
-              </div>
-              <button className="icon-button" onClick={closeModal} aria-label="关闭">
-                <X aria-hidden="true" />
-              </button>
-            </div>
-            <form onSubmit={submit}>
-              <div className="form-grid">
-                {config.fields.map((field) => (
-                  <label key={field.name} className={field.type === "textarea" || field.type === "json" ? "wide-field" : ""}>
+        <ModalShell
+          className="quality-modal"
+          eyebrow="ENGINEERING WORKFLOW"
+          title={`新建${config.bulkLabel}`}
+          description={`统一维护${config.bulkLabel}表单结构、关闭交互和保存动作。`}
+          onClose={closeModal}
+          busy={submitting}
+        >
+          <form onSubmit={submit}>
+            <div className="form-grid">
+                {config.fields.filter((field) => !isSystemGeneratedJsonField(field.name)).map((field) => (
+                  <label
+                    key={field.name}
+                    className={field.type === "textarea" || field.type === "json" ? "form-field form-field-wide" : "form-field"}
+                  >
                     <span>{field.label}{field.required ? " *" : ""}</span>
                     {renderField(field, form, setForm)}
                   </label>
                 ))}
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button>
-                <button className="button button-primary" disabled={submitting}>
-                  {submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}
-                  {submitting ? "正在保存" : "保存到 MySQL"}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
+                {config.fields.some((field) => isSystemGeneratedJsonField(field.name)) ? (
+                  <div className="modal-note form-field-wide">
+                    系统生成字段不会在录入弹窗中要求人工填写。保存后，预览结果、错误清单、校验结果和模型解释结果由后端自动生成或回写。
+                  </div>
+                ) : null}
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button>
+              <button className="button button-primary" disabled={submitting}>
+                {submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}
+                {submitting ? "正在保存" : "保存到 MySQL"}
+              </button>
+            </div>
+          </form>
+        </ModalShell>
       ) : null}
     </div>
   );
@@ -785,7 +804,48 @@ function renderField(field: FieldDef, form: FormState, setForm: (next: FormState
       </select>
     );
   }
-  if (field.type === "textarea" || field.type === "json") {
+  if (field.type === "json") {
+    if (field.name === "recommended_checks" || field.name === "related_parameters") {
+      return (
+        <JsonStringListEditor
+          value={String(value ?? "")}
+          onChange={(nextValue) => setForm({ ...form, [field.name]: nextValue })}
+          itemLabel={field.name === "recommended_checks" ? "检查项" : "参数代码"}
+          addLabel={field.name === "recommended_checks" ? "新增检查项" : "新增参数"}
+        />
+      );
+    }
+    return (
+      <JsonObjectEditor
+        value={String(value ?? "")}
+        onChange={(nextValue) => setForm({ ...form, [field.name]: nextValue })}
+        keyLabel={
+          field.name === "field_values"
+            ? "字段名"
+            : field.name === "field_mapping"
+              ? "源列名"
+              : field.name === "evidence_payload"
+                ? "证据项"
+                : "项目"
+        }
+        valueLabel={
+          field.name === "field_mapping"
+            ? "目标字段"
+            : field.name === "raw_results"
+              ? "结果值"
+              : "内容"
+        }
+        addLabel={
+          field.name === "field_mapping"
+            ? "新增映射"
+            : field.name === "field_values"
+              ? "新增字段"
+              : "新增一项"
+        }
+      />
+    );
+  }
+  if (field.type === "textarea") {
     return <textarea value={String(value ?? "")} required={field.required} placeholder={field.placeholder} onChange={(event) => setForm({ ...form, [field.name]: event.target.value })} />;
   }
   if (field.type === "checkbox") {

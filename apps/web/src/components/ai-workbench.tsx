@@ -18,6 +18,7 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ValidationChart } from "@/components/validation-chart";
+import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 import { useAuth } from "@/lib/auth-context";
 
 const DEFAULT_FEATURE_SET_VERSION = "point-features-v4-material-governed";
@@ -1238,6 +1239,18 @@ export function AiWorkbench() {
     }
   }
 
+  if (!actor.isAuthenticated) {
+    return (
+      <div className="page-stack">
+        <WorkspaceEmptyState
+          icon={ShieldCheck}
+          title="请先登录后进入 AI 闭环工作台"
+          description="模型治理、预测诊断、推荐审批与复测闭环都属于高风险业务能力，需要登录后再继续。"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="page-stack">
       <header className="page-header">
@@ -1348,7 +1361,14 @@ export function AiWorkbench() {
                   <div className="ai-model-metrics"><span>目标 <b>{model.target_metric}</b></span><span>训练样本 <b>{model.training_sample_count}</b></span><span>验证 R² <b>{formatNumber(model.evaluation_metrics.validation_r2)}</b></span><span>验证 RMSE <b>{formatNumber(model.evaluation_metrics.validation_rmse)}</b></span></div>
                 </article>
               ))}
-              {!filteredModels.length ? <div className="master-empty"><BrainCircuit /> 暂无模型版本</div> : null}
+              {!filteredModels.length ? (
+                <WorkspaceEmptyState
+                  icon={BrainCircuit}
+                  title="暂无模型版本"
+                  description="先完成点位特征快照和数据集治理，再训练候选模型，这里才会出现可管理的模型版本。"
+                  compact
+                />
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -1434,7 +1454,14 @@ export function AiWorkbench() {
                   {driftReport.feature_drift.map((feature) => <div className="ai-drift-row" key={feature.feature}><span><strong>{feature.feature}</strong><small>{feature.sample_count} 个有效样本</small></span><span>{formatNumber(feature.training_mean)}</span><span>{formatNumber(feature.recent_mean)}</span><span>{formatNumber(feature.standardized_mean_shift)}</span><span>{formatNumber(feature.missing_rate * 100, 1)}%</span><span><b className={`status-badge ${driftStatusClass(feature.status)}`}>{statusLabel(feature.status)}</b></span></div>)}
                 </div>
               </> : null}
-              {!driftLoading && !driftReport ? <div className="master-empty"><Activity /> 请选择模型版本查看治理报告</div> : null}
+              {!driftLoading && !driftReport ? (
+                <WorkspaceEmptyState
+                  icon={Activity}
+                  title="请选择模型版本查看治理报告"
+                  description="治理报告会展示漂移、验证证据、工件哈希和适用范围，请先从左侧选择具体模型版本。"
+                  compact
+                />
+              ) : null}
               {selectedModel?.evaluation_metrics?.multi_axis_validation ? (() => {
                 const raw = selectedModel.evaluation_metrics.multi_axis_validation as unknown as Record<string, unknown>;
                 const axes = raw && typeof raw === "object" && "axes" in raw ? (raw.axes as Record<string, Record<string, unknown>>) : null;
@@ -1483,7 +1510,14 @@ export function AiWorkbench() {
                   <span className={`record-status ${diagnosis ? "status-on" : "status-off"}`}>{diagnosis ? "已诊断" : "待诊断"}</span>
                 </button>;
               })}
-              {!filteredPredictions.length ? <div className="master-empty"><Activity /> 暂无预测记录</div> : null}
+              {!filteredPredictions.length ? (
+                <WorkspaceEmptyState
+                  icon={Activity}
+                  title="暂无预测记录"
+                  description="当生效模型通过治理门禁后执行预测，这里会沉淀点位预测结果和诊断证据。"
+                  compact
+                />
+              ) : null}
               {selectedPrediction ? <div className="ai-evidence-panel">
                 <div className="program-subheading"><div><span className="eyebrow">Explainability</span><h3>诊断证据</h3></div>{!selectedDiagnosis ? <button className="button button-primary" onClick={() => void runDiagnosis(selectedPrediction.id)} disabled={submitting === `diagnose-${selectedPrediction.id}`}>{submitting ? <LoaderCircle className="spin" /> : <Sparkles />} 生成诊断</button> : <span className="record-status status-on">{selectedDiagnosis.causality_status}</span>}</div>
                 {selectedDiagnosis ? <><p className="ai-summary">{selectedDiagnosis.summary}</p><div className="ai-factor-list">{selectedDiagnosis.factor_contributions.map((factor) => <div key={factor.feature}><span><strong>{factor.feature}</strong><small>当前值 {formatNumber(factor.value)} · {factor.basis}</small></span><b className={factor.impact >= 0 ? "positive" : "negative"}>{factor.impact >= 0 ? "+" : ""}{formatNumber(factor.impact)}</b></div>)}</div></> : <div className="program-empty">选择“生成诊断”后保存局部特征贡献和相关性说明。</div>}
@@ -1531,7 +1565,14 @@ export function AiWorkbench() {
                 {selectedRecommendation.status === "APPROVED" ? <div className="ai-workflow-actions"><button className="button button-primary" onClick={() => void executeRecommendation(selectedRecommendation)}><Play /> 记录实际执行</button></div> : null}
                 {selectedRecommendation.status === "EXECUTED" ? <div className="ai-verification"><label className="form-field"><span>选择执行后的同生产事件、同点位复测记录</span><select value={verificationMeasurementId} onChange={(event) => setVerificationMeasurementId(event.target.value)}><option value="">请选择复测数据</option>{verificationOptions.map((measurement) => <option key={measurement.id} value={measurement.id}>{measurement.data_no} · {new Date(measurement.measured_at).toLocaleString("zh-CN")}</option>)}</select></label>{!verificationOptions.length ? <p className="ai-hint">请先在质量数据中心录入执行后的复测数据，或通过 QMS 集成事件写入。</p> : null}<button className="button button-primary" disabled={!verificationOptions.length} onClick={() => void verifyRecommendation(selectedRecommendation)}><ShieldCheck /> 完成复测评价</button></div> : null}
                 {selectedRecommendation.evaluation ? <div className={`ai-evaluation ${selectedRecommendation.evaluation.is_effective ? "effective" : "ineffective"}`}><strong>{selectedRecommendation.evaluation.is_effective ? "闭环改善有效" : "闭环改善未达预期"}</strong><span>基准 {formatNumber(selectedRecommendation.evaluation.baseline_value)} → 复测 {formatNumber(selectedRecommendation.evaluation.verified_value)}，实际改善 {formatNumber(selectedRecommendation.evaluation.actual_improvement)}</span><small>{selectedRecommendation.evaluation.verified_by} · {selectedRecommendation.evaluation.conclusion}</small></div> : null}
-              </div> : <div className="master-empty"><Sparkles /> 暂无推荐记录</div>}
+              </div> : (
+                <WorkspaceEmptyState
+                  icon={Sparkles}
+                  title="暂无推荐记录"
+                  description="约束推荐会在模型、范围和 OOD 校验通过后生成，后续可从这里进入审批、执行与复测闭环。"
+                  compact
+                />
+              )}
             </div>
           </div>
         ) : null}
@@ -1543,7 +1584,12 @@ export function AiWorkbench() {
             </div>
             <div className="comparison-grid">
               {models.length === 0 ? (
-                <div className="master-empty"><BrainCircuit /> 暂无模型版本可供对比</div>
+                <WorkspaceEmptyState
+                  icon={BrainCircuit}
+                  title="暂无模型版本可供对比"
+                  description="至少训练出一个模型版本后，才会在这里形成验证指标和特征版本对比视图。"
+                  compact
+                />
               ) : (
                 <div className="model-comparison-table-wrap">
                   <table className="master-table comparison-table">
@@ -1566,7 +1612,6 @@ export function AiWorkbench() {
                         .map((model) => {
                           const trainingR2 = model.evaluation_metrics.training_r2;
                           const validationR2 = model.evaluation_metrics.validation_r2;
-                          const r2Gap = trainingR2 != null && validationR2 != null ? trainingR2 - validationR2 : null;
                           const isActive = model.status === "ACTIVE";
                           return (
                             <tr key={model.id} className={isActive ? "comparison-row-active" : ""}>
@@ -1577,7 +1622,7 @@ export function AiWorkbench() {
                               <td>{formatNumber(model.evaluation_metrics.training_rmse)}</td>
                               <td>{formatNumber(model.evaluation_metrics.validation_rmse)}</td>
                               <td>{model.training_sample_count}</td>
-                              <td className="mono" style={{fontSize:".7rem"}}>{model.feature_set_version.slice(-20)}</td>
+                              <td className="mono comparison-feature-version">{model.feature_set_version.slice(-20)}</td>
                               <td><span className={`record-status ${isActive ? "status-on" : "status-off"}`}>{statusLabel(model.status)}</span></td>
                             </tr>
                           );

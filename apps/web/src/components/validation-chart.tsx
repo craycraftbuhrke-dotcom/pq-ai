@@ -20,6 +20,7 @@ const AMBER = "var(--amber-500, #b97918)";
 const TEXT = "var(--color-text)";
 const MUTED = "var(--color-muted)";
 const LINE = "var(--color-border)";
+const VALIDATION_MARGIN = { top: 8, right: 108, bottom: 8, left: 20 } as const;
 
 function barColor(status: string): string {
   if (status === "EVALUATED") return TEAL;
@@ -45,9 +46,8 @@ export function ValidationChart({
 }: ValidationChartProps) {
   const barH = 32;
   const barGap = 12;
-  const margin = { top: 8, right: 108, bottom: 8, left: 20 };
   const labelW = 138;
-  const chartLeft = margin.left + labelW + 12;
+  const chartLeft = VALIDATION_MARGIN.left + labelW + 12;
 
   const insufficientH = 20;
 
@@ -64,10 +64,10 @@ export function ValidationChart({
   const evalRows = evaluatedAxes.length;
   const insufRows = insufficientAxes.length;
   const actualH =
-    margin.top +
+    VALIDATION_MARGIN.top +
     evalRows * (barH + barGap) +
     (insufRows > 0 ? insufRows * (insufficientH + 8) + 4 : 0) +
-    margin.bottom;
+    VALIDATION_MARGIN.bottom;
 
   const svgH = height ?? Math.max(actualH + 8, 120);
 
@@ -77,16 +77,15 @@ export function ValidationChart({
     .filter((v): v is number => v != null);
   const maxRmse = allRmse.length > 0 ? Math.max(...allRmse) : 1;
 
-  const barAreaW = width - chartLeft - margin.right;
+  const barAreaW = width - chartLeft - VALIDATION_MARGIN.right;
 
-  let y = margin.top;
+  let y = VALIDATION_MARGIN.top;
 
   const evalBarRects: {
     axis: ValidationAxis;
     x: number;
     y: number;
     w: number;
-    r2X: number;
   }[] = [];
 
   for (const a of ordered) {
@@ -96,8 +95,7 @@ export function ValidationChart({
     }
     const rmse = a.rmse ?? 0;
     const barW = maxRmse > 0 ? (rmse / maxRmse) * barAreaW : 0;
-    const r2X = chartLeft + Math.max(barW, 4) + 10;
-    evalBarRects.push({ axis: a, x: chartLeft, y, w: Math.max(barW, 4), r2X });
+    evalBarRects.push({ axis: a, x: chartLeft, y, w: Math.max(barW, 4) });
     y += barH + barGap;
   }
 
@@ -107,25 +105,17 @@ export function ValidationChart({
 
   if (axes.length === 0) {
     return (
-      <figure style={{ width, height: svgH, margin: 0 }}>
+      <figure style={{ width, height: svgH }} className="chart-figure">
         <figcaption
-          style={{
-            color: TEXT,
-            fontWeight: 600,
-            fontSize: 13,
-            marginBottom: 4,
-            paddingLeft: margin.left + labelW + 12,
-          }}
+          className="chart-figure-title"
+          style={{ paddingLeft: VALIDATION_MARGIN.left + labelW + 12 }}
         >
           Multi-Axis Validation
         </figcaption>
         <div
+          className="chart-empty"
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
             height: svgH - 28,
-            color: MUTED,
           }}
         >
           No axes
@@ -135,15 +125,10 @@ export function ValidationChart({
   }
 
   return (
-    <figure style={{ width, height: svgH, margin: 0 }}>
+    <figure style={{ width, height: svgH }} className="chart-figure">
       <figcaption
-        style={{
-          color: TEXT,
-          fontWeight: 600,
-          fontSize: 13,
-          marginBottom: 4,
-          paddingLeft: chartLeft,
-        }}
+        className="chart-figure-title"
+        style={{ paddingLeft: chartLeft }}
       >
         Multi-Axis Validation
       </figcaption>
@@ -151,20 +136,20 @@ export function ValidationChart({
         viewBox={`0 0 ${width} ${svgH}`}
         role="img"
         aria-label="Multi-Axis Validation"
-        style={{ width: "100%", height: "auto", display: "block" }}
+        className="chart-svg"
       >
         {/* Background grid line at 0 */}
         <line
           x1={chartLeft}
-          y1={svgH - margin.bottom}
+          y1={svgH - VALIDATION_MARGIN.bottom}
           x2={chartLeft}
-          y2={margin.top}
+          y2={VALIDATION_MARGIN.top}
           stroke={LINE}
           strokeWidth={1}
         />
 
         {/* Evaluated bars */}
-        {evalBarRects.map(({ axis, x, y, w, r2X }) => {
+        {evalBarRects.map(({ axis, x, y, w }) => {
           const color = barColor(axis.status);
           const rmse = axis.rmse ?? 0;
           return (
@@ -216,7 +201,7 @@ export function ValidationChart({
 
               {/* Sample count */}
               <text
-                x={width - margin.right + 6}
+                x={width - VALIDATION_MARGIN.right + 6}
                 y={y + barH / 2 + 4}
                 fill={MUTED}
                 fontSize={11}
@@ -231,8 +216,8 @@ export function ValidationChart({
         {/* Insufficient rows */}
         {(() => {
           let iy = evalRows > 0
-            ? margin.top + evalRows * (barH + barGap) + 4
-            : margin.top;
+            ? VALIDATION_MARGIN.top + evalRows * (barH + barGap) + 4
+            : VALIDATION_MARGIN.top;
           return insufficientItems.map((axis) => {
             const rowY = iy;
             iy += insufficientH + 8;
@@ -256,7 +241,7 @@ export function ValidationChart({
                   (insufficient data)
                 </text>
                 <text
-                  x={width - margin.right + 6}
+                  x={width - VALIDATION_MARGIN.right + 6}
                   y={rowY + insufficientH / 2 + 4}
                   fill={MUTED}
                   fontSize={11}

@@ -2,6 +2,8 @@
 
 import { Activity, CheckCircle2, CircleAlert, LoaderCircle, PlugZap, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { SectionHeader } from "@/components/section-header";
+import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 import { useAuth } from "@/lib/auth-context";
 
 type EndpointHealth = {
@@ -62,7 +64,18 @@ export default function IntegrationMonitorPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
-  if (!actor.isAuthenticated) return <div className="page-stack"><div className="master-empty">请先登录。</div></div>;
+  if (!actor.isAuthenticated) {
+    return (
+      <div className="page-stack">
+        <WorkspaceEmptyState
+          icon={PlugZap}
+          title="请先登录后查看集成监控"
+          description="集成监控会展示端点健康度、失败事件和待处理死信，需要登录后再继续。"
+          compact
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="page-stack">
@@ -76,11 +89,28 @@ export default function IntegrationMonitorPage() {
           <article><Activity /><span>最近失败</span><strong>{health.recent_failures.length}</strong><small>条待处理</small></article>
         </section>
         <div className="integration-monitor-grid">
-          <section className="panel"><div className="panel-heading"><div><span className="eyebrow">ENDPOINTS</span><h2>端点状态</h2></div></div>
-            <div className="master-table-wrap"><table className="master-table"><thead><tr><th>端点</th><th>类型</th><th>事件数</th><th>成功</th><th>失败</th><th>待处理</th><th>最近成功</th><th>状态</th></tr></thead><tbody>{health.endpoints.map((ep) => <tr key={ep.id}><td><strong>{ep.code}</strong><small>{ep.name}</small></td><td>{SYSTEM_ICONS[ep.system_type] ?? "🔌"} {ep.system_type}</td><td>{ep.event_count}</td><td className="cell-good">{ep.success_count}</td><td className={ep.failed_count > 0 ? "cell-warn" : ""}>{ep.failed_count}</td><td className={ep.pending_count > 0 ? "cell-warn" : ""}>{ep.pending_count}</td><td><small>{timeSince(ep.last_success_at)}</small></td><td><span className={`record-status ${ep.is_active ? "status-on" : "status-off"}`}>{ep.is_active ? "在线" : "离线"}</span></td></tr>)}</tbody></table>{!health.endpoints.length ? <div className="master-empty"><PlugZap /> 暂无集成端点</div> : null}</div></section>
-          {health.recent_failures.length > 0 ? <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RECENT FAILURES</span><h2>近期失败事件</h2></div><span className="record-status status-off">{health.recent_failures.length} 条</span></div><div className="failure-list">{health.recent_failures.map((f, i) => <div className="failure-card" key={i}><CircleAlert className="alert-icon" /><div className="failure-body"><div className="failure-header"><strong className="mono">{f.endpoint_code}</strong><span>{f.event_type}</span><small>{timeSince(f.created_at)}</small></div><p className="failure-error">{f.last_error}</p></div></div>)}</div></section> : null}
+          <section className="panel">
+            <SectionHeader eyebrow="ENDPOINTS" title="端点状态" className="panel-heading" compact />
+            <div className="master-table-wrap"><table className="master-table"><thead><tr><th>端点</th><th>类型</th><th>事件数</th><th>成功</th><th>失败</th><th>待处理</th><th>最近成功</th><th>状态</th></tr></thead><tbody>{health.endpoints.map((ep) => <tr key={ep.id}><td><strong>{ep.code}</strong><small>{ep.name}</small></td><td>{SYSTEM_ICONS[ep.system_type] ?? "🔌"} {ep.system_type}</td><td>{ep.event_count}</td><td className="cell-good">{ep.success_count}</td><td className={ep.failed_count > 0 ? "cell-warn" : ""}>{ep.failed_count}</td><td className={ep.pending_count > 0 ? "cell-warn" : ""}>{ep.pending_count}</td><td><small>{timeSince(ep.last_success_at)}</small></td><td><span className={`record-status ${ep.is_active ? "status-on" : "status-off"}`}>{ep.is_active ? "在线" : "离线"}</span></td></tr>)}</tbody></table>{!health.endpoints.length ? <WorkspaceEmptyState icon={PlugZap} title="暂无集成端点" description="先在集成与任务中心维护端点后，这里才会展示健康度与事件统计。" compact /> : null}</div>
+          </section>
+          <section className="panel">
+            <SectionHeader
+              eyebrow="RECENT FAILURES"
+              title="近期失败事件"
+              className="panel-heading"
+              compact
+              badge={<span className={`record-status ${health.recent_failures.length > 0 ? "status-off" : "status-on"}`}>{health.recent_failures.length > 0 ? `${health.recent_failures.length} 条` : "无失败"}</span>}
+            />
+            {health.recent_failures.length > 0 ? (
+              <div className="failure-list">
+                {health.recent_failures.map((f, i) => <div className="failure-card" key={i}><CircleAlert className="alert-icon" /><div className="failure-body"><div className="failure-header"><strong className="mono">{f.endpoint_code}</strong><span>{f.event_type}</span><small>{timeSince(f.created_at)}</small></div><p className="failure-error">{f.last_error}</p></div></div>)}
+              </div>
+            ) : (
+              <WorkspaceEmptyState icon={CheckCircle2} title="最近未发现失败事件" description="最近的集成事件处理状态稳定，当前没有需要人工复盘的失败记录。" compact />
+            )}
+          </section>
         </div>
-      </> : null}
+      </> : <WorkspaceEmptyState icon={PlugZap} title="暂无集成监控数据" description="当前还没有可用于统计的端点和事件数据，补齐集成端点后这里会自动形成监控视图。" />}
     </div>
   );
 }

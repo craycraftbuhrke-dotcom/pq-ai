@@ -10,7 +10,7 @@ import {
   TrendingUp,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { useAuth } from "@/lib/auth-context";
 
@@ -61,11 +61,11 @@ const TREND_LABELS: Record<string, string> = {
   insufficient_data: "数据不足",
 };
 
-const TREND_ICONS: Record<string, React.ReactNode> = {
-  stable: <TrendingUp style={{ color: "var(--teal)" }} />,
-  improving: <TrendingUp style={{ color: "var(--teal)" }} />,
-  declining: <TrendingDown style={{ color: "var(--red)" }} />,
-  insufficient_data: <BarChart3 style={{ color: "var(--text-muted)" }} />,
+const TREND_ICONS: Record<string, ReactNode> = {
+  stable: <TrendingUp className="trend-icon" />,
+  improving: <TrendingUp className="trend-icon" />,
+  declining: <TrendingDown className="trend-icon" />,
+  insufficient_data: <BarChart3 className="trend-icon" />,
 };
 
 function getApiKeyFromCookie(): string {
@@ -102,14 +102,14 @@ function reliabilityDot(status: string) {
   const color = RELIABILITY_COLORS[status] ?? "var(--text-muted)";
   return (
     <span
-      style={{
-        display: "inline-block",
-        width: 8,
-        height: 8,
-        borderRadius: "50%",
-        background: color,
-        flexShrink: 0,
-      }}
+      className={`reliability-dot ${
+        status === "VERIFIED" || status === "PASSED"
+          ? "dot-verified"
+          : status === "FAILED"
+            ? "dot-failed"
+            : "dot-unverified"
+      }`}
+      style={{ background: color, flexShrink: 0 }}
     />
   );
 }
@@ -143,7 +143,7 @@ function ScatterChart({
 
   if (filtered.length === 0) {
     return (
-      <div className="master-empty" style={{ minHeight: 200 }}>
+      <div className="master-empty material-trend-empty">
         <BarChart3 /> 暂无该特性的检测数据
       </div>
     );
@@ -187,18 +187,11 @@ function ScatterChart({
       : [filtered[0].tested_at];
 
   return (
-    <div>
-      <div style={{ padding: "8px 16px", display: "flex", alignItems: "center", gap: 8 }}>
-        <span className="eyebrow">特性选择</span>
+    <div className="material-trend-chart">
+      <div className="material-trend-controls">
+        <label htmlFor="material-trend-char">特性选择</label>
         <select
-          style={{
-            background: "var(--surface)",
-            border: "1px solid var(--line)",
-            borderRadius: 5,
-            padding: "4px 8px",
-            fontSize: 11,
-            color: "var(--text)",
-          }}
+          id="material-trend-char"
           value={selectedChar}
           onChange={(e) => onSelectChar(e.target.value)}
         >
@@ -208,7 +201,7 @@ function ScatterChart({
             </option>
           ))}
         </select>
-        <span style={{ marginLeft: "auto", color: "var(--text-muted)", fontSize: 10 }}>
+        <span className="material-trend-meta">
           {filtered.length} 条记录 · 均值 {mean.toFixed(3)} · σ {sd.toFixed(3)}
         </span>
       </div>
@@ -346,8 +339,12 @@ export default function MaterialTrendsPage() {
     }
   }, []);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void reload();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [reload]);
 
   const characteristics = useMemo(
     () => [...new Set(results.map((r) => r.characteristic_name))],
@@ -491,7 +488,7 @@ export default function MaterialTrendsPage() {
                 <span className="eyebrow">BATCH LIST</span>
                 <h2>批次检测汇总</h2>
               </div>
-              <span className="mono" style={{ color: "var(--text-muted)", fontSize: 10 }}>
+              <span className="mono material-trend-meta">
                 {batchSummaries.length} 个批次
               </span>
             </div>
@@ -520,18 +517,14 @@ export default function MaterialTrendsPage() {
                     return (
                       <tr
                         key={batch.batch_no}
+                        className={`batch-row-clickable ${selectedBatch === batch.batch_no ? "batch-row-selected" : ""}`}
                         onClick={() =>
                           setSelectedBatch((prev) => (prev === batch.batch_no ? null : batch.batch_no))
                         }
-                        style={{
-                          cursor: "pointer",
-                          background:
-                            selectedBatch === batch.batch_no ? "var(--surface)" : undefined,
-                        }}
                       >
                         <td>{reliabilityDot(relStatus)}</td>
                         <td className="mono">{batch.batch_no}</td>
-                        <td className="mono" style={{ color: "var(--text-muted)" }}>
+                        <td className="mono material-trend-meta">
                           {batch.material_code}
                         </td>
                         <td>{batch.material_name}</td>
@@ -541,14 +534,14 @@ export default function MaterialTrendsPage() {
                         </td>
                         <td>
                           {batch.failed_count > 0 ? (
-                            <span className="record-status status-off" style={{ color: "var(--red)" }}>
+                            <span className="record-status status-off status-danger">
                               {batch.failed_count}
                             </span>
                           ) : (
                             <span className="record-status status-off">0</span>
                           )}
                         </td>
-                        <td className="mono" style={{ fontSize: 9, color: "var(--text-muted)" }}>
+                        <td className="mono material-trend-meta">
                           {formatDate(batch.latest_tested_at)}
                         </td>
                       </tr>
@@ -584,9 +577,8 @@ export default function MaterialTrendsPage() {
                   </h2>
                 </div>
                 <button
-                  className="button button-secondary"
+                  className="button button-secondary compact-button"
                   onClick={() => setSelectedBatch(null)}
-                  style={{ fontSize: 9, padding: "4px 8px", minHeight: 26 }}
                 >
                   <X /> 关闭
                 </button>
@@ -610,12 +602,12 @@ export default function MaterialTrendsPage() {
                         <td className="mono">{r.result_no}</td>
                         <td>{r.characteristic_name}</td>
                         <td className="mono">{r.result_value}</td>
-                        <td style={{ color: "var(--text-muted)" }}>{r.unit}</td>
+                        <td className="material-trend-meta">{r.unit}</td>
                         <td>
                           {r.is_within_spec === true ? (
                             <span className="record-status status-on">合格</span>
                           ) : r.is_within_spec === false ? (
-                            <span className="record-status status-off" style={{ color: "var(--red)" }}>
+                            <span className="record-status status-off status-danger">
                               不合格
                             </span>
                           ) : (
@@ -623,7 +615,7 @@ export default function MaterialTrendsPage() {
                           )}
                         </td>
                         <td>
-                          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                          <span className="inline-status-with-dot">
                             {reliabilityDot(r.reliability_status)}
                             <span
                               className={`record-status ${
@@ -633,17 +625,13 @@ export default function MaterialTrendsPage() {
                                     ? "status-off"
                                     : "status-off"
                               }`}
-                              style={
-                                r.reliability_status === "FAILED"
-                                  ? { color: "var(--red)" }
-                                  : undefined
-                              }
+                              style={r.reliability_status === "FAILED" ? { color: "var(--red)" } : undefined}
                             >
                               {reliabilityLabel(r.reliability_status)}
                             </span>
                           </span>
                         </td>
-                        <td className="mono" style={{ fontSize: 9, color: "var(--text-muted)" }}>
+                        <td className="mono material-trend-meta">
                           {formatDate(r.tested_at)}
                         </td>
                       </tr>
@@ -660,9 +648,8 @@ export default function MaterialTrendsPage() {
                   <h2>批次 {selectedBatch}</h2>
                 </div>
                 <button
-                  className="button button-secondary"
+                  className="button button-secondary compact-button"
                   onClick={() => setSelectedBatch(null)}
-                  style={{ fontSize: 9, padding: "4px 8px", minHeight: 26 }}
                 >
                   <X /> 关闭
                 </button>

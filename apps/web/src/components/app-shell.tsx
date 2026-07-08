@@ -1,14 +1,14 @@
 "use client";
 
-import { LogOut, Menu, Search, ShieldCheck, X } from "lucide-react";
+import { ChevronDown, LogOut, Menu, Search, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { navigationIcons } from "@/components/icons";
 import { ContextSelector } from "@/components/context-selector";
 import { useAuth } from "@/lib/auth-context";
-import { navItems } from "@/lib/ui-data";
+import { navSections, roleQuickAccess, type NavItem } from "@/lib/ui-data";
 
 type AppShellProps = {
   children: ReactNode;
@@ -18,6 +18,74 @@ export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const { actor, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const isAdmin = actor.roles.includes("ADMIN") || actor.permissions.includes("*");
+  const isQualityFocused =
+    actor.roles.includes("QUALITY_ENGINEER") && !actor.roles.includes("PROCESS_ENGINEER") && !isAdmin;
+
+  const allNavItems = useMemo(() => {
+    const items = navSections.flatMap((section) => section.items);
+    return isAdmin
+      ? [...items, { href: "/security-admin", label: "权限与安全", icon: "audit" } satisfies NavItem]
+      : items;
+  }, [isAdmin]);
+
+  const visibleSections = useMemo(() => {
+    if (isAdmin) return navSections;
+    const actorRoles = new Set(actor.roles);
+    return navSections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter(
+          (item) => item.href === pathname || !item.roles || item.roles.some((role) => actorRoles.has(role)),
+        ),
+      }))
+      .filter((section) => section.items.length > 0);
+  }, [actor.roles, isAdmin, pathname]);
+
+  const quickAccessItems = useMemo(() => {
+    const preferredPaths = actor.roles.flatMap((role) => roleQuickAccess[role] ?? []);
+    const candidatePaths = preferredPaths.length
+      ? preferredPaths
+      : ["/", "/production", "/quality", "/engineering", "/master-data"];
+    const uniquePaths = [...new Set(candidatePaths)];
+    return uniquePaths
+      .map((href) => allNavItems.find((item) => item.href === href))
+      .filter((item): item is NavItem => Boolean(item))
+      .filter((item) =>
+        isAdmin
+          ? true
+          : visibleSections.some((section) => section.items.some((sectionItem) => sectionItem.href === item.href)),
+      )
+      .slice(0, 5);
+  }, [actor.roles, allNavItems, isAdmin, visibleSections]);
+
+  const initialCollapsedSections = useMemo(() => {
+    const collapsed: Record<string, boolean> = {};
+    for (const section of visibleSections) {
+      if (section.key === "governance") {
+        collapsed[section.key] = !isAdmin;
+        continue;
+      }
+      if (section.key === "execution") {
+        collapsed[section.key] = isQualityFocused;
+        continue;
+      }
+      collapsed[section.key] = false;
+    }
+    return collapsed;
+  }, [isAdmin, isQualityFocused, visibleSections]);
+
+  const [collapsedOverrides, setCollapsedOverrides] = useState<Record<string, boolean>>({});
+
+  function toggleSection(sectionKey: string) {
+    const defaultValue = initialCollapsedSections[sectionKey] ?? false;
+    const currentValue = collapsedOverrides[sectionKey] ?? defaultValue;
+    setCollapsedOverrides((current) => ({
+      ...current,
+      [sectionKey]: !currentValue,
+    }));
+  }
 
   const isAuthPage = pathname === "/login" || pathname === "/register";
 
@@ -49,31 +117,92 @@ export function AppShell({ children }: AppShellProps) {
           </button>
         </div>
         <nav className="main-nav" aria-label="主导航">
-          <span className="nav-section-label">工作空间</span>
-          {navItems.map((item) => {
-            const Icon = navigationIcons[item.icon];
-            const active = pathname === item.href;
+          <span className="nav-section-label nav-root-label">工作空间</span>
+          {quickAccessItems.length ? (
+            <div className="nav-group nav-quick-group">
+              <div className="nav-group-header">
+                <div className="nav-section-copy">
+                  <span className="nav-section-label">常用入口</span>
+                  <span className="nav-section-description">结合当前角色预置的高频页面，优先放在最上方。</span>
+                </div>
+              </div>
+              {quickAccessItems.map((item) => {
+                const Icon = navigationIcons[item.icon];
+                const active = pathname === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    className={`nav-item nav-item-quick ${active ? "nav-item-active" : ""}`}
+                    href={item.href}
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    <Icon aria-hidden="true" />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+          {visibleSections.map((section) => {
+            const containsActive = section.items.some((item) => item.href === pathname);
+            const isCollapsed = containsActive
+              ? false
+              : (collapsedOverrides[section.key] ?? initialCollapsedSections[section.key] ?? false);
             return (
-              <Link
-                key={item.href}
-                className={`nav-item ${active ? "nav-item-active" : ""}`}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
-              >
-                <Icon aria-hidden="true" />
-                <span>{item.label}</span>
-              </Link>
+              <div className={`nav-group${isCollapsed ? " nav-group-collapsed" : ""}`} key={section.key}>
+                <button
+                  className={`nav-group-header${section.collapsible ? " nav-group-toggle" : ""}`}
+                  type="button"
+                  onClick={section.collapsible ? () => toggleSection(section.key) : undefined}
+                  aria-expanded={!isCollapsed}
+                >
+                  <div className="nav-section-copy">
+                    <span className="nav-section-label">{section.title}</span>
+                    <span className="nav-section-description">{section.description}</span>
+                  </div>
+                  {section.collapsible ? (
+                    <span className={`nav-section-toggle${isCollapsed ? " collapsed" : ""}`}>
+                      <ChevronDown aria-hidden="true" />
+                    </span>
+                  ) : null}
+                </button>
+                {!isCollapsed
+                  ? section.items.map((item) => {
+                      const Icon = navigationIcons[item.icon];
+                      const active = pathname === item.href;
+                      return (
+                        <Link
+                          key={item.href}
+                          className={`nav-item ${active ? "nav-item-active" : ""}`}
+                          href={item.href}
+                          onClick={() => setMobileOpen(false)}
+                        >
+                          <Icon aria-hidden="true" />
+                          <span>{item.label}</span>
+                        </Link>
+                      );
+                    })
+                  : null}
+              </div>
             );
           })}
-          {actor.isAuthenticated && (actor.roles.includes("ADMIN") || actor.permissions.includes("*")) ? (
-            <Link
-              className={`nav-item ${pathname === "/security-admin" ? "nav-item-active" : ""}`}
-              href="/security-admin"
-              onClick={() => setMobileOpen(false)}
-            >
-              <ShieldCheck aria-hidden="true" />
-              <span>安全管理</span>
-            </Link>
+          {actor.isAuthenticated && isAdmin ? (
+            <div className="nav-group">
+              <div className="nav-group-header">
+                <div className="nav-section-copy">
+                  <span className="nav-section-label">权限治理</span>
+                  <span className="nav-section-description">仅管理员使用的账号、角色与 API Key 管理入口。</span>
+                </div>
+              </div>
+              <Link
+                className={`nav-item ${pathname === "/security-admin" ? "nav-item-active" : ""}`}
+                href="/security-admin"
+                onClick={() => setMobileOpen(false)}
+              >
+                <ShieldCheck aria-hidden="true" />
+                <span>权限与安全</span>
+              </Link>
+            </div>
           ) : null}
         </nav>
         <div className="sidebar-foot">

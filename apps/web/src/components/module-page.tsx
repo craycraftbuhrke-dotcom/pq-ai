@@ -3,6 +3,8 @@
 import { ArrowUpRight, FileCheck2, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { ModalBody, ModalShell } from "@/components/modal-shell";
+
 type ModulePageProps = {
   kicker: string;
   title: string;
@@ -142,23 +144,14 @@ export function ModulePage({
         </div>
       </section>
       {selectedRow ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSelectedRow(null)}>
-          <section
-            className="modal-card module-detail-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="module-detail-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="modal-heading">
-              <div>
-                <span className="eyebrow">RECORD DETAIL</span>
-                <h2 id="module-detail-title">{selectedRow[0]}</h2>
-              </div>
-              <button className="icon-button" onClick={() => setSelectedRow(null)} aria-label="关闭">
-                <X aria-hidden="true" />
-              </button>
-            </div>
+        <ModalShell
+          className="module-detail-card"
+          eyebrow="RECORD DETAIL"
+          title={selectedRow[0]}
+          description="统一使用弹窗详情视图查看当前记录，支持 Esc 和遮罩关闭。"
+          onClose={() => setSelectedRow(null)}
+        >
+          <ModalBody>
             <dl className="module-detail-list">
               {columns.map((column, index) => (
                 <div key={column}>
@@ -167,8 +160,8 @@ export function ModulePage({
                 </div>
               ))}
             </dl>
-          </section>
-        </div>
+          </ModalBody>
+        </ModalShell>
       ) : null}
     </div>
   );

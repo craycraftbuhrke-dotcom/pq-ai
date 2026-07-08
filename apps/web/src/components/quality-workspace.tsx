@@ -10,11 +10,11 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
+import { ModalShell } from "@/components/modal-shell";
 import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
-import { useModalDismiss } from "@/lib/use-modal-dismiss";
 
 type Resource = {
   id: string;
@@ -325,8 +325,6 @@ export function QualityWorkspace() {
     if (submitting) return;
     setModal(null);
   }, [submitting]);
-  useModalDismiss({ open: modal !== null, onClose: closeModal, busy: submitting });
-
   const reload = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -682,7 +680,7 @@ export function QualityWorkspace() {
         </div> : null}
         {tab === "measurements" ? (
           <div className="master-empty">
-            批量模板会自动带出当前质量类型下的测量编组、编组内点位和对应质量指标列；用户直接填写生产事件、测量时间和指标值即可，无需再填写 `metrics` JSON。
+            批量模板会自动带出当前质量类型下的测量编组、编组内点位和对应质量指标列；用户直接填写生产事件、测量时间和指标值即可，无需再理解技术结构字段。
           </div>
         ) : null}
         {tab === "measurements" ? (
@@ -708,19 +706,16 @@ export function QualityWorkspace() {
       </section>
 
       {modal ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}>
-          <section className="modal-card quality-modal" role="dialog" aria-modal="true" aria-labelledby="quality-modal-title" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-heading"><div><span className="eyebrow">{modal.record ? "EDIT" : "CREATE"}</span><h2 id="quality-modal-title">{modal.record ? "编辑" : "新建"}{modal.kind === "measurement" ? "质量测量" : "质量标准"}</h2></div><button className="icon-button" onClick={closeModal} aria-label="关闭"><X /></button></div>
-            <form onSubmit={(event) => void submit(event)}>
-              <div className="form-grid">
-                {modal.kind === "measurement"
-                  ? renderMeasurementForm(form, setMeasurementForm, metricRows, setMetricRows, repeatRows, setRepeatRows, { runs, groups, groupPoints, points, definitions, instruments, methods, calibrations, references, importProfiles })
-                  : renderStandardForm(form, setForm, { vehicleModels, colors, parts, points, definitions })}
-              </div>
-              <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div>
-            </form>
-          </section>
-        </div>
+        <ModalShell className="quality-modal" eyebrow={modal.record ? "EDIT" : "CREATE"} title={`${modal.record ? "编辑" : "新建"}${modal.kind === "measurement" ? "质量测量" : "质量标准"}`} description={modal.kind === "measurement" ? "统一收口质量测量弹窗的治理对象选择、指标录入和重复读数编辑体验。" : "统一维护质量标准的适用范围、上下限和状态信息。"} onClose={closeModal} busy={submitting}>
+          <form onSubmit={(event) => void submit(event)}>
+            <div className="form-grid">
+              {modal.kind === "measurement"
+                ? renderMeasurementForm(form, setMeasurementForm, metricRows, setMetricRows, repeatRows, setRepeatRows, { runs, groups, groupPoints, points, definitions, instruments, methods, calibrations, references, importProfiles })
+                : renderStandardForm(form, setForm, { vehicleModels, colors, parts, points, definitions })}
+            </div>
+            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div>
+          </form>
+        </ModalShell>
       ) : null}
     </div>
   );
@@ -855,30 +850,40 @@ function renderMeasurementForm(
   const references = refs.references.filter((item) => item.quality_type === form.quality_type);
   const profiles = refs.importProfiles.filter((item) => item.quality_type === form.quality_type && (!selectedInstrument || item.instrument_type === selectedInstrument.instrument_type));
   return [
-    inputField("数据编号", "data_no", form, setForm, "text", true),
-    selectField("生产事件", "production_run_id", form, setForm, refs.runs.map((item) => [item.id, `${item.run_no} / ${item.body_no ?? "无车身号"}`]), true),
-    <label className="form-field form-field-wide" key="measurement-context-hint"><span>录入提示</span><div className="master-empty">测量编组会按当前生产事件车型与质量类型过滤；若命中单一编组，表单会自动收口到该编组，并同步过滤可选测量点。</div></label>,
-    selectField("测量编组", "measurement_group_id", form, setForm, options(groups, true)),
-    selectField("测量点", "measurement_point_id", form, setForm, options(points), true),
-    selectField("质量类型", "quality_type", form, (next) => {
-      setForm({ ...next, instrument_id: "", measurement_method_id: "", calibration_record_id: "", reference_standard_id: "", import_profile_id: "" });
-      const first = refs.definitions.find((item) => item.quality_type === next.quality_type);
-      setMetricRows([{ metric_code: first?.code ?? "", raw_value: "", corrected_value: "" }]);
-      setRepeatRows([{ repeat_no: "1", metric_code: first?.code ?? "", raw_value: "", corrected_value: "" }]);
-    }, Object.entries(qualityLabels), true),
-    selectField("数据类型", "data_type", form, setForm, [["TEST", "测试数据"], ["MASTER_SAMPLE", "封样数据"], ["STANDARD", "标准数据"]], true),
-    inputField("测量时间", "measured_at", form, setForm, "datetime-local", true),
-    inputField("测量人", "measured_by", form, setForm),
-    selectField("受治理仪器", "instrument_id", form, (next) => setForm({ ...next, measurement_method_id: "", calibration_record_id: "", import_profile_id: "" }), options(instruments, true)),
-    selectField("测量方法", "measurement_method_id", form, (next) => setForm({ ...next, calibration_record_id: "" }), options(methods, true)),
-    selectField("校准/检查记录", "calibration_record_id", form, setForm, [["", "未关联"], ...calibrations.map((item) => [item.id, `${item.calibration_no} / ${item.result} / ${new Date(item.valid_until).toLocaleDateString("zh-CN")}`] as [string, string])]),
-    selectField("参考件", "reference_standard_id", form, setForm, options(references, true)),
-    selectField("导入模板", "import_profile_id", form, setForm, [["", "手工录入 / 未关联"], ...profiles.map((item) => [item.id, `${item.code}:${item.version}`] as [string, string])]),
-    selectField("测量方向", "measurement_direction", form, setForm, [["", "未记录"], ["LONGITUDINAL", "纵向"], ["TRANSVERSE", "横向"], ["NORMAL", "法向 / 不适用"]]),
-    inputField("原始文件 URI", "raw_file_uri", form, setForm),
-    inputField("状态分数", "status_score", form, setForm, "number"),
-    checkboxField("数据有效", "is_valid", form, setForm),
-    <div className="metric-editor form-field-wide" key="metrics">
+    <FormSection key="measurement-basic" title="采集上下文" description="先确认生产事件、质量类型、测量编组和测量点，避免录错对象。">
+      <div className="modal-section-grid">
+        {inputField("数据编号", "data_no", form, setForm, "text", true)}
+        {selectField("生产事件", "production_run_id", form, setForm, refs.runs.map((item) => [item.id, `${item.run_no} / ${item.body_no ?? "无车身号"}`]), true)}
+        <label className="form-field form-field-wide"><span>录入提示</span><div className="master-empty">测量编组会按当前生产事件车型与质量类型过滤；若命中单一编组，表单会自动收口到该编组，并同步过滤可选测量点。</div></label>
+        {selectField("测量编组", "measurement_group_id", form, setForm, options(groups, true))}
+        {selectField("测量点", "measurement_point_id", form, setForm, options(points), true)}
+        {selectField("质量类型", "quality_type", form, (next) => {
+          setForm({ ...next, instrument_id: "", measurement_method_id: "", calibration_record_id: "", reference_standard_id: "", import_profile_id: "" });
+          const first = refs.definitions.find((item) => item.quality_type === next.quality_type);
+          setMetricRows([{ metric_code: first?.code ?? "", raw_value: "", corrected_value: "" }]);
+          setRepeatRows([{ repeat_no: "1", metric_code: first?.code ?? "", raw_value: "", corrected_value: "" }]);
+        }, Object.entries(qualityLabels), true)}
+        {selectField("数据类型", "data_type", form, setForm, [["TEST", "测试数据"], ["MASTER_SAMPLE", "封样数据"], ["STANDARD", "标准数据"]], true)}
+        {inputField("测量时间", "measured_at", form, setForm, "datetime-local", true)}
+        {inputField("测量人", "measured_by", form, setForm)}
+      </div>
+    </FormSection>,
+    <FormSection key="measurement-governance" title="治理对象与可靠性" description="补齐受治理仪器、方法、校准、参考件和导入模板，支撑可靠性判定。">
+      <div className="modal-section-grid">
+        {selectField("受治理仪器", "instrument_id", form, (next) => setForm({ ...next, measurement_method_id: "", calibration_record_id: "", import_profile_id: "" }), options(instruments, true))}
+        {selectField("测量方法", "measurement_method_id", form, (next) => setForm({ ...next, calibration_record_id: "" }), options(methods, true))}
+        {selectField("校准/检查记录", "calibration_record_id", form, setForm, [["", "未关联"], ...calibrations.map((item) => [item.id, `${item.calibration_no} / ${item.result} / ${new Date(item.valid_until).toLocaleDateString("zh-CN")}`] as [string, string])])}
+        {selectField("参考件", "reference_standard_id", form, setForm, options(references, true))}
+        {selectField("导入模板", "import_profile_id", form, setForm, [["", "手工录入 / 未关联"], ...profiles.map((item) => [item.id, `${item.code}:${item.version}`] as [string, string])])}
+        {selectField("测量方向", "measurement_direction", form, setForm, [["", "未记录"], ["LONGITUDINAL", "纵向"], ["TRANSVERSE", "横向"], ["NORMAL", "法向 / 不适用"]])}
+        {inputField("原始文件 URI", "raw_file_uri", form, setForm)}
+        {inputField("状态分数", "status_score", form, setForm, "number")}
+        {checkboxField("数据有效", "is_valid", form, setForm)}
+      </div>
+    </FormSection>,
+    <FormSection key="measurement-results" title="结果明细" description="按行录入质量指标值和逐次原始读数，不再挤在同一块平铺表单中。">
+      <div className="modal-section-grid">
+        <div className="metric-editor form-field-wide" key="metrics">
       <div className="program-subheading"><div><span className="eyebrow">METRIC VALUES</span><h3>质量指标值</h3></div><button type="button" className="button button-secondary" onClick={() => setMetricRows([...metricRows, { metric_code: metricOptions[0]?.code ?? "", raw_value: "", corrected_value: "" }])}><Plus />新增指标</button></div>
       <div className="master-empty">指标值属于当前表单内容调整，至少保留 1 条有效指标后才能保存。</div>
       {metricRows.map((row, index) => (
@@ -897,8 +902,8 @@ function renderMeasurementForm(
           </button>
         </div>
       ))}
-    </div>,
-    <div className="metric-editor form-field-wide" key="repeat-readings">
+    </div>
+        <div className="metric-editor form-field-wide" key="repeat-readings">
       <div className="program-subheading"><div><span className="eyebrow">REPEAT READINGS</span><h3>逐次原始读数</h3></div><button type="button" className="button button-secondary" onClick={() => setRepeatRows([...repeatRows, { repeat_no: String(repeatRows.length + 1), metric_code: metricOptions[0]?.code ?? "", raw_value: "", corrected_value: "" }])}><Plus />新增读数</button></div>
       <div className="master-empty">逐次读数可按需填写；如果当前没有重复测量，可留空或移除未填写的行。</div>
       {repeatRows.length === 0 ? <div className="master-empty">暂未填写逐次读数，可按需新增。</div> : null}
@@ -918,7 +923,9 @@ function renderMeasurementForm(
           </button>
         </div>
       ))}
-    </div>,
+    </div>
+      </div>
+    </FormSection>,
   ];
 }
 
@@ -929,18 +936,38 @@ function renderStandardForm(
 ) {
   const metricOptions = refs.definitions.filter((item) => item.quality_type === form.quality_type);
   return [
-    inputField("标准编号", "standard_no", form, setForm, "text", true),
-    inputField("版本号", "version", form, setForm, "text", true),
-    selectField("标准类型", "standard_type", form, setForm, [["PRODUCTION", "生产标准"], ["MASTER_SAMPLE", "封样标准"], ["LAB", "实验室标准"]], true),
-    selectField("质量类型", "quality_type", form, (next) => setForm({ ...next, metric_code: refs.definitions.find((item) => item.quality_type === next.quality_type)?.code ?? "" }), Object.entries(qualityLabels), true),
-    selectField("质量指标", "metric_code", form, setForm, metricOptions.map((item) => [item.code, `${item.name} · ${item.code}`]), true),
-    inputField("下限", "min_value", form, setForm, "number"),
-    inputField("上限", "max_value", form, setForm, "number"),
-    inputField("单位", "unit", form, setForm),
-    selectField("适用车型", "vehicle_model_id", form, setForm, options(refs.vehicleModels, true)),
-    selectField("适用颜色", "color_id", form, setForm, options(refs.colors, true)),
-    selectField("适用零件", "part_id", form, setForm, options(refs.parts, true)),
-    selectField("适用测量点", "measurement_point_id", form, setForm, options(refs.points, true)),
-    checkboxField("标准生效", "is_active", form, setForm),
+    <FormSection key="standard-basic" title="标准定义" description="先明确标准编号、版本、质量类型和指标口径。">
+      <div className="modal-section-grid">
+        {inputField("标准编号", "standard_no", form, setForm, "text", true)}
+        {inputField("版本号", "version", form, setForm, "text", true)}
+        {selectField("标准类型", "standard_type", form, setForm, [["PRODUCTION", "生产标准"], ["MASTER_SAMPLE", "封样标准"], ["LAB", "实验室标准"]], true)}
+        {selectField("质量类型", "quality_type", form, (next) => setForm({ ...next, metric_code: refs.definitions.find((item) => item.quality_type === next.quality_type)?.code ?? "" }), Object.entries(qualityLabels), true)}
+        {selectField("质量指标", "metric_code", form, setForm, metricOptions.map((item) => [item.code, `${item.name} · ${item.code}`]), true)}
+        {inputField("下限", "min_value", form, setForm, "number")}
+        {inputField("上限", "max_value", form, setForm, "number")}
+        {inputField("单位", "unit", form, setForm)}
+      </div>
+    </FormSection>,
+    <FormSection key="standard-scope" title="适用范围" description="按车型、颜色、零件和测量点收口当前标准的适用边界。">
+      <div className="modal-section-grid">
+        {selectField("适用车型", "vehicle_model_id", form, setForm, options(refs.vehicleModels, true))}
+        {selectField("适用颜色", "color_id", form, setForm, options(refs.colors, true))}
+        {selectField("适用零件", "part_id", form, setForm, options(refs.parts, true))}
+        {selectField("适用测量点", "measurement_point_id", form, setForm, options(refs.points, true))}
+        {checkboxField("标准生效", "is_active", form, setForm)}
+      </div>
+    </FormSection>,
   ];
+}
+
+function FormSection({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return (
+    <div className="modal-section form-field-wide">
+      <div className="modal-section-title">
+        <h3>{title}</h3>
+        <p>{description}</p>
+      </div>
+      {children}
+    </div>
+  );
 }

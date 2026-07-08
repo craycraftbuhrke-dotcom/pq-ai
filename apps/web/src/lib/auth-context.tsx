@@ -234,7 +234,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // 认证关闭：不请求 /auth/me，保持 AUTH_DISABLED_ACTOR，直接结束加载。
     if (!authEnabled) {
-      setLoading(false);
       return;
     }
     const apiKey = getApiKeyFromCookie();

@@ -25,9 +25,9 @@ type SpcChartProps = {
 const TEAL = "var(--teal-500)";
 const RED = "var(--red-500)";
 const GRAY = "var(--color-muted)";
-const TEXT = "var(--color-text)";
 const MUTED = "var(--color-muted)";
 const LINE = "var(--color-border)";
+const SPC_MARGIN = { top: 20, right: 24, bottom: 48, left: 64 } as const;
 
 function pointColor(judgement: string): string {
   if (judgement === "PASS") return TEAL;
@@ -60,11 +60,9 @@ export function SpcChart({
   width = 800,
   height = 340,
 }: SpcChartProps) {
-  const margin = { top: 20, right: 24, bottom: 48, left: 64 };
-
   const { plotW, plotH, yMin, yMax, points, xTicks } = useMemo(() => {
-    const pw = Math.max(width - margin.left - margin.right, 100);
-    const ph = Math.max(height - margin.top - margin.bottom, 60);
+    const pw = Math.max(width - SPC_MARGIN.left - SPC_MARGIN.right, 100);
+    const ph = Math.max(height - SPC_MARGIN.top - SPC_MARGIN.bottom, 60);
     const n = series.length;
 
     // compute Y range
@@ -99,9 +97,9 @@ export function SpcChart({
 
     // compute point positions
     const pts = series.map((p, i) => ({
-      x: margin.left + (n > 1 ? (i / (n - 1)) * pw : pw / 2),
+      x: SPC_MARGIN.left + (n > 1 ? (i / (n - 1)) * pw : pw / 2),
       y:
-        margin.top +
+        SPC_MARGIN.top +
         ph -
         ((p.value - tyMin) / (tyMax - tyMin || 1)) * ph,
       ...p,
@@ -142,7 +140,7 @@ export function SpcChart({
   }, [points]);
 
   const toY = (v: number) =>
-    margin.top + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+    SPC_MARGIN.top + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
 
   const refLines: { label: string; value: number; stroke: string; dash: string }[] =
     [];
@@ -156,15 +154,12 @@ export function SpcChart({
 
   if (series.length === 0) {
     return (
-      <figure style={{ width, height }} className="spc-chart">
-        <figcaption style={{ color: TEXT, fontWeight: 600, marginBottom: 8 }}>{title}</figcaption>
+      <figure style={{ width, height }} className="spc-chart chart-figure">
+        <figcaption className="chart-figure-title">{title}</figcaption>
         <div
+          className="chart-empty"
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
             height: height - 28,
-            color: MUTED,
           }}
         >
           No data
@@ -174,22 +169,13 @@ export function SpcChart({
   }
 
   return (
-    <figure style={{ width, height, margin: 0 }}>
-      <figcaption
-        style={{
-          color: TEXT,
-          fontWeight: 600,
-          fontSize: 13,
-          marginBottom: 4,
-        }}
-      >
-        {title}
-      </figcaption>
+    <figure style={{ width, height }} className="chart-figure">
+      <figcaption className="chart-figure-title">{title}</figcaption>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         role="img"
         aria-label={title}
-        style={{ width: "100%", height: "auto", display: "block" }}
+        className="chart-svg"
       >
         {/* Y-axis grid lines + labels */}
         {yTicks.map((v, i) => {
@@ -197,15 +183,15 @@ export function SpcChart({
           return (
             <g key={`y-${i}`}>
               <line
-                x1={margin.left}
+                x1={SPC_MARGIN.left}
                 y1={y}
-                x2={width - margin.right}
+                x2={width - SPC_MARGIN.right}
                 y2={y}
                 stroke={LINE}
                 strokeWidth={0.5}
               />
               <text
-                x={margin.left - 6}
+                x={SPC_MARGIN.left - 6}
                 y={y + 4}
                 textAnchor="end"
                 fill={MUTED}
@@ -223,16 +209,16 @@ export function SpcChart({
           return (
             <g key={rl.label}>
               <line
-                x1={margin.left}
+                x1={SPC_MARGIN.left}
                 y1={y}
-                x2={width - margin.right}
+                x2={width - SPC_MARGIN.right}
                 y2={y}
                 stroke={rl.stroke}
                 strokeWidth={1}
                 strokeDasharray={rl.dash}
               />
               <text
-                x={width - margin.right - 4}
+                x={width - SPC_MARGIN.right - 4}
                 y={y - 4}
                 textAnchor="end"
                 fill={rl.stroke}
@@ -246,10 +232,10 @@ export function SpcChart({
 
         {/* X-axis */}
         <line
-          x1={margin.left}
-          y1={margin.top + plotH}
-          x2={width - margin.right}
-          y2={margin.top + plotH}
+          x1={SPC_MARGIN.left}
+          y1={SPC_MARGIN.top + plotH}
+          x2={width - SPC_MARGIN.right}
+          y2={SPC_MARGIN.top + plotH}
           stroke={LINE}
           strokeWidth={1}
         />
@@ -257,13 +243,13 @@ export function SpcChart({
         {/* X-axis tick labels */}
         {xTicks.map((t) => {
           const x =
-            margin.left +
+            SPC_MARGIN.left +
             (t.i / (series.length - 1 || 1)) * plotW;
           return (
             <text
               key={`xt-${t.i}`}
               x={x}
-              y={margin.top + plotH + 16}
+              y={SPC_MARGIN.top + plotH + 16}
               textAnchor="middle"
               fill={MUTED}
               fontSize={10}
@@ -303,11 +289,11 @@ export function SpcChart({
         {unit ? (
           <text
             x={12}
-            y={margin.top + plotH / 2}
+            y={SPC_MARGIN.top + plotH / 2}
             textAnchor="middle"
             fill={MUTED}
             fontSize={11}
-            transform={`rotate(-90, 12, ${margin.top + plotH / 2})`}
+            transform={`rotate(-90, 12, ${SPC_MARGIN.top + plotH / 2})`}
           >
             {unit}
           </text>

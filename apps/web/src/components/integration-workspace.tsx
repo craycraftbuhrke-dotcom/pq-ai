@@ -17,8 +17,9 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
+import { ModalShell } from "@/components/modal-shell";
+import { JsonObjectEditor, JsonTableEditor } from "@/components/structured-json-editor";
 import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
-import { useModalDismiss } from "@/lib/use-modal-dismiss";
 
 type Summary = {
   endpoints: number;
@@ -157,6 +158,19 @@ function systemTypeForEvent(eventType: string): string {
   return "MATERIAL";
 }
 
+function parsePayloadValue(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function stringifyPayloadValue(value: Record<string, unknown>): string {
+  return JSON.stringify(value, null, 2);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { cache: "no-store", ...init });
   if (response.status === 204) return undefined as T;
@@ -215,8 +229,6 @@ export function IntegrationWorkspace() {
     if (endpointBusy) return;
     setEndpointModal(undefined);
   }, [endpointBusy]);
-  useModalDismiss({ open: endpointModal !== undefined, onClose: closeEndpointModal, busy: endpointBusy });
-
   const reload = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -428,7 +440,7 @@ export function IntegrationWorkspace() {
               <label className="form-field"><span>集成端点 <b>*</b></span><select required value={eventEndpointId} onChange={(event) => setEventEndpointId(event.target.value)}>{endpoints.filter((item) => item.is_active).map((endpoint) => <option value={endpoint.id} key={endpoint.id}>{endpoint.code} · {endpoint.name}</option>)}</select></label>
               <label className="form-field"><span>事件类型 <b>*</b></span><select value={eventType} onChange={(event) => changeEventType(event.target.value)}>{eventTypes.map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
               <label className="form-field"><span>来源事件 ID / 幂等键 <b>*</b></span><input required value={sourceEventId} onChange={(event) => setSourceEventId(event.target.value)} placeholder="例如 MES-20260611-0001" /></label>
-              <label className="form-field"><span>JSON 事件负载 <b>*</b></span><textarea rows={16} required value={eventPayload} onChange={(event) => setEventPayload(event.target.value)} /></label>
+              <label className="form-field form-field-wide"><span>事件数据明细 <b>*</b></span><IntegrationEventPayloadEditor eventType={eventType} value={eventPayload} onChange={setEventPayload} /></label>
               <label className="checkbox-field"><input type="checkbox" checked={processImmediately} onChange={(event) => setProcessImmediately(event.target.checked)} />接收后立即处理</label>
               <button className="button button-primary" disabled={!eventEndpointId || !sourceEventId || submitting === "event"}>{submitting === "event" ? <LoaderCircle className="spin" /> : <Play />} 接收并处理</button>
             </div>
@@ -453,7 +465,7 @@ export function IntegrationWorkspace() {
         {tab === "endpoints" ? <div className="master-table-wrap"><table className="master-table integration-endpoint-table"><thead><tr><th>端点</th><th>系统类型</th><th>方向</th><th>连接配置</th><th>最近成功</th><th>状态</th><th>操作</th></tr></thead><tbody>{filteredEndpoints.map((endpoint) => <tr key={endpoint.id}><td><strong>{endpoint.code}</strong><br /><small>{endpoint.name}</small></td><td>{endpoint.system_type}</td><td>{endpoint.direction}</td><td>{endpoint.base_url ?? "由现场适配器推送"} · {endpoint.auth_type}</td><td>{endpoint.last_success_at ? new Date(endpoint.last_success_at).toLocaleString("zh-CN") : "—"}</td><td><span className={`record-status ${endpoint.is_active ? "status-on" : "status-off"}`}>{endpoint.is_active ? "启用" : "停用"}</span></td><td><div className="row-actions"><button className="icon-button" title="查看或编辑" aria-label="查看或编辑集成端点" onClick={() => openEndpoint(endpoint)}><Pencil aria-hidden="true" /></button><button className="icon-button icon-button-danger" title="删除" aria-label="删除集成端点" onClick={() => void deleteEndpoint(endpoint)} disabled={submitting === `delete-${endpoint.id}`}><Trash2 aria-hidden="true" /></button></div></td></tr>)}</tbody></table>{!filteredEndpoints.length ? <div className="master-empty"><PlugZap /> 暂无集成端点</div> : null}</div> : null}
       </section>
 
-      {endpointModal !== undefined ? <div className="modal-backdrop" role="presentation" onMouseDown={closeEndpointModal}><section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="integration-endpoint-modal-title" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">Integration Endpoint</span><h2 id="integration-endpoint-modal-title">{endpointModal?.id ? "编辑集成端点" : "新建集成端点"}</h2></div><button className="icon-button" onClick={closeEndpointModal} aria-label="关闭"><X aria-hidden="true" /></button></div><form onSubmit={saveEndpoint}><div className="form-grid"><EndpointInput label="端点代码" value={endpointForm.code} onChange={(value) => setEndpointForm({ ...endpointForm, code: value })} required /><EndpointInput label="端点名称" value={endpointForm.name} onChange={(value) => setEndpointForm({ ...endpointForm, name: value })} required /><EndpointSelect label="系统类型" value={endpointForm.system_type} onChange={(value) => setEndpointForm({ ...endpointForm, system_type: value })} options={["MES", "QMS", "ROBOT", "MATERIAL", "MEASUREMENT"]} /><EndpointSelect label="数据方向" value={endpointForm.direction} onChange={(value) => setEndpointForm({ ...endpointForm, direction: value })} options={["INBOUND", "OUTBOUND", "BIDIRECTIONAL"]} /><EndpointInput label="基础地址" value={endpointForm.base_url} onChange={(value) => setEndpointForm({ ...endpointForm, base_url: value })} /><EndpointSelect label="认证方式" value={endpointForm.auth_type} onChange={(value) => setEndpointForm({ ...endpointForm, auth_type: value })} options={["API_KEY", "OAUTH2", "BASIC", "NONE"]} /><label className="form-field form-field-wide"><span>非敏感配置 JSON</span><textarea rows={6} value={endpointForm.config} onChange={(event) => setEndpointForm({ ...endpointForm, config: event.target.value })} /></label><label className="form-field"><span>状态</span><span className="checkbox-field"><input type="checkbox" checked={endpointForm.is_active} onChange={(event) => setEndpointForm({ ...endpointForm, is_active: event.target.checked })} />启用端点</span></label></div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeEndpointModal} disabled={endpointBusy}>取消</button><button className="button button-primary" disabled={endpointBusy}>{endpointBusy ? <LoaderCircle className="spin" aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}{endpointBusy ? "正在保存" : "保存端点"}</button></div></form></section></div> : null}
+      {endpointModal !== undefined ? <ModalShell eyebrow="Integration Endpoint" title={endpointModal?.id ? "编辑集成端点" : "新建集成端点"} description="统一维护集成端点的连接信息、认证方式和非敏感配置。" onClose={closeEndpointModal} busy={endpointBusy}><form onSubmit={saveEndpoint}><div className="form-grid"><EndpointInput label="端点代码" value={endpointForm.code} onChange={(value) => setEndpointForm({ ...endpointForm, code: value })} required /><EndpointInput label="端点名称" value={endpointForm.name} onChange={(value) => setEndpointForm({ ...endpointForm, name: value })} required /><EndpointSelect label="系统类型" value={endpointForm.system_type} onChange={(value) => setEndpointForm({ ...endpointForm, system_type: value })} options={["MES", "QMS", "ROBOT", "MATERIAL", "MEASUREMENT"]} /><EndpointSelect label="数据方向" value={endpointForm.direction} onChange={(value) => setEndpointForm({ ...endpointForm, direction: value })} options={["INBOUND", "OUTBOUND", "BIDIRECTIONAL"]} /><EndpointInput label="基础地址" value={endpointForm.base_url} onChange={(value) => setEndpointForm({ ...endpointForm, base_url: value })} /><EndpointSelect label="认证方式" value={endpointForm.auth_type} onChange={(value) => setEndpointForm({ ...endpointForm, auth_type: value })} options={["API_KEY", "OAUTH2", "BASIC", "NONE"]} /><label className="form-field form-field-wide"><span>端点参数配置</span><JsonObjectEditor value={endpointForm.config} onChange={(value) => setEndpointForm({ ...endpointForm, config: value })} keyLabel="配置项" valueLabel="配置值" addLabel="新增配置项" /></label><label className="form-field"><span>状态</span><span className="checkbox-field"><input type="checkbox" checked={endpointForm.is_active} onChange={(event) => setEndpointForm({ ...endpointForm, is_active: event.target.checked })} />启用端点</span></label></div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeEndpointModal} disabled={endpointBusy}>取消</button><button className="button button-primary" disabled={endpointBusy}>{endpointBusy ? <LoaderCircle className="spin" aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}{endpointBusy ? "正在保存" : "保存端点"}</button></div></form></ModalShell> : null}
     </div>
   );
 }
@@ -464,4 +476,130 @@ function EndpointInput({ label, value, onChange, required = false }: { label: st
 
 function EndpointSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
   return <label className="form-field"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option value={option} key={option}>{option}</option>)}</select></label>;
+}
+
+function IntegrationEventPayloadEditor({ eventType, value, onChange }: { eventType: string; value: string; onChange: (value: string) => void }) {
+  const payload = parsePayloadValue(value);
+  const setField = (key: string, nextValue: unknown) => onChange(stringifyPayloadValue({ ...payload, [key]: nextValue }));
+
+  if (eventType === "MES_PRODUCTION_RUN_UPSERT") {
+    return (
+      <div className="modal-section-grid">
+        <PayloadInput label="生产事件编号" value={String(payload.run_no ?? "")} onChange={(nextValue) => setField("run_no", nextValue)} />
+        <PayloadInput label="车身号" value={String(payload.body_no ?? "")} onChange={(nextValue) => setField("body_no", nextValue)} />
+        <PayloadInput label="工厂代码" value={String(payload.factory_code ?? "")} onChange={(nextValue) => setField("factory_code", nextValue)} />
+        <PayloadInput label="车型代码" value={String(payload.vehicle_model_code ?? "")} onChange={(nextValue) => setField("vehicle_model_code", nextValue)} />
+        <PayloadInput label="颜色代码" value={String(payload.color_code ?? "")} onChange={(nextValue) => setField("color_code", nextValue)} />
+        <PayloadInput label="班次" value={String(payload.shift ?? "")} onChange={(nextValue) => setField("shift", nextValue)} />
+        <PayloadInput label="开始时间" type="datetime-local" value={String(payload.started_at ?? "")} onChange={(nextValue) => setField("started_at", nextValue)} />
+      </div>
+    );
+  }
+
+  if (eventType === "MATERIAL_BATCH_UPSERT") {
+    return (
+      <div className="structured-editor">
+        <div className="modal-section-grid">
+          <PayloadInput label="批次号" value={String(payload.batch_no ?? "")} onChange={(nextValue) => setField("batch_no", nextValue)} />
+          <PayloadInput label="材料代码" value={String(payload.material_code ?? "")} onChange={(nextValue) => setField("material_code", nextValue)} />
+          <PayloadInput label="材料名称" value={String(payload.material_name ?? "")} onChange={(nextValue) => setField("material_name", nextValue)} />
+          <PayloadInput label="材料类型" value={String(payload.material_type ?? "")} onChange={(nextValue) => setField("material_type", nextValue)} />
+          <PayloadInput label="供应商" value={String(payload.supplier ?? "")} onChange={(nextValue) => setField("supplier", nextValue)} />
+        </div>
+        <JsonTableEditor
+          value={JSON.stringify(Array.isArray(payload.characteristic_results) ? payload.characteristic_results : [], null, 2)}
+          onChange={(nextValue) => setField("characteristic_results", JSON.parse(nextValue))}
+          columns={[
+            { key: "result_no", label: "结果编号" },
+            { key: "characteristic_code", label: "特性代码" },
+            { key: "method_code", label: "方法代码" },
+            { key: "method_version", label: "方法版本" },
+            { key: "result_value", label: "结果值", type: "number" },
+            { key: "unit", label: "单位" },
+            { key: "tested_at", label: "检测时间", type: "datetime-local" },
+            { key: "tested_by", label: "检测人" },
+          ]}
+          addLabel="新增检测结果"
+        />
+      </div>
+    );
+  }
+
+  if (eventType === "QMS_QUALITY_MEASUREMENT_UPSERT") {
+    return (
+      <div className="structured-editor">
+        <div className="modal-section-grid">
+          <PayloadInput label="数据编号" value={String(payload.data_no ?? "")} onChange={(nextValue) => setField("data_no", nextValue)} />
+          <PayloadInput label="生产事件编号" value={String(payload.production_run_no ?? "")} onChange={(nextValue) => setField("production_run_no", nextValue)} />
+          <PayloadInput label="测量点代码" value={String(payload.measurement_point_code ?? "")} onChange={(nextValue) => setField("measurement_point_code", nextValue)} />
+          <PayloadInput label="质量类型" value={String(payload.quality_type ?? "")} onChange={(nextValue) => setField("quality_type", nextValue)} />
+          <PayloadInput label="测量时间" type="datetime-local" value={String(payload.measured_at ?? "")} onChange={(nextValue) => setField("measured_at", nextValue)} />
+        </div>
+        <JsonTableEditor
+          value={JSON.stringify(Array.isArray(payload.metrics) ? payload.metrics : [], null, 2)}
+          onChange={(nextValue) => setField("metrics", JSON.parse(nextValue))}
+          columns={[
+            { key: "metric_code", label: "指标代码" },
+            { key: "metric_name", label: "指标名称" },
+            { key: "raw_value", label: "原始值", type: "number" },
+          ]}
+          addLabel="新增指标"
+        />
+      </div>
+    );
+  }
+
+  if (eventType === "ROBOT_ACTUAL_PARAMETERS_UPSERT") {
+    return (
+      <div className="structured-editor">
+        <div className="modal-section-grid">
+          <PayloadInput label="生产事件编号" value={String(payload.production_run_no ?? "")} onChange={(nextValue) => setField("production_run_no", nextValue)} />
+          <PayloadInput label="工序" value={String(payload.process_stage ?? "")} onChange={(nextValue) => setField("process_stage", nextValue)} />
+          <PayloadInput label="采样时间" type="datetime-local" value={String(payload.sampled_at ?? "")} onChange={(nextValue) => setField("sampled_at", nextValue)} />
+        </div>
+        <JsonTableEditor
+          value={JSON.stringify(Array.isArray(payload.parameters) ? payload.parameters : [], null, 2)}
+          onChange={(nextValue) => setField("parameters", JSON.parse(nextValue))}
+          columns={[
+            { key: "brush_no", label: "刷子号" },
+            { key: "parameter_code", label: "参数代码" },
+            { key: "actual_value", label: "实际值", type: "number" },
+            { key: "unit", label: "单位" },
+          ]}
+          addLabel="新增参数"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="structured-editor">
+      <div className="modal-section-grid">
+        <PayloadInput label="生产事件编号" value={String(payload.production_run_no ?? "")} onChange={(nextValue) => setField("production_run_no", nextValue)} />
+        <PayloadInput label="工序" value={String(payload.process_stage ?? "")} onChange={(nextValue) => setField("process_stage", nextValue)} />
+        <PayloadInput label="设备配置版本" value={String(payload.device_configuration_version ?? "")} onChange={(nextValue) => setField("device_configuration_version", nextValue)} />
+        <PayloadInput label="轨迹代码" value={String(payload.trajectory_code ?? "")} onChange={(nextValue) => setField("trajectory_code", nextValue)} />
+        <PayloadInput label="轨迹版本" value={String(payload.trajectory_version ?? "")} onChange={(nextValue) => setField("trajectory_version", nextValue)} />
+        <PayloadInput label="执行校验和" value={String(payload.executed_checksum ?? "")} onChange={(nextValue) => setField("executed_checksum", nextValue)} />
+        <PayloadInput label="开始时间" type="datetime-local" value={String(payload.started_at ?? "")} onChange={(nextValue) => setField("started_at", nextValue)} />
+        <PayloadInput label="完成时间" type="datetime-local" value={String(payload.completed_at ?? "")} onChange={(nextValue) => setField("completed_at", nextValue)} />
+        <PayloadInput label="来源系统" value={String(payload.source_system ?? "")} onChange={(nextValue) => setField("source_system", nextValue)} />
+      </div>
+      <JsonTableEditor
+        value={JSON.stringify(Array.isArray(payload.segments) ? payload.segments : [], null, 2)}
+        onChange={(nextValue) => setField("segments", JSON.parse(nextValue))}
+        columns={[
+          { key: "segment_no", label: "路径段序号", type: "number" },
+          { key: "actual_speed", label: "实际速度", type: "number" },
+          { key: "speed_unit", label: "速度单位" },
+          { key: "trigger_state", label: "触发状态" },
+        ]}
+        addLabel="新增路径段"
+      />
+    </div>
+  );
+}
+
+function PayloadInput({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
+  return <label className="form-field"><span>{label}</span><input type={type} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
