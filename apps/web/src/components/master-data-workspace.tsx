@@ -644,32 +644,38 @@ export function MasterDataWorkspace() {
           ))}
         </div>
 
-        <FilterToolbar eyebrow="CRUD WORKSPACE" title={`${config.label}清单`} description={config.description} className="master-toolbar">
-          <div className="master-toolbar-actions">
-            <label className="master-search">
-              <Search aria-hidden="true" />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={`搜索${config.label}编码、名称或属性`}
+        <FilterToolbar
+          eyebrow="CRUD WORKSPACE"
+          title={`${config.label}清单`}
+          description={config.description}
+          className="master-toolbar"
+          actions={
+            <div className="master-toolbar-actions">
+              <label className="master-search">
+                <Search aria-hidden="true" />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={`搜索${config.label}编码、名称或属性`}
+                />
+              </label>
+              <button className="button button-secondary" onClick={() => void loadData()} disabled={loading}>
+                <RefreshCw className={loading ? "spin" : ""} aria-hidden="true" />
+                刷新
+              </button>
+              <BulkDataActions
+                resourceKey={`master.${activeResource}`}
+                resourceLabel={config.label}
+                disabled={loading || submitting}
+                onImported={loadData}
+                onResult={(message, type) => {
+                  setNotice(type === "success" ? message : "");
+                  setError(type === "error" ? message : "");
+                }}
               />
-            </label>
-            <button className="button button-secondary" onClick={() => void loadData()} disabled={loading}>
-              <RefreshCw className={loading ? "spin" : ""} aria-hidden="true" />
-              刷新
-            </button>
-            <BulkDataActions
-              resourceKey={`master.${activeResource}`}
-              resourceLabel={config.label}
-              disabled={loading || submitting}
-              onImported={loadData}
-              onResult={(message, type) => {
-                setNotice(type === "success" ? message : "");
-                setError(type === "error" ? message : "");
-              }}
-            />
-          </div>
-        </FilterToolbar>
+            </div>
+          }
+        />
         <div className="freshness">该页面不提供物理删除；如需停用，请编辑记录并调整启用状态或改走替换流程。</div>
 
         <div className="master-table-wrap">

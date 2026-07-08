@@ -42,7 +42,7 @@ export type NavSection = {
   items: readonly NavItem[];
 };
 
-export const navSections = [
+export const navSections: readonly NavSection[] = [
   {
     key: "overview",
     title: "总览",
@@ -84,7 +84,7 @@ export const navSections = [
       { href: "/audit", label: "审计追溯", icon: "audit", roles: ["ADMIN", "AUDITOR"] },
     ],
   },
-] as const satisfies readonly NavSection[];
+] as const;
 
 export const roleQuickAccess: Record<string, readonly string[]> = {
   ADMIN: ["/", "/master-data", "/integrations", "/integration-monitor", "/security-admin"],

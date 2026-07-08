@@ -24,7 +24,7 @@ export function AppShell({ children }: AppShellProps) {
     actor.roles.includes("QUALITY_ENGINEER") && !actor.roles.includes("PROCESS_ENGINEER") && !isAdmin;
 
   const allNavItems = useMemo(() => {
-    const items = navSections.flatMap((section) => section.items);
+    const items: NavItem[] = navSections.flatMap((section) => [...section.items]);
     return isAdmin
       ? [...items, { href: "/security-admin", label: "权限与安全", icon: "audit" } satisfies NavItem]
       : items;
@@ -34,12 +34,15 @@ export function AppShell({ children }: AppShellProps) {
     if (isAdmin) return navSections;
     const actorRoles = new Set(actor.roles);
     return navSections
-      .map((section) => ({
-        ...section,
-        items: section.items.filter(
-          (item) => item.href === pathname || !item.roles || item.roles.some((role) => actorRoles.has(role)),
-        ),
-      }))
+      .map((section) => {
+        const items: NavItem[] = [...section.items];
+        return {
+          ...section,
+          items: items.filter(
+            (item) => item.href === pathname || !item.roles || item.roles.some((role) => actorRoles.has(role)),
+          ),
+        };
+      })
       .filter((section) => section.items.length > 0);
   }, [actor.roles, isAdmin, pathname]);
 
