@@ -54,3 +54,14 @@ Every new feature must pass:
 - MySQL standards check: no physical foreign keys, no runtime physical deletes, no unsupported data types, compliant table/field/index naming, and DBA-reviewed DDL only.
 - Authentication check: user sessions, API Keys, RBAC permission checks, and write-operation audit evidence are present for protected workflows.
 - Bulk data check: editable domain resources provide templates, export, import validation, row-level errors, idempotent upsert behavior, and post-import UI refresh.
+
+## Execution Discipline
+
+1. Development is plan-driven. Before implementing or changing a non-trivial feature, update `docs/development-plan.md` with scope, acceptance criteria, execution order, and completion status.
+2. Work strictly in small sequential steps. Do not start a later step until the current step is implemented, reviewed, tested, verified, and marked complete in the development plan.
+3. Foundation-first order is mandatory: master data, process-stage parameter capture, equipment/device parameter capture, quality data capture, point-level aggregation and business workflow usability come before AI model and closed-loop optimization work.
+4. After every completed development step, perform a self-review against product rules, database governance rules, workflow correctness, and UI usability expectations before moving on.
+5. After every completed development step, run focused tests and verification suitable for the change scope. At minimum this includes relevant automated tests; when UI or workflow behavior changes, add manual/browser verification evidence.
+6. A step is not considered complete until implementation, review, testing, verification evidence, and plan status update are all finished.
+7. Any new page, form, import flow, or CRUD surface must be checked for dead controls, misleading placeholders, layout overlap, overflow, stacking conflicts, and missing empty/error/success states as part of the same step, not as a later cleanup.
+8. All changes must continue to respect project database rules: no automatic MySQL DDL, no physical foreign keys, no runtime physical deletes, no unsafe SQL, and no schema mutation outside approved manual SQL workflow.

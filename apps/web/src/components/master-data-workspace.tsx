@@ -6,13 +6,11 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Trash2,
   X,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
-import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
 import { useModalDismiss } from "@/lib/use-modal-dismiss";
 
 type ResourceKey =
@@ -479,11 +477,6 @@ export function MasterDataWorkspace() {
     }
   }
 
-  function deleteRecord(record: MasterRecord) {
-    setNotice("");
-    setError(`${config.singular} ${record.code} / ${record.name} 不能物理删除。${physicalDeleteDisabledMessage}`);
-  }
-
   function relationName(resource: ResourceKey, id?: string): string {
     const record = data[resource].find((item) => item.id === id);
     return record ? `${record.code} / ${record.name}` : "未找到关联主数据";
@@ -522,13 +515,6 @@ export function MasterDataWorkspace() {
     } finally {
       setSubmitting(false);
     }
-  }
-
-  function deleteRelation(_record: RelationRecord) {
-    void _record;
-    const relation = relationConfigs[activeRelation];
-    setNotice("");
-    setError(`${relation.label}关系不能物理删除。${physicalDeleteDisabledMessage}`);
   }
 
   return (
@@ -580,6 +566,11 @@ export function MasterDataWorkspace() {
               <h2>建立{relationConfigs[activeRelation].label}关系</h2>
               <p>关系写入 MySQL，并用于程序适用范围、生产事件和测量编组校验。</p>
             </div>
+            {!data[activeRelationConfig.left].length || !data[activeRelationConfig.right].length ? (
+              <div className="master-empty">
+                请先维护{resourceConfigs[activeRelationConfig.left].singular}和{resourceConfigs[activeRelationConfig.right].singular}，再建立关系。
+              </div>
+            ) : null}
             <label className="form-field">
               <span>{resourceConfigs[relationConfigs[activeRelation].left].singular}</span>
               <select required value={selectedRelationLeftId} onChange={(event) => setRelationLeftId(event.target.value)}>
@@ -608,12 +599,12 @@ export function MasterDataWorkspace() {
             />
           </form>
           <div className="relation-list">
-            <div className="relation-row relation-head"><span>主对象</span><span>关联对象</span><span>属性</span><span>操作</span></div>
+            <div className="relation-row relation-head"><span>主对象</span><span>关联对象</span><span>属性</span><span>说明</span></div>
             {relations[activeRelation].map((record) => {
               const relation = relationConfigs[activeRelation];
               const leftId = record[relation.leftKey as keyof RelationRecord] as string | undefined;
               const rightId = record[relation.rightKey as keyof RelationRecord] as string | undefined;
-              return <div className="relation-row" key={record.id}><span>{relationName(relation.left, leftId)}</span><span>{relationName(relation.right, rightId)}</span><span>{activeRelation === "measurement-group-points" ? `顺序 ${record.sequence_no ?? 0}` : record.is_active ? "启用" : "停用"}</span><span><button className="icon-button icon-button-danger" onClick={() => void deleteRelation(record)} aria-label="删除关系记录"><Trash2 aria-hidden="true" /></button></span></div>;
+              return <div className="relation-row" key={record.id}><span>{relationName(relation.left, leftId)}</span><span>{relationName(relation.right, rightId)}</span><span>{activeRelation === "measurement-group-points" ? `顺序 ${record.sequence_no ?? 0}` : record.is_active ? "启用" : "停用"}</span><span>关系数据采用停用或替换治理</span></div>;
             })}
             {!relations[activeRelation].length ? <div className="master-empty">暂无关系，请从左侧建立。</div> : null}
           </div>
@@ -679,6 +670,7 @@ export function MasterDataWorkspace() {
             />
           </div>
         </div>
+        <div className="freshness">该页面不提供物理删除；如需停用，请编辑记录并调整启用状态或改走替换流程。</div>
 
         <div className="master-table-wrap">
           <table className="master-table">
@@ -708,14 +700,6 @@ export function MasterDataWorkspace() {
                     <div className="row-actions">
                       <button className="icon-button" onClick={() => openModal("edit", record)} aria-label={`编辑 ${record.code}`}>
                         <Pencil aria-hidden="true" />
-                      </button>
-                      <button
-                        className="icon-button icon-button-danger"
-                        onClick={() => void deleteRecord(record)}
-                        disabled={submitting}
-                        aria-label={`删除 ${record.code}`}
-                      >
-                        <Trash2 aria-hidden="true" />
                       </button>
                     </div>
                   </td>

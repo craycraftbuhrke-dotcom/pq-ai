@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.api.routes.factories import create_factory
 from app.api.routes.master_data import (
+    bind_factory_vehicle_model,
+    bind_vehicle_model_color,
     create_color,
     create_measurement_point,
     create_part,
@@ -32,8 +34,10 @@ from app.models.domain import (
 from app.schemas.common import FactoryCreate
 from app.schemas.master_data import (
     ColorCreate,
+    FactoryVehicleModelCreate,
     MeasurementPointCreate,
     PartCreate,
+    VehicleModelColorCreate,
     VehicleModelCreate,
 )
 from app.schemas.process import ProductionRunCreate
@@ -64,6 +68,14 @@ def test_measurement_reliability_gate_tracks_governed_provenance() -> None:
     vehicle = create_vehicle_model(VehicleModelCreate(code="M-GATE", name="可靠性车型"), db)
     color = create_color(
         ColorCreate(code="C-GATE", name="可靠性颜色", color_type="BASECOAT"),
+        db,
+    )
+    bind_factory_vehicle_model(
+        FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle.id),
+        db,
+    )
+    bind_vehicle_model_color(
+        VehicleModelColorCreate(vehicle_model_id=vehicle.id, color_id=color.id),
         db,
     )
     part = create_part(PartCreate(code="P-GATE", name="车顶"), db)
@@ -197,6 +209,14 @@ def test_measurement_without_provenance_is_preserved_but_unverified() -> None:
     vehicle = create_vehicle_model(VehicleModelCreate(code="M-LEGACY", name="历史车型"), db)
     color = create_color(
         ColorCreate(code="C-LEGACY", name="历史颜色", color_type="BASECOAT"),
+        db,
+    )
+    bind_factory_vehicle_model(
+        FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle.id),
+        db,
+    )
+    bind_vehicle_model_color(
+        VehicleModelColorCreate(vehicle_model_id=vehicle.id, color_id=color.id),
         db,
     )
     part = create_part(PartCreate(code="P-LEGACY", name="车顶"), db)

@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.api.routes.factories import create_factory
 from app.api.routes.master_data import (
+    bind_factory_vehicle_model,
+    bind_measurement_group_point,
+    bind_vehicle_model_color,
     create_color,
     create_measurement_group,
     create_measurement_point,
@@ -35,9 +38,12 @@ from app.models.domain import (
 from app.schemas.common import FactoryCreate
 from app.schemas.master_data import (
     ColorCreate,
+    FactoryVehicleModelCreate,
     MeasurementGroupCreate,
+    MeasurementGroupPointBind,
     MeasurementPointCreate,
     PartCreate,
+    VehicleModelColorCreate,
     VehicleModelCreate,
 )
 from app.schemas.process import ProductionRunCreate
@@ -76,6 +82,14 @@ def test_quality_measurement_and_standard_crud() -> None:
     factory = create_factory(FactoryCreate(code="F1", name="TEST_FACTORY_ONE"), db)
     vehicle = create_vehicle_model(VehicleModelCreate(code="M1", name="TEST_MODEL_ONE"), db)
     color = create_color(ColorCreate(code="C1", name="TEST_COLOR_ONE", color_type="BASECOAT"), db)
+    bind_factory_vehicle_model(
+        FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle.id),
+        db,
+    )
+    bind_vehicle_model_color(
+        VehicleModelColorCreate(vehicle_model_id=vehicle.id, color_id=color.id),
+        db,
+    )
     part = create_part(PartCreate(code="P1", name="TEST_PART_ONE"), db)
     point = create_measurement_point(
         MeasurementPointCreate(
@@ -93,6 +107,14 @@ def test_quality_measurement_and_standard_crud() -> None:
             name="橘皮编组",
             vehicle_model_id=vehicle.id,
             quality_type="ORANGE_PEEL",
+        ),
+        db,
+    )
+    bind_measurement_group_point(
+        MeasurementGroupPointBind(
+            measurement_group_id=group.id,
+            measurement_point_id=point.id,
+            sequence_no=1,
         ),
         db,
     )
@@ -231,4 +253,123 @@ def test_quality_standard_rejects_invalid_range() -> None:
             db,
         )
     assert error.value.status_code == 422
+    db.close()
+
+
+def test_quality_measurement_rejects_point_group_or_type_mismatch() -> None:
+    db = build_session()
+    now = datetime.now(UTC)
+    factory = create_factory(FactoryCreate(code="F2", name="二号工厂"), db)
+    vehicle = create_vehicle_model(VehicleModelCreate(code="M2", name="车型二"), db)
+    other_vehicle = create_vehicle_model(VehicleModelCreate(code="M3", name="车型三"), db)
+    color = create_color(ColorCreate(code="C2", name="红色", color_type="BASECOAT"), db)
+    bind_factory_vehicle_model(
+        FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle.id),
+        db,
+    )
+    bind_vehicle_model_color(
+        VehicleModelColorCreate(vehicle_model_id=vehicle.id, color_id=color.id),
+        db,
+    )
+    part = create_part(PartCreate(code="P2", name="测试零件"), db)
+    point = create_measurement_point(
+        MeasurementPointCreate(
+            code="PT2",
+            name="橘皮点位",
+            vehicle_model_id=vehicle.id,
+            part_id=part.id,
+            quality_types=["ORANGE_PEEL"],
+        ),
+        db,
+    )
+    wrong_vehicle_point = create_measurement_point(
+        MeasurementPointCreate(
+            code="PT3",
+            name="异车型点位",
+            vehicle_model_id=other_vehicle.id,
+            part_id=part.id,
+            quality_types=["ORANGE_PEEL"],
+        ),
+        db,
+    )
+    wrong_type_group = create_measurement_group(
+        MeasurementGroupCreate(
+            code="G2",
+            name="膜厚编组",
+            vehicle_model_id=vehicle.id,
+            quality_type="THICKNESS",
+        ),
+        db,
+    )
+    valid_group = create_measurement_group(
+        MeasurementGroupCreate(
+            code="G3",
+            name="橘皮编组",
+            vehicle_model_id=vehicle.id,
+            quality_type="ORANGE_PEEL",
+        ),
+        db,
+    )
+    bind_measurement_group_point(
+        MeasurementGroupPointBind(
+            measurement_group_id=valid_group.id,
+            measurement_point_id=point.id,
+            sequence_no=1,
+        ),
+        db,
+    )
+    run = create_production_run(
+        ProductionRunCreate(
+            run_no="RUN-2",
+            factory_id=factory.id,
+            vehicle_model_id=vehicle.id,
+            color_id=color.id,
+            started_at=now,
+        ),
+        db,
+    )
+
+    with pytest.raises(HTTPException) as point_error:
+        create_quality_measurement(
+            QualityMeasurementCreate(
+                data_no="QM-2",
+                production_run_id=run.id,
+                measurement_point_id=wrong_vehicle_point.id,
+                quality_type="ORANGE_PEEL",
+                measured_at=now,
+                metrics=[QualityMetricInput(metric_code="doi", metric_name="DOI", raw_value=81)],
+            ),
+            db,
+        )
+    assert point_error.value.status_code == 422
+
+    with pytest.raises(HTTPException) as type_error:
+        create_quality_measurement(
+            QualityMeasurementCreate(
+                data_no="QM-3",
+                production_run_id=run.id,
+                measurement_point_id=point.id,
+                measurement_group_id=wrong_type_group.id,
+                quality_type="ORANGE_PEEL",
+                measured_at=now,
+                metrics=[QualityMetricInput(metric_code="doi", metric_name="DOI", raw_value=82)],
+            ),
+            db,
+        )
+    assert type_error.value.status_code == 422
+
+    with pytest.raises(HTTPException) as group_binding_error:
+        create_quality_measurement(
+            QualityMeasurementCreate(
+                data_no="QM-4",
+                production_run_id=run.id,
+                measurement_point_id=wrong_vehicle_point.id,
+                measurement_group_id=valid_group.id,
+                quality_type="ORANGE_PEEL",
+                measured_at=now,
+                metrics=[QualityMetricInput(metric_code="doi", metric_name="DOI", raw_value=83)],
+            ),
+            db,
+        )
+    assert group_binding_error.value.status_code == 422
     db.close()

@@ -23,6 +23,7 @@ from app.models.domain import (
     Color,
     MeasurementCalibrationRecord,
     MeasurementGroup,
+    MeasurementGroupPoint,
     MeasurementImportProfile,
     MeasurementInstrument,
     MeasurementMethod,
@@ -99,6 +100,38 @@ def _validate_measurement_governance_relations(db: Session, values: dict) -> Non
         probe = _required(db, MeasurementProbe, values["measurement_probe_id"], "测量探头")
         if probe.instrument_id != values["instrument_id"]:
             raise HTTPException(status_code=422, detail="测量探头不属于该测量仪器")
+
+
+def _validate_measurement_business_context(
+    db: Session,
+    production_run_id: str,
+    measurement_point_id: str,
+    measurement_group_id: str | None,
+    quality_type: str,
+) -> None:
+    production_run = _required(db, ProductionRun, production_run_id, "生产事件")
+    measurement_point = _required(db, MeasurementPoint, measurement_point_id, "测量点")
+    if measurement_point.vehicle_model_id != production_run.vehicle_model_id:
+        raise HTTPException(status_code=422, detail="测量点不属于该生产事件对应车型")
+
+    if quality_type not in (measurement_point.quality_types or []):
+        raise HTTPException(status_code=422, detail="测量点不支持该质量类型")
+
+    if measurement_group_id:
+        measurement_group = _required(db, MeasurementGroup, measurement_group_id, "测量编组")
+        if measurement_group.vehicle_model_id != production_run.vehicle_model_id:
+            raise HTTPException(status_code=422, detail="测量编组不属于该生产事件对应车型")
+        if measurement_group.quality_type != quality_type:
+            raise HTTPException(status_code=422, detail="测量编组质量类型与当前质量数据不一致")
+        group_point_ids = list(
+            db.scalars(
+                select(MeasurementGroupPoint.measurement_point_id).where(
+                    MeasurementGroupPoint.measurement_group_id == measurement_group_id
+                )
+            )
+        )
+        if group_point_ids and measurement_point_id not in group_point_ids:
+            raise HTTPException(status_code=422, detail="测量点未绑定到所选测量编组")
 
 
 def _required(db: Session, model: type, resource_id: str, label: str):
@@ -574,17 +607,18 @@ def create_quality_measurement(
         [reading.model_dump() for reading in payload.repeat_readings],
     )
     _validate_measurement_governance_relations(db, payload.model_dump())
-    check_fk(db, ProductionRun, payload.production_run_id, "生产事件")
-    check_fk(db, MeasurementPoint, payload.measurement_point_id, "测量点")
+    _validate_measurement_business_context(
+        db,
+        payload.production_run_id,
+        payload.measurement_point_id,
+        payload.measurement_group_id,
+        payload.quality_type,
+    )
     if db.scalar(select(QualityMeasurement).where(QualityMeasurement.data_no == payload.data_no)):
         raise HTTPException(status_code=409, detail="质量数据编号已存在")
-    if not db.get(ProductionRun, payload.production_run_id):
-        raise HTTPException(status_code=404, detail="生产事件不存在")
     point = db.get(MeasurementPoint, payload.measurement_point_id)
     if not point:
         raise HTTPException(status_code=404, detail="测量点不存在")
-    if payload.measurement_group_id and not db.get(MeasurementGroup, payload.measurement_group_id):
-        raise HTTPException(status_code=404, detail="测量编组不存在")
 
     measurement_data = payload.model_dump(exclude={"metrics", "repeat_readings"})
     if payload.instrument_id and not measurement_data.get("device_code"):
@@ -660,6 +694,13 @@ def update_quality_measurement(
             "import_profile_id": changes.get("import_profile_id", measurement.import_profile_id),
         },
     )
+    _validate_measurement_business_context(
+        db,
+        changes.get("production_run_id", measurement.production_run_id),
+        changes.get("measurement_point_id", measurement.measurement_point_id),
+        changes.get("measurement_group_id", measurement.measurement_group_id),
+        resolved_quality_type,
+    )
     if "data_no" in changes:
         duplicate = db.scalar(
             select(QualityMeasurement).where(
@@ -669,12 +710,6 @@ def update_quality_measurement(
         )
         if duplicate:
             raise HTTPException(status_code=409, detail="质量数据编号已存在")
-    if "production_run_id" in changes:
-        _required(db, ProductionRun, changes["production_run_id"], "生产事件")
-    if "measurement_point_id" in changes:
-        _required(db, MeasurementPoint, changes["measurement_point_id"], "测量点")
-    if changes.get("measurement_group_id"):
-        _required(db, MeasurementGroup, changes["measurement_group_id"], "测量编组")
     if changes.get("instrument_id") and "device_code" not in changes:
         changes["device_code"] = db.get(MeasurementInstrument, changes["instrument_id"]).code
     for field, value in changes.items():

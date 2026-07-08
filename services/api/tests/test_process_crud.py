@@ -6,7 +6,14 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from app.api.routes.factories import create_factory
-from app.api.routes.master_data import create_color, create_measurement_point, create_part, create_vehicle_model
+from app.api.routes.master_data import (
+    bind_factory_vehicle_model,
+    bind_vehicle_model_color,
+    create_color,
+    create_measurement_point,
+    create_part,
+    create_vehicle_model,
+)
 from app.api.routes.process import (
     create_brush,
     create_brush_parameter,
@@ -53,6 +60,7 @@ from app.api.routes.process import (
 from tests.schema_guard import create_transient_test_schema
 from app.schemas.common import FactoryCreate
 from app.schemas.master_data import ColorCreate, MeasurementPointCreate, PartCreate, VehicleModelCreate
+from app.schemas.master_data import FactoryVehicleModelCreate, VehicleModelColorCreate
 from app.schemas.process import (
     BrushCreate,
     ActualParameterCreate,
@@ -207,6 +215,168 @@ def test_program_with_version_cannot_be_deleted() -> None:
     db.close()
 
 
+def test_program_version_applicability_cannot_shrink_in_place() -> None:
+    db = build_session()
+    factory = create_factory(FactoryCreate(code="F02A", name="二号A工厂"), db)
+    vehicle_a = create_vehicle_model(VehicleModelCreate(code="M02A", name="车型A"), db)
+    vehicle_b = create_vehicle_model(VehicleModelCreate(code="M02B", name="车型B"), db)
+    color_a = create_color(ColorCreate(code="C02A", name="颜色A", color_type="BASECOAT"), db)
+    color_b = create_color(ColorCreate(code="C02B", name="颜色B", color_type="BASECOAT"), db)
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-02A",
+            name="色漆一站",
+            factory_id=factory.id,
+            process_stage="BASECOAT_1",
+            station_code="P1B1A1",
+            station_name="色漆一站",
+        ),
+        db,
+    )
+    version = create_program_version(
+        program.id,
+        SprayProgramVersionCreate(
+            version="V1",
+            vehicle_model_ids=[vehicle_a.id, vehicle_b.id],
+            color_ids=[color_a.id, color_b.id],
+        ),
+        db,
+    )
+
+    expanded = update_program_version(
+        version.id,
+        SprayProgramVersionUpdate(vehicle_model_ids=[vehicle_a.id, vehicle_b.id], color_ids=[color_a.id, color_b.id]),
+        db,
+    )
+    assert expanded.id == version.id
+
+    with pytest.raises(HTTPException) as vehicle_error:
+        update_program_version(
+            version.id,
+            SprayProgramVersionUpdate(vehicle_model_ids=[vehicle_a.id]),
+            db,
+        )
+    assert vehicle_error.value.status_code == 422
+
+    with pytest.raises(HTTPException) as color_error:
+        update_program_version(
+            version.id,
+            SprayProgramVersionUpdate(color_ids=[color_a.id]),
+            db,
+        )
+    assert color_error.value.status_code == 422
+    db.close()
+
+
+def test_brush_point_contribution_requires_matching_point_context() -> None:
+    db = build_session()
+    factory = create_factory(FactoryCreate(code="F02B", name="二号B工厂"), db)
+    vehicle_a = create_vehicle_model(VehicleModelCreate(code="M02C", name="车型C"), db)
+    vehicle_b = create_vehicle_model(VehicleModelCreate(code="M02D", name="车型D"), db)
+    part_roof = create_part(PartCreate(code="ROOF2", name="车顶"), db)
+    part_door = create_part(PartCreate(code="DOOR2", name="车门"), db)
+    quality_point = create_measurement_point(
+        MeasurementPointCreate(
+            code="P02A",
+            name="车顶橘皮点",
+            vehicle_model_id=vehicle_a.id,
+            part_id=part_roof.id,
+            point_type="QUALITY",
+            quality_types=["ORANGE_PEEL"],
+        ),
+        db,
+    )
+    wrong_vehicle_point = create_measurement_point(
+        MeasurementPointCreate(
+            code="P02B",
+            name="异车型点",
+            vehicle_model_id=vehicle_b.id,
+            part_id=part_roof.id,
+            point_type="QUALITY",
+            quality_types=["ORANGE_PEEL"],
+        ),
+        db,
+    )
+    wrong_part_point = create_measurement_point(
+        MeasurementPointCreate(
+            code="P02C",
+            name="异零件点",
+            vehicle_model_id=vehicle_a.id,
+            part_id=part_door.id,
+            point_type="QUALITY",
+            quality_types=["ORANGE_PEEL"],
+        ),
+        db,
+    )
+    non_quality_point = create_measurement_point(
+        MeasurementPointCreate(
+            code="P02D",
+            name="非质量点",
+            vehicle_model_id=vehicle_a.id,
+            part_id=part_roof.id,
+            point_type="PROCESS",
+            quality_types=["ORANGE_PEEL"],
+        ),
+        db,
+    )
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-02B",
+            name="清漆一站",
+            factory_id=factory.id,
+            process_stage="CLEARCOAT_1",
+            station_code="P1C1A1",
+            station_name="清漆一站",
+        ),
+        db,
+    )
+    version = create_program_version(
+        program.id,
+        SprayProgramVersionCreate(version="V1", vehicle_model_ids=[vehicle_a.id]),
+        db,
+    )
+    brush = create_brush(
+        version.id,
+        BrushCreate(brush_no="B02", brush_table_no="BT02", part_id=part_roof.id),
+        db,
+    )
+
+    upsert_brush_point_contribution(
+        brush.id,
+        quality_point.id,
+        BrushPointContributionUpsert(overlap_ratio=0.5, contribution_weight=0.5),
+        db,
+    )
+
+    with pytest.raises(HTTPException) as vehicle_error:
+        upsert_brush_point_contribution(
+            brush.id,
+            wrong_vehicle_point.id,
+            BrushPointContributionUpsert(overlap_ratio=0.5, contribution_weight=0.5),
+            db,
+        )
+    assert vehicle_error.value.status_code == 422
+
+    with pytest.raises(HTTPException) as part_error:
+        upsert_brush_point_contribution(
+            brush.id,
+            wrong_part_point.id,
+            BrushPointContributionUpsert(overlap_ratio=0.5, contribution_weight=0.5),
+            db,
+        )
+    assert part_error.value.status_code == 422
+
+    with pytest.raises(HTTPException) as point_type_error:
+        upsert_brush_point_contribution(
+            brush.id,
+            non_quality_point.id,
+            BrushPointContributionUpsert(overlap_ratio=0.5, contribution_weight=0.5),
+            db,
+        )
+    assert point_type_error.value.status_code == 422
+    db.close()
+
+
 def test_parameter_constraint_source_crud_and_activation_gate() -> None:
     db = build_session()
     factory = create_factory(FactoryCreate(code="F03", name="三号工厂"), db)
@@ -275,6 +445,14 @@ def test_production_material_stage_and_actual_parameter_crud() -> None:
     factory = create_factory(FactoryCreate(code="F05", name="五号工厂"), db)
     vehicle = create_vehicle_model(VehicleModelCreate(code="M05", name="车型五"), db)
     color = create_color(ColorCreate(code="C05", name="蓝色", color_type="BASECOAT"), db)
+    bind_factory_vehicle_model(
+        FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle.id),
+        db,
+    )
+    bind_vehicle_model_color(
+        VehicleModelColorCreate(vehicle_model_id=vehicle.id, color_id=color.id),
+        db,
+    )
     program = create_spray_program(
         SprayProgramCreate(
             program_code="PRG-05",
@@ -358,4 +536,214 @@ def test_production_material_stage_and_actual_parameter_crud() -> None:
     assert_delete_disabled(delete_material_batch, batch.id, db)
     assert_delete_disabled(delete_program_version, version.id, db)
     assert_delete_disabled(delete_spray_program, program.id, db)
+    db.close()
+
+
+def test_production_run_requires_active_factory_model_and_model_color_mapping() -> None:
+    db = build_session()
+    now = datetime.now(UTC)
+    factory = create_factory(FactoryCreate(code="F06", name="六号工厂"), db)
+    vehicle = create_vehicle_model(VehicleModelCreate(code="M06", name="车型六"), db)
+    color = create_color(ColorCreate(code="C06", name="银色", color_type="BASECOAT"), db)
+
+    with pytest.raises(HTTPException) as error:
+        create_production_run(
+            ProductionRunCreate(
+                run_no="RUN-06",
+                factory_id=factory.id,
+                vehicle_model_id=vehicle.id,
+                color_id=color.id,
+                started_at=now,
+            ),
+            db,
+        )
+    assert error.value.status_code == 422
+
+    bind_factory_vehicle_model(
+        FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle.id),
+        db,
+    )
+    with pytest.raises(HTTPException) as color_error:
+        create_production_run(
+            ProductionRunCreate(
+                run_no="RUN-06-B",
+                factory_id=factory.id,
+                vehicle_model_id=vehicle.id,
+                color_id=color.id,
+                started_at=now,
+            ),
+            db,
+        )
+    assert color_error.value.status_code == 422
+
+    bind_vehicle_model_color(
+        VehicleModelColorCreate(vehicle_model_id=vehicle.id, color_id=color.id),
+        db,
+    )
+    run = create_production_run(
+        ProductionRunCreate(
+            run_no="RUN-06-C",
+            factory_id=factory.id,
+            vehicle_model_id=vehicle.id,
+            color_id=color.id,
+            started_at=now,
+        ),
+        db,
+    )
+    assert run.run_no == "RUN-06-C"
+    db.close()
+
+
+def test_stage_run_rejects_mismatched_program_or_material_context() -> None:
+    db = build_session()
+    now = datetime.now(UTC)
+    factory = create_factory(FactoryCreate(code="F07", name="七号工厂"), db)
+    other_factory = create_factory(FactoryCreate(code="F08", name="八号工厂"), db)
+    vehicle = create_vehicle_model(VehicleModelCreate(code="M07", name="车型七"), db)
+    other_vehicle = create_vehicle_model(VehicleModelCreate(code="M08", name="车型八"), db)
+    color = create_color(ColorCreate(code="C07", name="黑色", color_type="BASECOAT"), db)
+    other_color = create_color(ColorCreate(code="C08", name="白色", color_type="BASECOAT"), db)
+
+    bind_factory_vehicle_model(
+        FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle.id),
+        db,
+    )
+    bind_vehicle_model_color(
+        VehicleModelColorCreate(vehicle_model_id=vehicle.id, color_id=color.id),
+        db,
+    )
+
+    run = create_production_run(
+        ProductionRunCreate(
+            run_no="RUN-07",
+            factory_id=factory.id,
+            vehicle_model_id=vehicle.id,
+            color_id=color.id,
+            started_at=now,
+        ),
+        db,
+    )
+
+    wrong_stage_program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-07-WRONG-STAGE",
+            name="色漆一站",
+            factory_id=factory.id,
+            process_stage="BASECOAT_1",
+            station_code="P1B1A1",
+            station_name="色漆一站",
+        ),
+        db,
+    )
+    wrong_stage_version = create_program_version(
+        wrong_stage_program.id,
+        SprayProgramVersionCreate(version="V1"),
+        db,
+    )
+    with pytest.raises(HTTPException) as stage_error:
+        create_production_stage_run(
+            run.id,
+            ProductionStageRunCreate(
+                process_stage="CLEARCOAT_1",
+                program_version_id=wrong_stage_version.id,
+            ),
+            db,
+        )
+    assert stage_error.value.status_code == 422
+
+    wrong_factory_program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-07-WRONG-FACTORY",
+            name="清漆一站",
+            factory_id=other_factory.id,
+            process_stage="CLEARCOAT_1",
+            station_code="P1C1A1",
+            station_name="清漆一站",
+        ),
+        db,
+    )
+    wrong_factory_version = create_program_version(
+        wrong_factory_program.id,
+        SprayProgramVersionCreate(version="V1"),
+        db,
+    )
+    with pytest.raises(HTTPException) as factory_error:
+        create_production_stage_run(
+            run.id,
+            ProductionStageRunCreate(
+                process_stage="CLEARCOAT_1",
+                program_version_id=wrong_factory_version.id,
+            ),
+            db,
+        )
+    assert factory_error.value.status_code == 422
+
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-07",
+            name="清漆一站",
+            factory_id=factory.id,
+            process_stage="CLEARCOAT_1",
+            station_code="P1C1A1",
+            station_name="清漆一站",
+        ),
+        db,
+    )
+    constrained_version = create_program_version(
+        program.id,
+        SprayProgramVersionCreate(version="V1", vehicle_model_ids=[other_vehicle.id]),
+        db,
+    )
+    with pytest.raises(HTTPException) as vehicle_error:
+        create_production_stage_run(
+            run.id,
+            ProductionStageRunCreate(
+                process_stage="CLEARCOAT_1",
+                program_version_id=constrained_version.id,
+            ),
+            db,
+        )
+    assert vehicle_error.value.status_code == 422
+
+    constrained_color_version = create_program_version(
+        program.id,
+        SprayProgramVersionCreate(version="V2", color_ids=[other_color.id]),
+        db,
+    )
+    with pytest.raises(HTTPException) as color_error:
+        create_production_stage_run(
+            run.id,
+            ProductionStageRunCreate(
+                process_stage="CLEARCOAT_1",
+                program_version_id=constrained_color_version.id,
+            ),
+            db,
+        )
+    assert color_error.value.status_code == 422
+
+    batch = create_material_batch(
+        MaterialBatchCreate(
+            batch_no="LOT-07",
+            material_code="BC-07",
+            material_name="色漆",
+            material_type="BASECOAT",
+        ),
+        db,
+    )
+    valid_version = create_program_version(
+        program.id,
+        SprayProgramVersionCreate(version="V3"),
+        db,
+    )
+    with pytest.raises(HTTPException) as batch_error:
+        create_production_stage_run(
+            run.id,
+            ProductionStageRunCreate(
+                process_stage="CLEARCOAT_1",
+                program_version_id=valid_version.id,
+                material_batch_id=batch.id,
+            ),
+            db,
+        )
+    assert batch_error.value.status_code == 422
     db.close()

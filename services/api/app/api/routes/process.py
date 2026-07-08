@@ -15,6 +15,7 @@ from app.models.domain import (
     BrushPointContribution,
     Color,
     Factory,
+    FactoryVehicleModel,
     MaterialBatch,
     MeasurementPoint,
     ParameterConstraintSource,
@@ -29,6 +30,7 @@ from app.models.domain import (
     ProgramVehicleModel,
     SprayProgram,
     SprayProgramVersion,
+    VehicleModelColor,
     VehicleModel,
 )
 from app.schemas.process import (
@@ -91,6 +93,140 @@ def _validate_process_stage(process_stage: str) -> None:
         ) from exc
 
 
+def _expected_material_type(process_stage: str) -> str:
+    if process_stage == ProcessStage.MIDCOAT_EXT.value:
+        return "MIDCOAT"
+    if process_stage in {ProcessStage.BASECOAT_1.value, ProcessStage.BASECOAT_2.value}:
+        return "BASECOAT"
+    return "CLEARCOAT"
+
+
+def _existing_program_vehicle_model_ids(db: Session, version_id: str) -> set[str]:
+    return set(
+        db.scalars(
+            select(ProgramVehicleModel.vehicle_model_id).where(
+                ProgramVehicleModel.program_version_id == version_id
+            )
+        )
+    )
+
+
+def _existing_program_color_ids(db: Session, version_id: str) -> set[str]:
+    return set(
+        db.scalars(
+            select(ProgramColor.color_id).where(ProgramColor.program_version_id == version_id)
+        )
+    )
+
+
+def _validate_production_run_context(
+    db: Session,
+    factory_id: str,
+    vehicle_model_id: str,
+    color_id: str,
+) -> None:
+    if not db.scalar(
+        select(FactoryVehicleModel.id).where(
+            FactoryVehicleModel.factory_id == factory_id,
+            FactoryVehicleModel.vehicle_model_id == vehicle_model_id,
+            FactoryVehicleModel.is_active.is_(True),
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="该工厂下未启用所选车型，不能创建或更新生产事件",
+        )
+    if not db.scalar(
+        select(VehicleModelColor.id).where(
+            VehicleModelColor.vehicle_model_id == vehicle_model_id,
+            VehicleModelColor.color_id == color_id,
+            VehicleModelColor.is_active.is_(True),
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="该车型下未启用所选颜色，不能创建或更新生产事件",
+        )
+
+
+def _validate_stage_run_context(
+    db: Session,
+    production_run: ProductionRun,
+    process_stage: str,
+    program_version_id: str,
+    material_batch_id: str | None,
+) -> None:
+    program_version = _required(db, SprayProgramVersion, program_version_id, "程序版本")
+    spray_program = _required(db, SprayProgram, program_version.spray_program_id, "喷涂程序")
+    if spray_program.factory_id != production_run.factory_id:
+        raise HTTPException(status_code=422, detail="程序版本不属于该生产事件所在工厂")
+    if spray_program.process_stage != process_stage:
+        raise HTTPException(status_code=422, detail="程序版本所属工艺阶段与实绩工艺阶段不一致")
+
+    if db.scalar(
+        select(ProgramVehicleModel.id).where(
+            ProgramVehicleModel.program_version_id == program_version.id
+        )
+    ) and not db.scalar(
+        select(ProgramVehicleModel.id).where(
+            ProgramVehicleModel.program_version_id == program_version.id,
+            ProgramVehicleModel.vehicle_model_id == production_run.vehicle_model_id,
+        )
+    ):
+        raise HTTPException(status_code=422, detail="程序版本不适用于该生产事件车型")
+
+    if db.scalar(
+        select(ProgramColor.id).where(ProgramColor.program_version_id == program_version.id)
+    ) and not db.scalar(
+        select(ProgramColor.id).where(
+            ProgramColor.program_version_id == program_version.id,
+            ProgramColor.color_id == production_run.color_id,
+        )
+    ):
+        raise HTTPException(status_code=422, detail="程序版本不适用于该生产事件颜色")
+
+    if material_batch_id:
+        material_batch = _required(db, MaterialBatch, material_batch_id, "材料批次")
+        expected_type = _expected_material_type(process_stage)
+        if material_batch.material_type != expected_type:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{process_stage} 仅允许绑定 {expected_type} 类型材料批次",
+            )
+
+
+def _validate_program_version_applicability_update(
+    db: Session,
+    version_id: str,
+    vehicle_model_ids: list[str] | None,
+    color_ids: list[str] | None,
+) -> tuple[list[str] | None, list[str] | None]:
+    normalized_vehicle_model_ids = (
+        list(dict.fromkeys(vehicle_model_ids)) if vehicle_model_ids is not None else None
+    )
+    normalized_color_ids = list(dict.fromkeys(color_ids)) if color_ids is not None else None
+
+    if normalized_vehicle_model_ids is not None:
+        for model_id in normalized_vehicle_model_ids:
+            _required(db, VehicleModel, model_id, "车型")
+        if _existing_program_vehicle_model_ids(db, version_id) - set(normalized_vehicle_model_ids):
+            raise HTTPException(
+                status_code=422,
+                detail="程序版本适用车型缩减需新建版本，不支持在当前版本直接移除既有适用车型",
+            )
+
+    if normalized_color_ids is not None:
+        for color_id in normalized_color_ids:
+            _required(db, Color, color_id, "颜色")
+        if _existing_program_color_ids(db, version_id) - set(normalized_color_ids):
+            raise HTTPException(
+                status_code=422,
+                detail="程序版本适用颜色缩减需新建版本，不支持在当前版本直接移除既有适用颜色",
+            )
+
+    return normalized_vehicle_model_ids, normalized_color_ids
+
+
 def _validate_constraint_source(
     db: Session,
     values: dict,
@@ -136,6 +272,22 @@ def _save(db: Session, resource):
 
 def _delete_resource(db: Session, resource, label: str) -> Response:
     reject_physical_delete(label)
+
+
+def _validate_brush_point_contribution_context(
+    db: Session,
+    brush_id: str,
+    measurement_point_id: str,
+) -> None:
+    brush = _required(db, Brush, brush_id, "刷子")
+    measurement_point = _required(db, MeasurementPoint, measurement_point_id, "测量点")
+    if measurement_point.point_type != "QUALITY":
+        raise HTTPException(status_code=422, detail="点位贡献仅允许绑定质量测量点")
+    if brush.part_id and measurement_point.part_id != brush.part_id:
+        raise HTTPException(status_code=422, detail="测量点所属零件与当前刷子负责零件不一致")
+    applicable_vehicle_model_ids = _existing_program_vehicle_model_ids(db, brush.program_version_id)
+    if applicable_vehicle_model_ids and measurement_point.vehicle_model_id not in applicable_vehicle_model_ids:
+        raise HTTPException(status_code=422, detail="测量点车型不在当前程序版本适用范围内")
 
 
 @router.get("/parameter-definitions", response_model=list[ParameterDefinitionRead])
@@ -310,9 +462,11 @@ def create_program_version(
         )
     ):
         raise HTTPException(status_code=409, detail="程序版本已存在")
-    for model_id in payload.vehicle_model_ids:
+    vehicle_model_ids = list(dict.fromkeys(payload.vehicle_model_ids))
+    color_ids = list(dict.fromkeys(payload.color_ids))
+    for model_id in vehicle_model_ids:
         _required(db, VehicleModel, model_id, "车型")
-    for color_id in payload.color_ids:
+    for color_id in color_ids:
         _required(db, Color, color_id, "颜色")
 
     version_data = payload.model_dump(exclude={"vehicle_model_ids", "color_ids"})
@@ -322,11 +476,11 @@ def create_program_version(
     db.add_all(
         [
             ProgramVehicleModel(program_version_id=version.id, vehicle_model_id=model_id)
-            for model_id in payload.vehicle_model_ids
+            for model_id in vehicle_model_ids
         ]
         + [
             ProgramColor(program_version_id=version.id, color_id=color_id)
-            for color_id in payload.color_ids
+            for color_id in color_ids
         ]
     )
     db.commit()
@@ -397,18 +551,14 @@ def update_program_version(
     if duplicate:
         raise HTTPException(status_code=409, detail="程序版本已存在")
 
-    vehicle_model_ids = changes.pop("vehicle_model_ids", None)
-    color_ids = changes.pop("color_ids", None)
+    vehicle_model_ids, color_ids = _validate_program_version_applicability_update(
+        db,
+        version_id,
+        changes.pop("vehicle_model_ids", None),
+        changes.pop("color_ids", None),
+    )
     if vehicle_model_ids is not None:
-        for model_id in vehicle_model_ids:
-            _required(db, VehicleModel, model_id, "车型")
-        existing_model_ids = set(
-            db.scalars(
-                select(ProgramVehicleModel.vehicle_model_id).where(
-                    ProgramVehicleModel.program_version_id == version_id
-                )
-            )
-        )
+        existing_model_ids = _existing_program_vehicle_model_ids(db, version_id)
         db.add_all(
             [
                 ProgramVehicleModel(program_version_id=version_id, vehicle_model_id=model_id)
@@ -417,13 +567,7 @@ def update_program_version(
             ]
         )
     if color_ids is not None:
-        for color_id in color_ids:
-            _required(db, Color, color_id, "颜色")
-        existing_color_ids = set(
-            db.scalars(
-                select(ProgramColor.color_id).where(ProgramColor.program_version_id == version_id)
-            )
-        )
+        existing_color_ids = _existing_program_color_ids(db, version_id)
         db.add_all(
             [
                 ProgramColor(program_version_id=version_id, color_id=color_id)
@@ -594,8 +738,7 @@ def upsert_brush_point_contribution(
     payload: BrushPointContributionUpsert,
     db: Session = Depends(get_db),
 ) -> BrushPointContribution:
-    _required(db, Brush, brush_id, "刷子")
-    _required(db, MeasurementPoint, measurement_point_id, "测量点")
+    _validate_brush_point_contribution_context(db, brush_id, measurement_point_id)
     contribution = db.scalar(
         select(BrushPointContribution).where(
             BrushPointContribution.brush_id == brush_id,
@@ -713,6 +856,12 @@ def create_production_run(payload: ProductionRunCreate, db: Session = Depends(ge
     check_fk(db, Factory, payload.factory_id, label="工厂")
     check_fk(db, VehicleModel, payload.vehicle_model_id, label="车型")
     check_fk(db, Color, payload.color_id, label="颜色")
+    _validate_production_run_context(
+        db,
+        payload.factory_id,
+        payload.vehicle_model_id,
+        payload.color_id,
+    )
     if db.scalar(select(ProductionRun).where(ProductionRun.run_no == payload.run_no)):
         raise HTTPException(status_code=409, detail="生产事件编号已存在")
     return _save(db, ProductionRun(**payload.model_dump()))
@@ -757,6 +906,12 @@ def update_production_run(
     ):
         if changes.get(field):
             _required(db, model, changes[field], label)
+    _validate_production_run_context(
+        db,
+        changes.get("factory_id", production_run.factory_id),
+        changes.get("vehicle_model_id", production_run.vehicle_model_id),
+        changes.get("color_id", production_run.color_id),
+    )
     for field, value in changes.items():
         setattr(production_run, field, value)
     return _save(db, production_run)
@@ -778,10 +933,7 @@ def create_production_stage_run(
 ) -> ProductionStageRun:
     _validate_process_stage(payload.process_stage)
     _validate_mapping_scope(payload.actual_parameters, "工序汇总参数")
-    check_fk(db, ProductionRun, production_run_id, label="生产事件")
-    check_fk(db, SprayProgramVersion, payload.program_version_id, label="程序版本")
-    if payload.material_batch_id:
-        check_fk(db, MaterialBatch, payload.material_batch_id, label="材料批次")
+    production_run = _required(db, ProductionRun, production_run_id, "生产事件")
     if db.scalar(
         select(ProductionStageRun).where(
             ProductionStageRun.production_run_id == production_run_id,
@@ -789,6 +941,13 @@ def create_production_stage_run(
         )
     ):
         raise HTTPException(status_code=409, detail="生产事件工艺阶段已存在")
+    _validate_stage_run_context(
+        db,
+        production_run,
+        payload.process_stage,
+        payload.program_version_id,
+        payload.material_batch_id,
+    )
     return _save(db, ProductionStageRun(production_run_id=production_run_id, **payload.model_dump()))
 
 
@@ -834,10 +993,14 @@ def update_production_stage_run(
         )
     ):
         raise HTTPException(status_code=409, detail="生产事件工艺阶段已存在")
-    if changes.get("program_version_id"):
-        _required(db, SprayProgramVersion, changes["program_version_id"], "程序版本")
-    if changes.get("material_batch_id"):
-        _required(db, MaterialBatch, changes["material_batch_id"], "材料批次")
+    production_run = _required(db, ProductionRun, stage_run.production_run_id, "生产事件")
+    _validate_stage_run_context(
+        db,
+        production_run,
+        process_stage,
+        changes.get("program_version_id", stage_run.program_version_id),
+        changes.get("material_batch_id", stage_run.material_batch_id),
+    )
     for field, value in changes.items():
         setattr(stage_run, field, value)
     return _save(db, stage_run)

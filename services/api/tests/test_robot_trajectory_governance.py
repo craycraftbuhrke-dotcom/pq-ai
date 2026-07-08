@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.api.routes.factories import create_factory
 from app.api.routes.features import build_point_snapshot
 from app.api.routes.master_data import (
+    bind_factory_vehicle_model,
+    bind_vehicle_model_color,
     create_color,
     create_measurement_point,
     create_part,
@@ -41,8 +43,10 @@ from app.schemas.common import FactoryCreate
 from app.schemas.features import PointFeatureBuildRequest
 from app.schemas.master_data import (
     ColorCreate,
+    FactoryVehicleModelCreate,
     MeasurementPointCreate,
     PartCreate,
+    VehicleModelColorCreate,
     VehicleModelCreate,
 )
 from app.schemas.process import (
@@ -80,6 +84,14 @@ def test_durr_trajectory_lineage_and_target_family_contribution_gate() -> None:
     vehicle = create_vehicle_model(VehicleModelCreate(code="M-DURR", name="轨迹车型"), db)
     color = create_color(
         ColorCreate(code="C-DURR", name="轨迹颜色", color_type="BASECOAT"), db
+    )
+    bind_factory_vehicle_model(
+        FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle.id),
+        db,
+    )
+    bind_vehicle_model_color(
+        VehicleModelColorCreate(vehicle_model_id=vehicle.id, color_id=color.id),
+        db,
     )
     part = create_part(PartCreate(code="ROOF-DURR", name="车顶"), db)
     point = create_measurement_point(

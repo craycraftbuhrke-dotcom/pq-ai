@@ -8,19 +8,34 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Trash2,
   X,
 } from "lucide-react";
 import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
 import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
-import { SpcChart } from "@/components/spc-chart";
-import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
 import { useModalDismiss } from "@/lib/use-modal-dismiss";
 
-type Resource = { id: string; code: string; name: string };
-type ProductionRun = { id: string; run_no: string; body_no?: string | null; started_at: string };
+type Resource = {
+  id: string;
+  code: string;
+  name: string;
+  vehicle_model_id?: string;
+  quality_type?: string;
+  quality_types?: string[];
+};
+type MeasurementGroupPointRelation = {
+  measurement_group_id: string;
+  measurement_point_id: string;
+};
+type ProductionRun = {
+  id: string;
+  run_no: string;
+  body_no?: string | null;
+  started_at: string;
+  vehicle_model_id?: string;
+  color_id?: string;
+};
 type Instrument = Resource & { instrument_type: string; status: string; supported_quality_types: string[] };
 type Method = Resource & { version: string; quality_type: string; instrument_type: string; minimum_repeats: number };
 type Calibration = { id: string; calibration_no: string; instrument_id: string; method_id?: string | null; result: string; valid_until: string };
@@ -214,6 +229,66 @@ function relationName(resources: Resource[], id?: string | null): string {
   return item ? `${item.code} / ${item.name}` : "全部";
 }
 
+function filterMeasurementGroups(runs: ProductionRun[], groups: Resource[], form: FormState): Resource[] {
+  const selectedRun = runs.find((item) => item.id === form.production_run_id);
+  return groups.filter(
+    (item) =>
+      (!selectedRun?.vehicle_model_id || item.vehicle_model_id === selectedRun.vehicle_model_id) &&
+      (!form.quality_type || item.quality_type === form.quality_type),
+  );
+}
+
+function filterMeasurementPoints(
+  runs: ProductionRun[],
+  points: Resource[],
+  groupPoints: MeasurementGroupPointRelation[],
+  form: FormState,
+): Resource[] {
+  const selectedRun = runs.find((item) => item.id === form.production_run_id);
+  const selectedGroupId = String(form.measurement_group_id ?? "");
+  const allowedPointIds = selectedGroupId
+    ? new Set(
+        groupPoints
+          .filter((item) => item.measurement_group_id === selectedGroupId)
+          .map((item) => item.measurement_point_id),
+      )
+    : null;
+  return points.filter((item) => {
+    if (selectedRun?.vehicle_model_id && item.vehicle_model_id !== selectedRun.vehicle_model_id) return false;
+    if (form.quality_type && !item.quality_types?.includes(String(form.quality_type))) return false;
+    if (allowedPointIds && !allowedPointIds.has(item.id)) return false;
+    return true;
+  });
+}
+
+function normalizeMeasurementForm(
+  runs: ProductionRun[],
+  groups: Resource[],
+  groupPoints: MeasurementGroupPointRelation[],
+  points: Resource[],
+  form: FormState,
+): FormState {
+  const validGroups = filterMeasurementGroups(runs, groups, form);
+  let nextGroupId = String(form.measurement_group_id ?? "");
+  if (!nextGroupId && validGroups.length === 1) {
+    nextGroupId = validGroups[0]?.id ?? "";
+  } else if (nextGroupId && !validGroups.some((item) => item.id === nextGroupId)) {
+    nextGroupId = validGroups.length === 1 ? validGroups[0]?.id ?? "" : "";
+  }
+  const validPoints = filterMeasurementPoints(runs, points, groupPoints, {
+    ...form,
+    measurement_group_id: nextGroupId,
+  });
+  const currentPointId = String(form.measurement_point_id ?? "");
+  return {
+    ...form,
+    measurement_group_id: nextGroupId,
+    measurement_point_id: validPoints.some((item) => item.id === currentPointId)
+      ? currentPointId
+      : validPoints[0]?.id ?? "",
+  };
+}
+
 export function QualityWorkspace() {
   const [tab, setTab] = useState<Tab>("measurements");
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -224,6 +299,7 @@ export function QualityWorkspace() {
   const [definitions, setDefinitions] = useState<MetricDefinition[]>([]);
   const [runs, setRuns] = useState<ProductionRun[]>([]);
   const [groups, setGroups] = useState<Resource[]>([]);
+  const [groupPoints, setGroupPoints] = useState<MeasurementGroupPointRelation[]>([]);
   const [points, setPoints] = useState<Resource[]>([]);
   const [vehicleModels, setVehicleModels] = useState<Resource[]>([]);
   const [colors, setColors] = useState<Resource[]>([]);
@@ -255,7 +331,7 @@ export function QualityWorkspace() {
     setLoading(true);
     setError("");
     try {
-      const [nextSummary, nextMeasurements, nextStandards, nextDefinitions, nextRuns, nextGroups, nextPoints, nextModels, nextColors, nextParts, nextInstruments, nextMethods, nextCalibrations, nextReferences, nextProfiles] =
+      const [nextSummary, nextMeasurements, nextStandards, nextDefinitions, nextRuns, nextGroups, nextGroupPoints, nextPoints, nextModels, nextColors, nextParts, nextInstruments, nextMethods, nextCalibrations, nextReferences, nextProfiles] =
         await Promise.all([
           request<Summary>("/api/quality/summary"),
           request<Measurement[]>("/api/quality/measurements?limit=500"),
@@ -263,6 +339,7 @@ export function QualityWorkspace() {
           request<MetricDefinition[]>("/api/quality/metric-definitions"),
           request<ProductionRun[]>("/api/process/production-runs?limit=500"),
           request<Resource[]>("/api/master-data/measurement-groups"),
+          request<MeasurementGroupPointRelation[]>("/api/master-data/measurement-group-points"),
           request<Resource[]>("/api/master-data/measurement-points"),
           request<Resource[]>("/api/master-data/vehicle-models"),
           request<Resource[]>("/api/master-data/colors"),
@@ -279,6 +356,7 @@ export function QualityWorkspace() {
       setDefinitions(nextDefinitions);
       setRuns(nextRuns);
       setGroups(nextGroups);
+      setGroupPoints(nextGroupPoints);
       setPoints(nextPoints);
       setVehicleModels(nextModels);
       setColors(nextColors);
@@ -299,6 +377,12 @@ export function QualityWorkspace() {
     const timer = window.setTimeout(() => void reload(), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
+  const setMeasurementForm = useCallback(
+    (nextForm: FormState) => {
+      setForm(normalizeMeasurementForm(runs, groups, groupPoints, points, nextForm));
+    },
+    [groupPoints, groups, points, runs],
+  );
 
   const analyticsDefinitions = useMemo(
     () => definitions.filter((item) => item.quality_type === (typeFilter || "ORANGE_PEEL")),
@@ -360,12 +444,11 @@ export function QualityWorkspace() {
 
   function openMeasurement(record?: Measurement) {
     const qualityType = record?.quality_type ?? "ORANGE_PEEL";
-    setModal({ kind: "measurement", record });
-    setForm({
+    const initialForm: FormState = {
       data_no: record?.data_no ?? `QM-${Date.now()}`,
       production_run_id: record?.production_run_id ?? runs[0]?.id ?? "",
       measurement_group_id: record?.measurement_group_id ?? "",
-      measurement_point_id: record?.measurement_point_id ?? points[0]?.id ?? "",
+      measurement_point_id: record?.measurement_point_id ?? "",
       quality_type: qualityType,
       data_type: record?.data_type ?? "TEST",
       measured_at: localDateTime(record?.measured_at),
@@ -380,7 +463,9 @@ export function QualityWorkspace() {
       raw_file_uri: record?.raw_file_uri ?? "",
       status_score: record?.status_score === null || record?.status_score === undefined ? "" : String(record.status_score),
       is_valid: record?.is_valid ?? true,
-    });
+    };
+    setModal({ kind: "measurement", record });
+    setMeasurementForm(initialForm);
     const firstDefinition = definitionsFor(qualityType)[0];
     setMetricRows(
       record?.metrics.map((metric) => ({
@@ -501,11 +586,6 @@ export function QualityWorkspace() {
     }
   }
 
-  function remove(_path: string, label: string) {
-    setNotice("");
-    setError(`${label}不能物理删除。${physicalDeleteDisabledMessage}`);
-  }
-
   function bulkResult(message: string, type: "success" | "error") {
     setNotice(type === "success" ? message : "");
     setError(type === "error" ? message : "");
@@ -574,6 +654,7 @@ export function QualityWorkspace() {
       </section>
       {error ? <div className="message-banner message-error">{error}</div> : null}
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
+      <div className="freshness">质量测量与质量标准采用追加、修订和版本化治理；当前页面不提供物理删除。</div>
 
       <section className="panel quality-workspace">
         <div className="master-tabs">
@@ -605,7 +686,7 @@ export function QualityWorkspace() {
                 <div className="quality-record-identity"><span className="mono">{measurement.data_no}</span><strong>{measurement.measurement_point_code} · {measurement.measurement_point_name}</strong><small>{qualityLabels[measurement.quality_type]} · {new Date(measurement.measured_at).toLocaleString("zh-CN", { hour12: false })}</small><small className={`reliability-${measurement.reliability_status.toLowerCase()}`}>{reliabilityLabels[measurement.reliability_status] ?? measurement.reliability_status} · {measurement.instrument_code ?? "未绑定仪器"}</small></div>
                 <div className="quality-metrics">{measurement.metrics.slice(0, 5).map((metric) => <span key={metric.id}><small>{metric.metric_name}</small><strong className="mono">{metric.corrected_value ?? metric.raw_value} {metric.unit}</strong></span>)}</div>
                 <div className={`quality-judgement judgement-${measurement.judgement.toLowerCase()}`}><strong>{judgementLabels[measurement.judgement] ?? measurement.judgement}</strong><small>{measurement.reliability_issues[0] ?? measurement.violations[0] ?? `${measurement.measured_by ?? "未记录测量人"} · ${measurement.data_type}`}</small></div>
-                <div className="row-actions"><button className="icon-button" onClick={() => openMeasurement(measurement)} aria-label={`编辑测量 ${measurement.data_no}`}><Pencil /></button><button className="icon-button icon-button-danger" onClick={() => void remove(`/api/quality/measurements/${measurement.id}`, "质量测量")} aria-label={`删除测量 ${measurement.data_no}`}><Trash2 /></button></div>
+                <div className="row-actions"><button className="icon-button" onClick={() => openMeasurement(measurement)} aria-label={`编辑测量 ${measurement.data_no}`}><Pencil /></button></div>
               </article>
             ))}
           </div>
@@ -613,7 +694,7 @@ export function QualityWorkspace() {
           <div className="master-table-wrap">
             <table className="master-table quality-standard-table"><thead><tr><th>标准编号</th><th>质量类型 / 指标</th><th>范围</th><th>适用上下文</th><th>状态</th><th>操作</th></tr></thead><tbody>
               {filteredStandards.map((standard) => (
-                <tr key={standard.id}><td className="mono">{standard.standard_no} · {standard.version}</td><td>{qualityLabels[standard.quality_type]} / {standard.metric_code}</td><td className="mono">{standard.min_value ?? "—"} ~ {standard.max_value ?? "—"} {standard.unit}</td><td>{[relationName(vehicleModels, standard.vehicle_model_id), relationName(colors, standard.color_id), relationName(parts, standard.part_id), relationName(points, standard.measurement_point_id)].filter((value) => value !== "全部").join(" · ") || "全局标准"}</td><td>{standard.is_active ? "生效" : "停用"}</td><td><div className="row-actions"><button className="icon-button" onClick={() => openStandard(standard)} aria-label={`编辑标准 ${standard.standard_no}`}><Pencil /></button><button className="icon-button icon-button-danger" onClick={() => void remove(`/api/quality/standards/${standard.id}`, "质量标准")} aria-label={`删除标准 ${standard.standard_no}`}><Trash2 /></button></div></td></tr>
+                <tr key={standard.id}><td className="mono">{standard.standard_no} · {standard.version}</td><td>{qualityLabels[standard.quality_type]} / {standard.metric_code}</td><td className="mono">{standard.min_value ?? "—"} ~ {standard.max_value ?? "—"} {standard.unit}</td><td>{[relationName(vehicleModels, standard.vehicle_model_id), relationName(colors, standard.color_id), relationName(parts, standard.part_id), relationName(points, standard.measurement_point_id)].filter((value) => value !== "全部").join(" · ") || "全局标准"}</td><td>{standard.is_active ? "生效" : "停用"}</td><td><div className="row-actions"><button className="icon-button" onClick={() => openStandard(standard)} aria-label={`编辑标准 ${standard.standard_no}`}><Pencil /></button></div></td></tr>
               ))}
             </tbody></table>
           </div>
@@ -627,7 +708,7 @@ export function QualityWorkspace() {
             <form onSubmit={(event) => void submit(event)}>
               <div className="form-grid">
                 {modal.kind === "measurement"
-                  ? renderMeasurementForm(form, setForm, metricRows, setMetricRows, repeatRows, setRepeatRows, { runs, groups, points, definitions, instruments, methods, calibrations, references, importProfiles })
+                  ? renderMeasurementForm(form, setMeasurementForm, metricRows, setMetricRows, repeatRows, setRepeatRows, { runs, groups, groupPoints, points, definitions, instruments, methods, calibrations, references, importProfiles })
                   : renderStandardForm(form, setForm, { vehicleModels, colors, parts, points, definitions })}
               </div>
               <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div>
@@ -748,6 +829,7 @@ function renderMeasurementForm(
   refs: {
     runs: ProductionRun[];
     groups: Resource[];
+    groupPoints: MeasurementGroupPointRelation[];
     points: Resource[];
     definitions: MetricDefinition[];
     instruments: Instrument[];
@@ -758,6 +840,8 @@ function renderMeasurementForm(
   },
 ) {
   const metricOptions = refs.definitions.filter((item) => item.quality_type === form.quality_type);
+  const groups = filterMeasurementGroups(refs.runs, refs.groups, form);
+  const points = filterMeasurementPoints(refs.runs, refs.points, refs.groupPoints, form);
   const selectedInstrument = refs.instruments.find((item) => item.id === form.instrument_id);
   const instruments = refs.instruments.filter((item) => item.supported_quality_types.includes(String(form.quality_type)));
   const methods = refs.methods.filter((item) => item.quality_type === form.quality_type && (!selectedInstrument || item.instrument_type === selectedInstrument.instrument_type));
@@ -767,8 +851,9 @@ function renderMeasurementForm(
   return [
     inputField("数据编号", "data_no", form, setForm, "text", true),
     selectField("生产事件", "production_run_id", form, setForm, refs.runs.map((item) => [item.id, `${item.run_no} / ${item.body_no ?? "无车身号"}`]), true),
-    selectField("测量编组", "measurement_group_id", form, setForm, options(refs.groups, true)),
-    selectField("测量点", "measurement_point_id", form, setForm, options(refs.points), true),
+    <label className="form-field form-field-wide" key="measurement-context-hint"><span>录入提示</span><div className="master-empty">测量编组会按当前生产事件车型与质量类型过滤；若命中单一编组，表单会自动收口到该编组，并同步过滤可选测量点。</div></label>,
+    selectField("测量编组", "measurement_group_id", form, setForm, options(groups, true)),
+    selectField("测量点", "measurement_point_id", form, setForm, options(points), true),
     selectField("质量类型", "quality_type", form, (next) => {
       setForm({ ...next, instrument_id: "", measurement_method_id: "", calibration_record_id: "", reference_standard_id: "", import_profile_id: "" });
       const first = refs.definitions.find((item) => item.quality_type === next.quality_type);
@@ -789,24 +874,42 @@ function renderMeasurementForm(
     checkboxField("数据有效", "is_valid", form, setForm),
     <div className="metric-editor form-field-wide" key="metrics">
       <div className="program-subheading"><div><span className="eyebrow">METRIC VALUES</span><h3>质量指标值</h3></div><button type="button" className="button button-secondary" onClick={() => setMetricRows([...metricRows, { metric_code: metricOptions[0]?.code ?? "", raw_value: "", corrected_value: "" }])}><Plus />新增指标</button></div>
+      <div className="master-empty">指标值属于当前表单内容调整，至少保留 1 条有效指标后才能保存。</div>
       {metricRows.map((row, index) => (
         <div className="metric-editor-row" key={`${index}-${row.metric_code}`}>
           <select aria-label={`指标 ${index + 1}`} required value={row.metric_code} onChange={(event) => setMetricRows(metricRows.map((item, rowIndex) => rowIndex === index ? { ...item, metric_code: event.target.value } : item))}>{metricOptions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code} ({item.unit})</option>)}</select>
           <input aria-label={`原始值 ${index + 1}`} type="number" step="any" required placeholder="原始值" value={row.raw_value} onChange={(event) => setMetricRows(metricRows.map((item, rowIndex) => rowIndex === index ? { ...item, raw_value: event.target.value } : item))} />
           <input aria-label={`修正值 ${index + 1}`} type="number" step="any" placeholder="修正值（可选）" value={row.corrected_value} onChange={(event) => setMetricRows(metricRows.map((item, rowIndex) => rowIndex === index ? { ...item, corrected_value: event.target.value } : item))} />
-          <button type="button" className="icon-button icon-button-danger" onClick={() => setMetricRows(metricRows.filter((_, rowIndex) => rowIndex !== index))} disabled={metricRows.length === 1} aria-label={`删除指标 ${index + 1}`}><Trash2 /></button>
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => setMetricRows(metricRows.filter((_, rowIndex) => rowIndex !== index))}
+            disabled={metricRows.length === 1}
+            aria-label={`移除指标行 ${index + 1}`}
+          >
+            移除此行
+          </button>
         </div>
       ))}
     </div>,
     <div className="metric-editor form-field-wide" key="repeat-readings">
       <div className="program-subheading"><div><span className="eyebrow">REPEAT READINGS</span><h3>逐次原始读数</h3></div><button type="button" className="button button-secondary" onClick={() => setRepeatRows([...repeatRows, { repeat_no: String(repeatRows.length + 1), metric_code: metricOptions[0]?.code ?? "", raw_value: "", corrected_value: "" }])}><Plus />新增读数</button></div>
+      <div className="master-empty">逐次读数可按需填写；如果当前没有重复测量，可留空或移除未填写的行。</div>
+      {repeatRows.length === 0 ? <div className="master-empty">暂未填写逐次读数，可按需新增。</div> : null}
       {repeatRows.map((row, index) => (
         <div className="metric-editor-row repeat-editor-row" key={`${index}-${row.repeat_no}-${row.metric_code}`}>
-          <input aria-label={`重复序号 ${index + 1}`} type="number" min="1" required value={row.repeat_no} onChange={(event) => setRepeatRows(repeatRows.map((item, rowIndex) => rowIndex === index ? { ...item, repeat_no: event.target.value } : item))} />
-          <select aria-label={`逐次指标 ${index + 1}`} required value={row.metric_code} onChange={(event) => setRepeatRows(repeatRows.map((item, rowIndex) => rowIndex === index ? { ...item, metric_code: event.target.value } : item))}>{metricOptions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code}</option>)}</select>
-          <input aria-label={`逐次原始值 ${index + 1}`} type="number" step="any" required placeholder="原始值" value={row.raw_value} onChange={(event) => setRepeatRows(repeatRows.map((item, rowIndex) => rowIndex === index ? { ...item, raw_value: event.target.value } : item))} />
+          <input aria-label={`重复序号 ${index + 1}`} type="number" min="1" value={row.repeat_no} onChange={(event) => setRepeatRows(repeatRows.map((item, rowIndex) => rowIndex === index ? { ...item, repeat_no: event.target.value } : item))} />
+          <select aria-label={`逐次指标 ${index + 1}`} value={row.metric_code} onChange={(event) => setRepeatRows(repeatRows.map((item, rowIndex) => rowIndex === index ? { ...item, metric_code: event.target.value } : item))}>{metricOptions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code}</option>)}</select>
+          <input aria-label={`逐次原始值 ${index + 1}`} type="number" step="any" placeholder="原始值" value={row.raw_value} onChange={(event) => setRepeatRows(repeatRows.map((item, rowIndex) => rowIndex === index ? { ...item, raw_value: event.target.value } : item))} />
           <input aria-label={`逐次修正值 ${index + 1}`} type="number" step="any" placeholder="修正值（可选）" value={row.corrected_value} onChange={(event) => setRepeatRows(repeatRows.map((item, rowIndex) => rowIndex === index ? { ...item, corrected_value: event.target.value } : item))} />
-          <button type="button" className="icon-button icon-button-danger" onClick={() => setRepeatRows(repeatRows.filter((_, rowIndex) => rowIndex !== index))} aria-label={`删除逐次读数 ${index + 1}`}><Trash2 /></button>
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => setRepeatRows(repeatRows.filter((_, rowIndex) => rowIndex !== index))}
+            aria-label={`移除逐次读数行 ${index + 1}`}
+          >
+            移除此行
+          </button>
         </div>
       ))}
     </div>,
