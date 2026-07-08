@@ -1,13 +1,51 @@
+from datetime import UTC, datetime
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.api.routes.factories import create_factory
-from app.api.routes.master_data import create_measurement_point, create_part, create_vehicle_model
-from app.api.routes.process import create_brush, create_program_version, create_spray_program
-from app.models.domain import Brush, BrushParameter, BrushPointContribution, Factory, SprayProgramVersion
+from app.api.routes.master_data import (
+    bind_factory_vehicle_model,
+    bind_measurement_group_point,
+    bind_vehicle_model_color,
+    create_color,
+    create_measurement_group,
+    create_measurement_point,
+    create_part,
+    create_vehicle_model,
+)
+from app.api.routes.process import (
+    create_brush,
+    create_production_run,
+    create_program_version,
+    create_spray_program,
+)
+from app.models.domain import (
+    Brush,
+    BrushParameter,
+    BrushPointContribution,
+    Factory,
+    QualityMeasurement,
+    QualityMetricValue,
+    SprayProgramVersion,
+)
 from app.schemas.common import FactoryCreate
-from app.schemas.master_data import MeasurementPointCreate, PartCreate, VehicleModelCreate
-from app.schemas.process import BrushCreate, SprayProgramCreate, SprayProgramVersionCreate
+from app.schemas.master_data import (
+    ColorCreate,
+    FactoryVehicleModelCreate,
+    MeasurementGroupCreate,
+    MeasurementGroupPointBind,
+    MeasurementPointCreate,
+    PartCreate,
+    VehicleModelColorCreate,
+    VehicleModelCreate,
+)
+from app.schemas.process import (
+    BrushCreate,
+    ProductionRunCreate,
+    SprayProgramCreate,
+    SprayProgramVersionCreate,
+)
 from app.services.bulk_io import export_resource, import_resource, render_template
 from tests.schema_guard import create_transient_test_schema
 
@@ -16,6 +54,77 @@ def build_session() -> Session:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     create_transient_test_schema(engine)
     return Session(engine)
+
+
+def build_quality_bulk_context(db: Session) -> dict[str, str]:
+    now = datetime(2026, 7, 8, 8, 0, tzinfo=UTC)
+    factory = create_factory(
+        FactoryCreate(code="FQ1", name="Factory Quality 01", site_owner="Owner"),
+        db,
+    )
+    vehicle = create_vehicle_model(
+        VehicleModelCreate(code="MQ1", name="Model Quality 01"),
+        db,
+    )
+    color = create_color(
+        ColorCreate(code="CQ1", name="Color Quality 01", color_type="BASECOAT"),
+        db,
+    )
+    bind_factory_vehicle_model(
+        FactoryVehicleModelCreate(factory_id=factory.id, vehicle_model_id=vehicle.id),
+        db,
+    )
+    bind_vehicle_model_color(
+        VehicleModelColorCreate(vehicle_model_id=vehicle.id, color_id=color.id),
+        db,
+    )
+    part = create_part(PartCreate(code="PQ1", name="Roof Panel"), db)
+    point = create_measurement_point(
+        MeasurementPointCreate(
+            code="PT1",
+            name="Point 01",
+            vehicle_model_id=vehicle.id,
+            part_id=part.id,
+            point_type="QUALITY",
+            quality_types=["ORANGE_PEEL"],
+        ),
+        db,
+    )
+    group = create_measurement_group(
+        MeasurementGroupCreate(
+            code="G1",
+            name="橘皮编组",
+            vehicle_model_id=vehicle.id,
+            quality_type="ORANGE_PEEL",
+        ),
+        db,
+    )
+    bind_measurement_group_point(
+        MeasurementGroupPointBind(
+            measurement_group_id=group.id,
+            measurement_point_id=point.id,
+            sequence_no=1,
+        ),
+        db,
+    )
+    run = create_production_run(
+        ProductionRunCreate(
+            run_no="RUN-QUALITY",
+            factory_id=factory.id,
+            vehicle_model_id=vehicle.id,
+            color_id=color.id,
+            started_at=now,
+        ),
+        db,
+    )
+    return {
+        "group_id": group.id,
+        "group_code": group.code,
+        "point_id": point.id,
+        "point_code": point.code,
+        "run_id": run.id,
+        "run_no": run.run_no,
+    }
 
 
 def test_bulk_template_contains_import_headers() -> None:
@@ -241,4 +350,46 @@ def test_bulk_import_uses_default_values_for_brush_contributions() -> None:
     assert result["created"] == 1
     contribution = db.query(BrushPointContribution).filter_by(brush_id=brush.id, measurement_point_id=point.id).one()
     assert contribution.contribution_weight == 0.6
+    db.close()
+
+
+def test_quality_measurement_template_uses_flat_metric_columns() -> None:
+    db = build_session()
+    build_quality_bulk_context(db)
+
+    response = render_template("quality.measurements", "csv", db=db, quality_type="ORANGE_PEEL")
+    content = response.body.decode("utf-8-sig")
+
+    assert "measurement_group_code" in content
+    assert "measurement_point_code" in content
+    assert "metric__doi" in content
+    assert "metrics" not in content
+    assert "repeat_readings" not in content
+    assert "G1" in content
+    assert "PT1" in content
+    db.close()
+
+
+def test_quality_measurement_bulk_import_transforms_flat_metric_columns() -> None:
+    db = build_session()
+    context = build_quality_bulk_context(db)
+    csv_content = (
+        "data_no,production_run_no,measurement_group_code,measurement_point_code,quality_type,measured_at,metric__doi\n"
+        f"QM-BULK-1,{context['run_no']},{context['group_code']},{context['point_code']},ORANGE_PEEL,2026-07-08T08:00:00+00:00,88.2\n"
+    )
+
+    result = import_resource(
+        "quality.measurements",
+        csv_content.encode("utf-8"),
+        filename="quality-measurements.csv",
+        mode="upsert",
+        db=db,
+    )
+
+    assert result["created"] == 1
+    measurement = db.query(QualityMeasurement).filter_by(data_no="QM-BULK-1").one()
+    metric = db.query(QualityMetricValue).filter_by(measurement_id=measurement.id, metric_code="doi").one()
+    assert measurement.measurement_group_id == context["group_id"]
+    assert measurement.measurement_point_id == context["point_id"]
+    assert metric.raw_value == 88.2
     db.close()

@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.routes.factories import create_factory, update_factory
+from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
 from app.api.routes.engineering import (
     create_contribution_validation,
     create_file_import_job,
@@ -383,8 +384,25 @@ def get_resource(resource_key: str) -> BulkResource:
     return resource
 
 
-def render_template(resource_key: str, file_format: FileFormat) -> Response:
+def render_template(
+    resource_key: str,
+    file_format: FileFormat,
+    *,
+    db: Session | None = None,
+    quality_type: str | None = None,
+) -> Response:
     resource = get_resource(resource_key)
+    if resource.key == "quality.measurements":
+        fields = _quality_measurement_bulk_fields(quality_type)
+        rows = _quality_measurement_template_rows(db, quality_type=quality_type)
+        return _file_response(
+            resource,
+            file_format,
+            rows,
+            purpose="template",
+            include_metadata=True,
+            fields=fields,
+        )
     rows: list[dict[str, Any]] = []
     return _file_response(
         resource,
@@ -395,8 +413,25 @@ def render_template(resource_key: str, file_format: FileFormat) -> Response:
     )
 
 
-def export_resource(resource_key: str, file_format: FileFormat, db: Session) -> Response:
+def export_resource(
+    resource_key: str,
+    file_format: FileFormat,
+    db: Session,
+    *,
+    quality_type: str | None = None,
+) -> Response:
     resource = get_resource(resource_key)
+    if resource.key == "quality.measurements":
+        fields = _quality_measurement_bulk_fields(quality_type)
+        rows = _quality_measurement_export_rows(db, quality_type=quality_type)
+        return _file_response(
+            resource,
+            file_format,
+            rows,
+            purpose="export",
+            include_metadata=file_format == "xlsx",
+            fields=fields,
+        )
     rows = [_resource_row(resource, db, item) for item in _query_resources(resource, db)]
     return _file_response(
         resource,
@@ -419,6 +454,8 @@ def import_resource(
     resource = get_resource(resource_key)
     if not resource.importable:
         raise HTTPException(status_code=405, detail=f"{resource.label}不支持批量导入")
+    if resource.key == "quality.measurements":
+        return _import_quality_measurements(content, filename=filename, mode=mode, db=db)
     rows = _parse_rows(content, filename)
     field_names = {field.name for field in resource.fields}
     required = {field.name for field in resource.fields if field.required}
@@ -598,12 +635,14 @@ def _file_response(
     *,
     purpose: Literal["template", "export"],
     include_metadata: bool,
+    fields: tuple[BulkField, ...] | None = None,
 ) -> Response:
+    field_specs = fields or resource.fields
     if file_format == "xlsx":
-        content = _xlsx_bytes(resource, rows, include_metadata=include_metadata)
+        content = _xlsx_bytes(field_specs, rows, include_metadata=include_metadata)
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     else:
-        content = _csv_bytes(resource, rows)
+        content = _csv_bytes(field_specs, rows)
         media_type = "text/csv; charset=utf-8"
     suffix = "xlsx" if file_format == "xlsx" else "csv"
     filename = f"{resource.key}-{purpose}.{suffix}"
@@ -614,23 +653,28 @@ def _file_response(
     )
 
 
-def _csv_bytes(resource: BulkResource, rows: list[dict[str, Any]]) -> bytes:
+def _csv_bytes(fields: tuple[BulkField, ...], rows: list[dict[str, Any]]) -> bytes:
     output = StringIO()
-    writer = csv.DictWriter(output, fieldnames=[field.name for field in resource.fields])
+    writer = csv.DictWriter(output, fieldnames=[field.name for field in fields])
     writer.writeheader()
     for row in rows:
-        writer.writerow({field.name: _cell_to_string(row.get(field.name)) for field in resource.fields})
+        writer.writerow({field.name: _cell_to_string(row.get(field.name)) for field in fields})
     return ("\ufeff" + output.getvalue()).encode("utf-8")
 
 
-def _xlsx_bytes(resource: BulkResource, rows: list[dict[str, Any]], *, include_metadata: bool) -> bytes:
+def _xlsx_bytes(
+    fields: tuple[BulkField, ...],
+    rows: list[dict[str, Any]],
+    *,
+    include_metadata: bool,
+) -> bytes:
     workbook = Workbook()
     data_sheet = workbook.active
     data_sheet.title = "data"
-    headers = [field.name for field in resource.fields]
+    headers = [field.name for field in fields]
     data_sheet.append(headers)
     for row in rows:
-        data_sheet.append([_cell_to_string(row.get(field.name)) for field in resource.fields])
+        data_sheet.append([_cell_to_string(row.get(field.name)) for field in fields])
     data_sheet.freeze_panes = "A2"
     for column in data_sheet.columns:
         max_length = max(len(str(cell.value or "")) for cell in column)
@@ -639,7 +683,7 @@ def _xlsx_bytes(resource: BulkResource, rows: list[dict[str, Any]], *, include_m
     if include_metadata:
         meta = workbook.create_sheet("fields")
         meta.append(["field", "label", "type", "required", "example", "description"])
-        for field_spec in resource.fields:
+        for field_spec in fields:
             meta.append(
                 [
                     field_spec.name,
@@ -929,6 +973,504 @@ def _quality_measurement_row(db: Session, measurement: QualityMeasurement) -> di
                 .order_by(MeasurementRepeatReading.repeat_no, MeasurementRepeatReading.metric_code)
             )
         ],
+    }
+
+
+def _quality_metric_field_name(metric_code: str) -> str:
+    return f"metric__{metric_code}"
+
+
+def _quality_metric_code_from_field(field_name: str) -> str | None:
+    if not field_name.startswith("metric__"):
+        return None
+    return field_name.split("__", 1)[1].strip()
+
+
+def _quality_metric_catalog_for(quality_type: str | None = None) -> list[dict[str, Any]]:
+    normalized = quality_type.strip().upper() if quality_type else None
+    catalog = [
+        metric for metric in QUALITY_METRIC_CATALOG if not normalized or metric["quality_type"] == normalized
+    ]
+    if normalized and not catalog:
+        raise HTTPException(status_code=422, detail=f"不支持的质量类型：{normalized}")
+    return catalog
+
+
+def _quality_measurement_base_fields() -> tuple[BulkField, ...]:
+    return (
+        BulkField("id", "ID（可选，用于更新）", "string", False, "", "存在 id 时可直接更新对应质量测量。"),
+        BulkField("data_no", "质量数据编号", "string", True, "QM-20260708-001", "质量测量业务编号，建议保持唯一。"),
+        BulkField("production_run_no", "生产事件编号", "string", True, "RT_RUN_001", "按生产事件编号关联，不要求用户手填 production_run_id。"),
+        BulkField("measurement_group_code", "测量编组代码", "string", False, "RT_MG_OP", "模板会自动预填当前编组代码，导入时按车型+代码解析。"),
+        BulkField("measurement_group_name", "测量编组名称", "string", False, "", "模板说明列，仅用于帮助识别编组，可保留原值。"),
+        BulkField("measurement_point_code", "测量点代码", "string", True, "RT_P01", "模板会自动预填当前编组内测量点代码，导入时按车型+代码解析。"),
+        BulkField("measurement_point_name", "测量点名称", "string", False, "", "模板说明列，仅用于帮助识别测量点，可保留原值。"),
+        BulkField("vehicle_model_code", "车型代码", "string", False, "", "模板说明列，帮助用户确认当前测量点所属车型。"),
+        BulkField("vehicle_model_name", "车型名称", "string", False, "", "模板说明列，帮助用户确认当前测量点所属车型。"),
+        BulkField("part_code", "零件代码", "string", False, "", "模板说明列，帮助用户确认当前测量点所属零件。"),
+        BulkField("part_name", "零件名称", "string", False, "", "模板说明列，帮助用户确认当前测量点所属零件。"),
+        BulkField("quality_type", "质量类型", "string", True, "ORANGE_PEEL", "模板会自动预填当前质量类型，导入时按批准质量类型校验。"),
+        BulkField("measured_at", "测量时间", "datetime", True, "2026-07-08T08:00:00+08:00", "支持 Excel 日期单元格或 ISO 时间。"),
+        BulkField("measured_by", "测量人", "string", False, "张三", "可选。"),
+        BulkField("data_type", "数据类型", "string", False, "TEST", "默认 TEST；可填写 TEST / MASTER_SAMPLE / STANDARD。"),
+        BulkField("device_code", "设备编码", "string", False, "BYK-WAVE-01", "可选，未填写时如绑定仪器会自动带出仪器编码。"),
+        BulkField("instrument_code", "仪器编码", "string", False, "BYK-WAVE-01", "按仪器编码解析，不要求用户手填 instrument_id。"),
+        BulkField("measurement_method_code", "测量方法编码", "string", False, "BYK-WAVE-DOI:1", "可填写 code 或 code:version；若同编码存在多版本，必须带版本。"),
+        BulkField("calibration_no", "校准记录编号", "string", False, "CAL-OP-1", "按校准记录编号解析。"),
+        BulkField("reference_standard_code", "参考件编码", "string", False, "REF-OP-1", "按参考件编码解析。"),
+        BulkField("import_profile_code", "导入模板编码", "string", False, "BYK-IMPORT:1", "可填写 code 或 code:version；若同编码存在多版本，必须带版本。"),
+        BulkField("measurement_direction", "测量方向", "string", False, "LONGITUDINAL", "可选。"),
+        BulkField("raw_file_uri", "原始文件 URI", "string", False, "", "可选。"),
+        BulkField("status_score", "状态分数", "number", False, "98.6", "可选。"),
+        BulkField("is_valid", "数据有效", "boolean", False, "true", "默认 true。"),
+    )
+
+
+def _quality_measurement_bulk_fields(quality_type: str | None = None) -> tuple[BulkField, ...]:
+    metric_fields = tuple(
+        BulkField(
+            _quality_metric_field_name(metric["code"]),
+            f"{metric['name']}（{metric['code']}）",
+            "number",
+            False,
+            "82.5",
+            f"{metric['quality_type']} 指标列，用户直接填写数值，后端自动组装为 metrics JSON。单位：{metric.get('unit') or '无'}",
+        )
+        for metric in _quality_metric_catalog_for(quality_type)
+    )
+    return _quality_measurement_base_fields() + metric_fields
+
+
+def _quality_measurement_template_rows(
+    db: Session | None,
+    *,
+    quality_type: str | None = None,
+) -> list[dict[str, Any]]:
+    if db is None:
+        return []
+    query = (
+        select(MeasurementGroupPoint, MeasurementGroup, MeasurementPoint, VehicleModel, Part)
+        .join(MeasurementGroup, MeasurementGroup.id == MeasurementGroupPoint.measurement_group_id)
+        .join(MeasurementPoint, MeasurementPoint.id == MeasurementGroupPoint.measurement_point_id)
+        .join(VehicleModel, VehicleModel.id == MeasurementGroup.vehicle_model_id)
+        .join(Part, Part.id == MeasurementPoint.part_id)
+        .order_by(MeasurementGroup.code, MeasurementGroupPoint.sequence_no, MeasurementPoint.code)
+    )
+    normalized = quality_type.strip().upper() if quality_type else None
+    if normalized:
+        _quality_metric_catalog_for(normalized)
+        query = query.where(MeasurementGroup.quality_type == normalized)
+    rows: list[dict[str, Any]] = []
+    for _, group, point, model, part in db.execute(query):
+        rows.append(
+            {
+                "data_no": "",
+                "production_run_no": "",
+                "measurement_group_code": group.code,
+                "measurement_group_name": group.name,
+                "measurement_point_code": point.code,
+                "measurement_point_name": point.name,
+                "vehicle_model_code": model.code,
+                "vehicle_model_name": model.name,
+                "part_code": part.code,
+                "part_name": part.name,
+                "quality_type": group.quality_type,
+                "measured_at": "",
+                "measured_by": "",
+                "data_type": "TEST",
+                "device_code": "",
+                "instrument_code": "",
+                "measurement_method_code": "",
+                "calibration_no": "",
+                "reference_standard_code": "",
+                "import_profile_code": "",
+                "measurement_direction": "",
+                "raw_file_uri": "",
+                "status_score": "",
+                "is_valid": True,
+            }
+        )
+    return rows
+
+
+def _quality_measurement_export_rows(
+    db: Session,
+    *,
+    quality_type: str | None = None,
+) -> list[dict[str, Any]]:
+    normalized = quality_type.strip().upper() if quality_type else None
+    if normalized:
+        _quality_metric_catalog_for(normalized)
+    query = select(QualityMeasurement).order_by(QualityMeasurement.measured_at)
+    if normalized:
+        query = query.where(QualityMeasurement.quality_type == normalized)
+    measurements = list(db.scalars(query))
+    if not measurements:
+        return []
+
+    run_map = {
+        item.id: item
+        for item in db.scalars(
+            select(ProductionRun).where(
+                ProductionRun.id.in_({measurement.production_run_id for measurement in measurements})
+            )
+        )
+    }
+    point_map = {
+        item.id: item
+        for item in db.scalars(
+            select(MeasurementPoint).where(
+                MeasurementPoint.id.in_({measurement.measurement_point_id for measurement in measurements})
+            )
+        )
+    }
+    group_ids = {
+        measurement.measurement_group_id
+        for measurement in measurements
+        if measurement.measurement_group_id
+    }
+    group_map = {
+        item.id: item
+        for item in db.scalars(select(MeasurementGroup).where(MeasurementGroup.id.in_(group_ids)))
+    } if group_ids else {}
+    model_ids = {
+        point.vehicle_model_id
+        for point in point_map.values()
+        if point.vehicle_model_id
+    }
+    model_map = {
+        item.id: item
+        for item in db.scalars(select(VehicleModel).where(VehicleModel.id.in_(model_ids)))
+    } if model_ids else {}
+    part_ids = {point.part_id for point in point_map.values() if point.part_id}
+    part_map = {
+        item.id: item
+        for item in db.scalars(select(Part).where(Part.id.in_(part_ids)))
+    } if part_ids else {}
+    instrument_ids = {
+        measurement.instrument_id for measurement in measurements if measurement.instrument_id
+    }
+    instrument_map = {
+        item.id: item
+        for item in db.scalars(
+            select(MeasurementInstrument).where(MeasurementInstrument.id.in_(instrument_ids))
+        )
+    } if instrument_ids else {}
+    method_ids = {
+        measurement.measurement_method_id
+        for measurement in measurements
+        if measurement.measurement_method_id
+    }
+    method_map = {
+        item.id: item
+        for item in db.scalars(select(MeasurementMethod).where(MeasurementMethod.id.in_(method_ids)))
+    } if method_ids else {}
+    calibration_ids = {
+        measurement.calibration_record_id
+        for measurement in measurements
+        if measurement.calibration_record_id
+    }
+    calibration_map = {
+        item.id: item
+        for item in db.scalars(
+            select(MeasurementCalibrationRecord).where(
+                MeasurementCalibrationRecord.id.in_(calibration_ids)
+            )
+        )
+    } if calibration_ids else {}
+    reference_ids = {
+        measurement.reference_standard_id
+        for measurement in measurements
+        if measurement.reference_standard_id
+    }
+    reference_map = {
+        item.id: item
+        for item in db.scalars(
+            select(MeasurementReferenceStandard).where(
+                MeasurementReferenceStandard.id.in_(reference_ids)
+            )
+        )
+    } if reference_ids else {}
+    profile_ids = {
+        measurement.import_profile_id
+        for measurement in measurements
+        if measurement.import_profile_id
+    }
+    profile_map = {
+        item.id: item
+        for item in db.scalars(
+            select(MeasurementImportProfile).where(MeasurementImportProfile.id.in_(profile_ids))
+        )
+    } if profile_ids else {}
+    metric_rows: dict[str, dict[str, float]] = {}
+    metric_query = select(QualityMetricValue).where(
+        QualityMetricValue.measurement_id.in_({measurement.id for measurement in measurements})
+    )
+    for metric in db.scalars(metric_query):
+        metric_rows.setdefault(metric.measurement_id, {})[metric.metric_code] = metric.raw_value
+
+    rows: list[dict[str, Any]] = []
+    for measurement in measurements:
+        point = point_map.get(measurement.measurement_point_id)
+        group = group_map.get(measurement.measurement_group_id) if measurement.measurement_group_id else None
+        model = model_map.get(point.vehicle_model_id) if point else None
+        part = part_map.get(point.part_id) if point else None
+        instrument = instrument_map.get(measurement.instrument_id) if measurement.instrument_id else None
+        method = method_map.get(measurement.measurement_method_id) if measurement.measurement_method_id else None
+        calibration = calibration_map.get(measurement.calibration_record_id) if measurement.calibration_record_id else None
+        reference = reference_map.get(measurement.reference_standard_id) if measurement.reference_standard_id else None
+        profile = profile_map.get(measurement.import_profile_id) if measurement.import_profile_id else None
+        row = {
+            "id": measurement.id,
+            "data_no": measurement.data_no,
+            "production_run_no": run_map.get(measurement.production_run_id).run_no
+            if run_map.get(measurement.production_run_id)
+            else "",
+            "measurement_group_code": group.code if group else "",
+            "measurement_group_name": group.name if group else "",
+            "measurement_point_code": point.code if point else "",
+            "measurement_point_name": point.name if point else "",
+            "vehicle_model_code": model.code if model else "",
+            "vehicle_model_name": model.name if model else "",
+            "part_code": part.code if part else "",
+            "part_name": part.name if part else "",
+            "quality_type": measurement.quality_type,
+            "measured_at": measurement.measured_at,
+            "measured_by": measurement.measured_by,
+            "data_type": measurement.data_type,
+            "device_code": measurement.device_code,
+            "instrument_code": instrument.code if instrument else "",
+            "measurement_method_code": f"{method.code}:{method.version}" if method else "",
+            "calibration_no": calibration.calibration_no if calibration else "",
+            "reference_standard_code": reference.code if reference else "",
+            "import_profile_code": f"{profile.code}:{profile.version}" if profile else "",
+            "measurement_direction": measurement.measurement_direction,
+            "raw_file_uri": measurement.raw_file_uri,
+            "status_score": measurement.status_score,
+            "is_valid": measurement.is_valid,
+        }
+        for metric in _quality_metric_catalog_for(normalized or measurement.quality_type):
+            metric_value = metric_rows.get(measurement.id, {}).get(metric["code"])
+            if metric_value is not None:
+                row[_quality_metric_field_name(metric["code"])] = metric_value
+        rows.append(row)
+    return rows
+
+
+def _resolve_lookup_by_code(
+    value: Any,
+    mapping: dict[str, Any],
+    *,
+    label: str,
+) -> str | None:
+    if _is_blank(value):
+        return None
+    code = str(value).strip()
+    item = mapping.get(code)
+    if not item:
+        raise ValueError(f"{label} {code} 不存在")
+    return item.id
+
+
+def _resolve_lookup_by_code_or_version(
+    value: Any,
+    mapping: dict[str, list[Any]],
+    *,
+    label: str,
+) -> str | None:
+    if _is_blank(value):
+        return None
+    text = str(value).strip()
+    if ":" in text:
+        code, version = [segment.strip() for segment in text.split(":", 1)]
+        matches = [item for item in mapping.get(code, []) if getattr(item, "version", "") == version]
+        if not matches:
+            raise ValueError(f"{label} {text} 不存在")
+        return matches[0].id
+    matches = mapping.get(text, [])
+    if not matches:
+        raise ValueError(f"{label} {text} 不存在")
+    if len(matches) > 1:
+        raise ValueError(f"{label} {text} 存在多个版本，请填写 code:version")
+    return matches[0].id
+
+
+def _optional_number(value: Any) -> float | None:
+    if _is_blank(value):
+        return None
+    return float(value)
+
+
+def _resolve_quality_measurement_existing_id(db: Session, row: dict[str, Any], data_no: str) -> str | None:
+    row_id = row.get("id")
+    if row_id and db.get(QualityMeasurement, row_id):
+        return str(row_id)
+    existing = db.scalar(select(QualityMeasurement).where(QualityMeasurement.data_no == data_no))
+    return existing.id if existing else None
+
+
+def _import_quality_measurements(
+    content: bytes,
+    *,
+    filename: str,
+    mode: ImportMode,
+    db: Session,
+) -> dict[str, Any]:
+    rows = _parse_rows(content, filename)
+    allowed_fields = {field.name for field in _quality_measurement_bulk_fields()}
+    unknown = sorted({key for row in rows for key in row if key and key not in allowed_fields})
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"模板字段不匹配，未知字段：{', '.join(unknown)}")
+
+    runs_by_no = {item.run_no: item for item in db.scalars(select(ProductionRun))}
+    groups_by_vehicle_code = {
+        (item.vehicle_model_id, item.code): item for item in db.scalars(select(MeasurementGroup))
+    }
+    points_by_vehicle_code = {
+        (item.vehicle_model_id, item.code): item for item in db.scalars(select(MeasurementPoint))
+    }
+    instruments_by_code = {
+        item.code: item for item in db.scalars(select(MeasurementInstrument))
+    }
+    methods_by_code: dict[str, list[Any]] = {}
+    for item in db.scalars(select(MeasurementMethod)):
+        methods_by_code.setdefault(item.code, []).append(item)
+    calibrations_by_no = {
+        item.calibration_no: item for item in db.scalars(select(MeasurementCalibrationRecord))
+    }
+    references_by_code = {
+        item.code: item for item in db.scalars(select(MeasurementReferenceStandard))
+    }
+    profiles_by_code: dict[str, list[Any]] = {}
+    for item in db.scalars(select(MeasurementImportProfile)):
+        profiles_by_code.setdefault(item.code, []).append(item)
+
+    created = 0
+    updated = 0
+    skipped = 0
+    errors: list[dict[str, Any]] = []
+    for row_index, raw_row in enumerate(rows, start=2):
+        if not any(str(value or "").strip() for value in raw_row.values()):
+            skipped += 1
+            continue
+        try:
+            data_no = str(raw_row.get("data_no") or "").strip()
+            run_no = str(raw_row.get("production_run_no") or "").strip()
+            point_code = str(raw_row.get("measurement_point_code") or "").strip()
+            measured_at_value = raw_row.get("measured_at")
+            if not data_no or not run_no or not point_code or _is_blank(measured_at_value):
+                raise ValueError("缺少必填字段：data_no, production_run_no, measurement_point_code, measured_at")
+
+            run = runs_by_no.get(run_no)
+            if not run:
+                raise ValueError(f"生产事件 {run_no} 不存在")
+
+            group_code = str(raw_row.get("measurement_group_code") or "").strip()
+            group = (
+                groups_by_vehicle_code.get((run.vehicle_model_id, group_code))
+                if group_code
+                else None
+            )
+            if group_code and not group:
+                raise ValueError(f"测量编组 {group_code} 不存在或不属于当前生产事件车型")
+
+            point = points_by_vehicle_code.get((run.vehicle_model_id, point_code))
+            if not point:
+                raise ValueError(f"测量点 {point_code} 不存在或不属于当前生产事件车型")
+
+            quality_type = str(raw_row.get("quality_type") or "").strip().upper()
+            if not quality_type and group:
+                quality_type = str(group.quality_type).strip().upper()
+            if not quality_type:
+                if len(point.quality_types or []) == 1:
+                    quality_type = str(point.quality_types[0]).upper()
+                else:
+                    raise ValueError("缺少必填字段：quality_type")
+            metric_catalog = {item["code"]: item for item in _quality_metric_catalog_for(quality_type)}
+            metrics = []
+            for name, raw_value in raw_row.items():
+                metric_code = _quality_metric_code_from_field(name)
+                if not metric_code or _is_blank(raw_value):
+                    continue
+                definition = metric_catalog.get(metric_code)
+                if not definition:
+                    raise ValueError(f"质量类型 {quality_type} 不支持指标 {metric_code}")
+                metrics.append(
+                    {
+                        "metric_code": metric_code,
+                        "metric_name": definition["name"],
+                        "raw_value": float(raw_value),
+                        "unit": definition.get("unit"),
+                    }
+                )
+            if not metrics:
+                raise ValueError("至少填写 1 个质量指标列")
+
+            payload = {
+                "data_no": data_no,
+                "production_run_id": run.id,
+                "measurement_group_id": group.id if group else None,
+                "measurement_point_id": point.id,
+                "quality_type": quality_type,
+                "data_type": str(raw_row.get("data_type") or "TEST").strip() or "TEST",
+                "measured_at": _coerce_datetime(measured_at_value),
+                "measured_by": str(raw_row.get("measured_by") or "").strip() or None,
+                "device_code": str(raw_row.get("device_code") or "").strip() or None,
+                "instrument_id": _resolve_lookup_by_code(
+                    raw_row.get("instrument_code"),
+                    instruments_by_code,
+                    label="仪器",
+                ),
+                "measurement_method_id": _resolve_lookup_by_code_or_version(
+                    raw_row.get("measurement_method_code"),
+                    methods_by_code,
+                    label="测量方法",
+                ),
+                "calibration_record_id": _resolve_lookup_by_code(
+                    raw_row.get("calibration_no"),
+                    calibrations_by_no,
+                    label="校准记录",
+                ),
+                "reference_standard_id": _resolve_lookup_by_code(
+                    raw_row.get("reference_standard_code"),
+                    references_by_code,
+                    label="参考件",
+                ),
+                "import_profile_id": _resolve_lookup_by_code_or_version(
+                    raw_row.get("import_profile_code"),
+                    profiles_by_code,
+                    label="导入模板",
+                ),
+                "measurement_direction": str(raw_row.get("measurement_direction") or "").strip() or None,
+                "raw_file_uri": str(raw_row.get("raw_file_uri") or "").strip() or None,
+                "status_score": _optional_number(raw_row.get("status_score")),
+                "is_valid": True if _is_blank(raw_row.get("is_valid")) else _coerce_bool(raw_row.get("is_valid")),
+                "metrics": metrics,
+                "repeat_readings": [],
+            }
+
+            existing_id = _resolve_quality_measurement_existing_id(db, raw_row, data_no) if mode == "upsert" else None
+            if existing_id:
+                update_quality_measurement(existing_id, QualityMeasurementUpdate(**payload), db)
+                updated += 1
+            else:
+                create_quality_measurement(QualityMeasurementCreate(**payload), db)
+                created += 1
+        except Exception as exc:  # noqa: BLE001 - row-level import must collect all failures.
+            db.rollback()
+            errors.append({"row": row_index, "message": _error_message(exc)})
+
+    return {
+        "resource_key": "quality.measurements",
+        "resource_label": "质量测量",
+        "mode": mode,
+        "total_rows": len(rows),
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "failed": len(errors),
+        "errors": errors[:100],
+        "truncated_errors": len(errors) > 100,
     }
 
 

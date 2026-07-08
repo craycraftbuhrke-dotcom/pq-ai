@@ -129,6 +129,22 @@
 - 已执行真实页面验证：在 `RT_PRG_CC2 -> RT-V1` 场景下，导入刷子文件后新增 `RT-BULK-B02`；切换到该刷子后导入参数文件，新增 `rt_bulk_param`；继续导入点位贡献文件后新增 `RT_P01` 贡献记录，页面展示“1 参数 · 1 贡献”。
 - 已执行数据库只读核对：`RT-BULK-B02` 确认归属 `RT_PRG_CC2 / RT-V1`，参数 `rt_bulk_param` 与点位贡献 `RT_P01` 均确认归属该刷子，说明页面提示、前端刷新与真实落库结果一致。
 
+### 步骤 2 质量测量批量模板友好化收口项
+
+- 2.t 将质量测量批量模板从 `metrics` / `repeat_readings` JSON 字段改为业务用户可直接填写的平铺列模式，模板列名直接暴露测量编组、测量点和对应质量指标，不再要求用户理解 JSON。
+- 2.u 下载质量测量模板时，按当前质量类型自动带出对应测量编组、编组内测量点和质量指标列；用户只填写生产事件、测量时间和各指标值即可。
+- 2.v 后端批量导入在保留既有质量治理校验的前提下，将模板中的平铺指标列自动转换为 `metrics` 结构并复用现有创建/更新链路，避免形成第二套业务规则。
+- 2.w 本批完成后执行后端针对性测试、前端诊断，并用真实页面验证“按质量类型下载模板 -> 填值导入 -> 页面刷新展示”的链路，再回写本计划。
+
+### 步骤 2 质量测量批量模板友好化完成记录
+
+- 已将 `quality.measurements` 的批量模板与导出改为平铺列模式：模板不再暴露 `metrics` / `repeat_readings` JSON，而是直接输出 `measurement_group_code`、`measurement_point_code` 以及按质量类型展开的 `metric__指标编码` 列，符合业务用户的 Excel/CSV 填写习惯。
+- 已将质量测量模板下载与页面筛选联动：质量数据中心在已选择质量类型时，下载模板和导出数据会自动附带当前质量类型参数，模板中只保留该类型对应的测量编组、点位和指标列，降低业务用户一次面对过多无关列的负担。
+- 已在后端批量导入中增加质量测量专用转换：导入时按 `production_run_no`、`measurement_group_code`、`measurement_point_code` 和治理对象编码解析上下文，并把 `metric__*` 平铺列自动转换成 `metrics` 结构后复用既有 `create_quality_measurement` / `update_quality_measurement` 治理链路。
+- 已在质量数据中心补充导入提示文案，明确告知用户模板会自动带出编组、点位和指标列，用户无需再填写 `metrics` JSON。
+- 已执行后端针对性测试：`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest services/api/tests/test_bulk_io.py`，结果 `10 passed`；新增覆盖质量测量模板列展开与平铺指标导入落库两条回归用例。
+- 已执行编辑文件诊断：`bulk_io.py`、`bulk.py`、`bulk-data-actions.tsx`、`quality-workspace.tsx` 均无新增诊断错误。
+
 ## 1. 业务目标
 
 PQ-AI 以“生产事件 + 测量点”为主线，将中涂、色漆、清漆三个涂层体系中的五个喷涂执行阶段、Dürr 机器人/旋杯/轨迹、材料实绩和漆膜质量结果关联起来，形成：

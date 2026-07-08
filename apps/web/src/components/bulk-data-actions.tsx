@@ -20,6 +20,7 @@ type BulkDataActionsProps = {
   onResult?: (message: string, type: "success" | "error") => void;
   onImported?: () => void | Promise<void>;
   importQuery?: Record<string, string | undefined>;
+  downloadQuery?: Record<string, string | undefined>;
   className?: string;
 };
 
@@ -49,6 +50,7 @@ export function BulkDataActions({
   onImported,
   onResult,
   importQuery,
+  downloadQuery,
   className,
 }: BulkDataActionsProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -60,7 +62,7 @@ export function BulkDataActions({
   }
 
   function download(action: "template" | "export") {
-    window.location.href = downloadUrl(resourceKey, action, format);
+    window.location.href = withQuery(downloadUrl(resourceKey, action, format), downloadQuery);
     notify(`${resourceLabel}${action === "template" ? "模板" : "数据"}下载已开始`);
   }
 

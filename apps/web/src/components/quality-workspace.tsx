@@ -674,11 +674,17 @@ export function QualityWorkspace() {
               disabled={loading || submitting}
               onImported={reload}
               onResult={bulkResult}
+              downloadQuery={tab === "measurements" && typeFilter ? { quality_type: typeFilter } : undefined}
             />
           ) : (
             <button className="button button-secondary" onClick={exportCsv}><Download />导出 CSV</button>
           )}
         </div> : null}
+        {tab === "measurements" ? (
+          <div className="master-empty">
+            批量模板会自动带出当前质量类型下的测量编组、编组内点位和对应质量指标列；用户直接填写生产事件、测量时间和指标值即可，无需再填写 `metrics` JSON。
+          </div>
+        ) : null}
         {tab === "measurements" ? (
           <div className="quality-card-list">
             {filteredMeasurements.map((measurement) => (

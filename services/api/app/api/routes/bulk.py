@@ -24,17 +24,20 @@ def bulk_resources() -> list[dict[str, str | bool]]:
 def bulk_template(
     resource_key: str,
     file_format: Literal["csv", "xlsx"] = Query(default="xlsx", alias="format"),
+    quality_type: str | None = Query(default=None),
+    db: Session = Depends(get_db),
 ):
-    return render_template(resource_key, file_format)
+    return render_template(resource_key, file_format, db=db, quality_type=quality_type)
 
 
 @router.get("/{resource_key}/export")
 def bulk_export(
     resource_key: str,
     file_format: Literal["csv", "xlsx"] = Query(default="xlsx", alias="format"),
+    quality_type: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    return export_resource(resource_key, file_format, db)
+    return export_resource(resource_key, file_format, db, quality_type=quality_type)
 
 
 @router.post("/{resource_key}/import")
