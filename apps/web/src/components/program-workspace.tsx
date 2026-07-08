@@ -163,6 +163,18 @@ export function ProgramWorkspace() {
   const selectedProgram = programs.find((item) => item.id === selectedProgramId);
   const selectedVersion = versions.find((item) => item.id === selectedVersionId);
   const selectedBrush = brushes.find((item) => item.id === selectedBrushId);
+  const versionImportQuery = selectedProgramId
+    ? { default_values: JSON.stringify({ spray_program_id: selectedProgramId }) }
+    : undefined;
+  const brushImportQuery = selectedVersionId
+    ? { default_values: JSON.stringify({ program_version_id: selectedVersionId }) }
+    : undefined;
+  const brushParameterImportQuery = selectedBrushId
+    ? { default_values: JSON.stringify({ brush_id: selectedBrushId }) }
+    : undefined;
+  const contributionImportQuery = selectedBrushId
+    ? { default_values: JSON.stringify({ brush_id: selectedBrushId }) }
+    : undefined;
   const selectableContributionPoints = points.filter((point) => {
     if (point.point_type && point.point_type !== "QUALITY") return false;
     if (selectedBrush?.part_id && point.part_id !== selectedBrush.part_id) return false;
@@ -536,16 +548,21 @@ export function ProgramWorkspace() {
 
         <article className="panel program-column">
           <div className="program-column-heading">
-            <div><span className="eyebrow">02 VERSION</span><h2>受控版本</h2></div>
-            <div className="row-actions">
+            <div><span className="eyebrow">02 VERSION</span><h2>受控版本</h2><small>{selectedProgram ? `当前归属 ${selectedProgram.program_code}` : "先选择左侧程序后，才能新建或导入版本"}</small></div>
+            <div className="row-actions program-heading-actions">
               <BulkDataActions
                 resourceKey="process.program-versions"
                 resourceLabel="程序版本"
-                disabled={loading || submitting}
+                disabled={loading || submitting || !selectedProgram}
                 onImported={reload}
                 onResult={bulkResult}
+                importQuery={versionImportQuery}
+                className="program-version-bulk-actions"
               />
-              <button className="icon-button" onClick={() => openModal("version")} disabled={!selectedProgram} aria-label="新建程序版本"><Plus /></button>
+              <button className="button button-secondary" onClick={() => openModal("version")} disabled={!selectedProgram}>
+                <Plus />
+                新建版本
+              </button>
             </div>
           </div>
           <div className="program-list">
@@ -578,14 +595,16 @@ export function ProgramWorkspace() {
 
         <article className="panel program-detail-column">
           <div className="program-column-heading">
-            <div><span className="eyebrow">03 BRUSH & POINT</span><h2>刷子与点位贡献</h2></div>
-            <div className="row-actions">
+            <div><span className="eyebrow">03 BRUSH & POINT</span><h2>刷子与点位贡献</h2><small>{selectedVersion ? `当前归属 ${selectedVersion.version}` : "先选择受控版本后，才能导入或新建刷子"}</small></div>
+            <div className="row-actions program-heading-actions">
               <BulkDataActions
                 resourceKey="process.brushes"
                 resourceLabel="刷子"
-                disabled={loading || submitting}
+                disabled={loading || submitting || !selectedVersion}
                 onImported={reload}
                 onResult={bulkResult}
+                importQuery={brushImportQuery}
+                className="program-version-bulk-actions"
               />
               <button className="button button-secondary" onClick={() => openModal("brush")} disabled={!selectedVersion}><Plus />新增刷子</button>
             </div>
@@ -611,7 +630,7 @@ export function ProgramWorkspace() {
                 </div>
               </div>
               <div className="program-subsection">
-                <div className="program-subheading"><div><span className="eyebrow">PARAMETER MATRIX</span><h3>配置参数</h3></div><div className="row-actions"><BulkDataActions resourceKey="process.brush-parameters" resourceLabel="刷子参数" disabled={loading || submitting} onImported={reload} onResult={bulkResult} /><button className="button button-secondary" onClick={() => openModal("parameter")}><Plus />新增参数</button></div></div>
+                <div className="program-subheading"><div><span className="eyebrow">PARAMETER MATRIX</span><h3>配置参数</h3><small>{selectedBrush ? `当前归属刷子 ${selectedBrush.brush_no}` : "先选择刷子后，才能导入或新增参数"}</small></div><div className="row-actions program-heading-actions"><BulkDataActions resourceKey="process.brush-parameters" resourceLabel="刷子参数" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={brushParameterImportQuery} className="program-version-bulk-actions" /><button className="button button-secondary" onClick={() => openModal("parameter")}><Plus />新增参数</button></div></div>
                 <div className="compact-table">
                   <div className="compact-row compact-head"><span>参数</span><span>配置值</span><span>软边界</span><span>可推荐</span><span /></div>
                   {parameters.map((parameter) => (
@@ -627,7 +646,7 @@ export function ProgramWorkspace() {
                 </div>
               </div>
               <div className="program-subsection">
-                <div className="program-subheading"><div><span className="eyebrow">POINT CONTRIBUTION</span><h3>测量点贡献权重</h3></div><div className="row-actions"><BulkDataActions resourceKey="process.brush-contributions" resourceLabel="点位贡献" disabled={loading || submitting} onImported={reload} onResult={bulkResult} /><button className="button button-secondary" onClick={() => openModal("contribution")}><Plus />配置贡献</button></div></div>
+                <div className="program-subheading"><div><span className="eyebrow">POINT CONTRIBUTION</span><h3>测量点贡献权重</h3><small>{selectedBrush ? `当前归属刷子 ${selectedBrush.brush_no}` : "先选择刷子后，才能导入或配置贡献"}</small></div><div className="row-actions program-heading-actions"><BulkDataActions resourceKey="process.brush-contributions" resourceLabel="点位贡献" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={contributionImportQuery} className="program-version-bulk-actions" /><button className="button button-secondary" onClick={() => openModal("contribution")}><Plus />配置贡献</button></div></div>
                 {!selectableContributionPoints.length ? <div className="program-empty">当前刷子下暂无可用质量测量点。请检查版本适用车型、刷子负责零件和测量点主数据是否已补齐。</div> : null}
                 <div className="compact-table">
                   <div className="compact-row contribution-row compact-head"><span>测量点</span><span>重叠率</span><span>贡献权重</span><span>审批</span><span /></div>

@@ -1825,9 +1825,10 @@ button.message-banner {
 
 .program-column-heading,
 .program-subheading {
-  align-items: center;
+  align-items: flex-start;
   border-bottom: 1px solid var(--line);
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   padding: 14px 15px;
@@ -1837,6 +1838,20 @@ button.message-banner {
 .program-subheading h3 {
   font-size: 13px;
   margin: 4px 0 0;
+}
+
+.program-column-heading > div:first-child,
+.program-subheading > div:first-child {
+  min-width: 0;
+}
+
+.program-column-heading > div:first-child small,
+.program-subheading > div:first-child small {
+  color: var(--text-muted);
+  display: block;
+  font-size: 9px;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
 }
 
 .program-column-heading > span {
@@ -1919,6 +1934,24 @@ button.message-banner {
 
 .program-column-actions .button {
   flex: 1;
+}
+
+.program-heading-actions {
+  align-items: stretch;
+  flex: 0 1 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.program-version-bulk-actions {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.program-version-bulk-actions select {
+  min-width: 84px;
 }
 
 .stacked-actions {

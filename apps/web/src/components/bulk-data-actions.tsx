@@ -19,6 +19,8 @@ type BulkDataActionsProps = {
   disabled?: boolean;
   onResult?: (message: string, type: "success" | "error") => void;
   onImported?: () => void | Promise<void>;
+  importQuery?: Record<string, string | undefined>;
+  className?: string;
 };
 
 async function readApiError(response: Response): Promise<string> {
@@ -30,12 +32,24 @@ function downloadUrl(resourceKey: string, action: "template" | "export", format:
   return `/api/bulk/${encodeURIComponent(resourceKey)}/${action}?format=${format}`;
 }
 
+function withQuery(path: string, query?: Record<string, string | undefined>): string {
+  if (!query) return path;
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value) params.set(key, value);
+  }
+  const text = params.toString();
+  return text ? `${path}${path.includes("?") ? "&" : "?"}${text}` : path;
+}
+
 export function BulkDataActions({
   resourceKey,
   resourceLabel,
   disabled = false,
   onImported,
   onResult,
+  importQuery,
+  className,
 }: BulkDataActionsProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [format, setFormat] = useState<"xlsx" | "csv">("xlsx");
@@ -54,7 +68,10 @@ export function BulkDataActions({
     setUploading(true);
     try {
       const response = await fetch(
-        `/api/bulk/${encodeURIComponent(resourceKey)}/import?mode=upsert&filename=${encodeURIComponent(file.name)}`,
+        withQuery(
+          `/api/bulk/${encodeURIComponent(resourceKey)}/import?mode=upsert&filename=${encodeURIComponent(file.name)}`,
+          importQuery,
+        ),
         {
           method: "POST",
           headers: { "Content-Type": file.type || "application/octet-stream" },
@@ -65,6 +82,10 @@ export function BulkDataActions({
       const result = (await response.json()) as BulkImportResult;
       const firstError = result.errors?.[0];
       const summary = `已处理 ${result.total_rows ?? 0} 行，新增 ${result.created ?? 0}，更新 ${result.updated ?? 0}，跳过 ${result.skipped ?? 0}，失败 ${result.failed ?? 0}`;
+      if ((result.total_rows ?? 0) === 0) {
+        notify("导入文件没有可处理的数据行，请先在模板的 data 页或 CSV 数据区填写记录后再导入", "error");
+        return;
+      }
       notify(firstError ? `${summary}；首个错误：第 ${firstError.row} 行 ${firstError.message}` : summary, firstError ? "error" : "success");
       await onImported?.();
     } catch (error) {
@@ -75,7 +96,7 @@ export function BulkDataActions({
   }
 
   return (
-    <div className="bulk-actions" aria-label={`${resourceLabel}批量导入导出`}>
+    <div className={className ? `bulk-actions ${className}` : "bulk-actions"} aria-label={`${resourceLabel}批量导入导出`}>
       <select
         aria-label={`${resourceLabel}导入导出格式`}
         value={format}

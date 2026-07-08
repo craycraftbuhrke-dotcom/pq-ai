@@ -1,6 +1,7 @@
-from typing import Literal
+import json
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -42,12 +43,23 @@ async def bulk_import(
     request: Request,
     filename: str = Query(default="bulk-import.csv"),
     mode: Literal["create", "upsert"] = "upsert",
+    default_values: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> dict:
+    parsed_default_values: dict[str, Any] | None = None
+    if default_values:
+        try:
+            payload = json.loads(default_values)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail="default_values 必须是合法 JSON") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=422, detail="default_values 必须是 JSON 对象")
+        parsed_default_values = payload
     return import_resource(
         resource_key,
         await request.body(),
         filename=filename,
         mode=mode,
+        default_values=parsed_default_values,
         db=db,
     )

@@ -413,6 +413,7 @@ def import_resource(
     *,
     filename: str,
     mode: ImportMode,
+    default_values: dict[str, Any] | None = None,
     db: Session,
 ) -> dict[str, Any]:
     resource = get_resource(resource_key)
@@ -421,20 +422,28 @@ def import_resource(
     rows = _parse_rows(content, filename)
     field_names = {field.name for field in resource.fields}
     required = {field.name for field in resource.fields if field.required}
+    default_values = default_values or {}
     unknown = sorted({key for row in rows for key in row if key and key not in field_names})
     if unknown:
         raise HTTPException(status_code=422, detail=f"模板字段不匹配，未知字段：{', '.join(unknown)}")
+    unknown_defaults = sorted(key for key in default_values if key not in field_names)
+    if unknown_defaults:
+        raise HTTPException(
+            status_code=422,
+            detail=f"默认导入字段不匹配：{', '.join(unknown_defaults)}",
+        )
 
     created = 0
     updated = 0
     skipped = 0
     errors: list[dict[str, Any]] = []
     for row_index, raw_row in enumerate(rows, start=2):
-        if not any(str(value or "").strip() for value in raw_row.values()):
+        merged_row = _apply_default_values(raw_row, default_values)
+        if not any(str(value or "").strip() for value in merged_row.values()):
             skipped += 1
             continue
         try:
-            normalized = _normalize_row(resource, raw_row)
+            normalized = _normalize_row(resource, merged_row)
             missing = sorted(
                 name
                 for name in required
@@ -687,6 +696,17 @@ def _normalize_row(resource: BulkResource, raw_row: dict[str, Any]) -> dict[str,
             continue
         normalized[name] = _coerce_value(raw_row[name], field_spec)
     return normalized
+
+
+def _apply_default_values(
+    raw_row: dict[str, Any],
+    default_values: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(raw_row)
+    for key, value in default_values.items():
+      if key not in merged or _is_blank(merged.get(key)):
+          merged[key] = value
+    return merged
 
 
 def _coerce_value(value: Any, field_spec: BulkField) -> Any:

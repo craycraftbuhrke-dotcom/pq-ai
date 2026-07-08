@@ -1,7 +1,13 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.models.domain import Factory
+from app.api.routes.factories import create_factory
+from app.api.routes.master_data import create_measurement_point, create_part, create_vehicle_model
+from app.api.routes.process import create_brush, create_program_version, create_spray_program
+from app.models.domain import Brush, BrushParameter, BrushPointContribution, Factory, SprayProgramVersion
+from app.schemas.common import FactoryCreate
+from app.schemas.master_data import MeasurementPointCreate, PartCreate, VehicleModelCreate
+from app.schemas.process import BrushCreate, SprayProgramCreate, SprayProgramVersionCreate
 from app.services.bulk_io import export_resource, import_resource, render_template
 from tests.schema_guard import create_transient_test_schema
 
@@ -80,4 +86,159 @@ def test_bulk_export_returns_excel_workbook() -> None:
 
     assert response.media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     assert response.body[:2] == b"PK"
+    db.close()
+
+
+def test_bulk_import_uses_default_values_for_program_versions() -> None:
+    db = build_session()
+    factory = create_factory(
+        FactoryCreate(code="F01", name="Factory 01", site_owner="Owner"),
+        db,
+    )
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-01",
+            name="Program 01",
+            factory_id=factory.id,
+            process_stage="CLEARCOAT_2",
+            station_code="ST-01",
+            station_name="Station 01",
+        ),
+        db,
+    )
+    csv_content = "id,version,status,source_type,is_master_sample,vehicle_model_ids,color_ids\n,V1,DRAFT,MANUAL,false,,\n"
+
+    result = import_resource(
+        "process.program-versions",
+        csv_content.encode("utf-8"),
+        filename="program-versions.csv",
+        mode="upsert",
+        default_values={"spray_program_id": program.id},
+        db=db,
+    )
+
+    assert result["created"] == 1
+    version = db.query(SprayProgramVersion).filter_by(spray_program_id=program.id, version="V1").one()
+    assert version.source_type == "MANUAL"
+    db.close()
+
+
+def test_bulk_import_uses_default_values_for_brushes() -> None:
+    db = build_session()
+    factory = create_factory(
+        FactoryCreate(code="F02", name="Factory 02", site_owner="Owner"),
+        db,
+    )
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-02",
+            name="Program 02",
+            factory_id=factory.id,
+            process_stage="CLEARCOAT_2",
+            station_code="ST-02",
+            station_name="Station 02",
+        ),
+        db,
+    )
+    version = create_program_version(program.id, SprayProgramVersionCreate(version="V1"), db)
+    csv_content = "id,brush_no,brush_table_no,spray_position,part_id,remark\n,B01,BT01,roof_front,,bulk brush\n"
+
+    result = import_resource(
+        "process.brushes",
+        csv_content.encode("utf-8"),
+        filename="brushes.csv",
+        mode="upsert",
+        default_values={"program_version_id": version.id},
+        db=db,
+    )
+
+    assert result["created"] == 1
+    brush = db.query(Brush).filter_by(program_version_id=version.id, brush_no="B01").one()
+    assert brush.brush_table_no == "BT01"
+    db.close()
+
+
+def test_bulk_import_uses_default_values_for_brush_parameters() -> None:
+    db = build_session()
+    factory = create_factory(
+        FactoryCreate(code="F03", name="Factory 03", site_owner="Owner"),
+        db,
+    )
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-03",
+            name="Program 03",
+            factory_id=factory.id,
+            process_stage="CLEARCOAT_2",
+            station_code="ST-03",
+            station_name="Station 03",
+        ),
+        db,
+    )
+    version = create_program_version(program.id, SprayProgramVersionCreate(version="V1"), db)
+    brush = create_brush(version.id, BrushCreate(brush_no="B01", brush_table_no="BT01"), db)
+    csv_content = "id,parameter_definition_id,parameter_code,parameter_name,configured_value,unit,soft_min,soft_max,hard_min,hard_max,is_recommendable\n,,clearcoat_2_flow,Clearcoat Flow,320,ml/min,280,360,,,true\n"
+
+    result = import_resource(
+        "process.brush-parameters",
+        csv_content.encode("utf-8"),
+        filename="brush-parameters.csv",
+        mode="upsert",
+        default_values={"brush_id": brush.id},
+        db=db,
+    )
+
+    assert result["created"] == 1
+    parameter = db.query(BrushParameter).filter_by(brush_id=brush.id, parameter_code="clearcoat_2_flow").one()
+    assert parameter.configured_value == 320
+    db.close()
+
+
+def test_bulk_import_uses_default_values_for_brush_contributions() -> None:
+    db = build_session()
+    factory = create_factory(
+        FactoryCreate(code="F04", name="Factory 04", site_owner="Owner"),
+        db,
+    )
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-04",
+            name="Program 04",
+            factory_id=factory.id,
+            process_stage="CLEARCOAT_2",
+            station_code="ST-04",
+            station_name="Station 04",
+        ),
+        db,
+    )
+    version = create_program_version(program.id, SprayProgramVersionCreate(version="V1"), db)
+    brush = create_brush(version.id, BrushCreate(brush_no="B01", brush_table_no="BT01"), db)
+    model = create_vehicle_model(VehicleModelCreate(code="VM-04", name="Vehicle 04"), db)
+    part = create_part(PartCreate(code="PART-04", name="Roof Panel"), db)
+    point = create_measurement_point(
+        MeasurementPointCreate(
+            code="P01",
+            name="Point 01",
+            vehicle_model_id=model.id,
+            part_id=part.id,
+            point_type="QUALITY",
+            region="Roof",
+            quality_types=["ORANGE_PEEL"],
+        ),
+        db,
+    )
+    csv_content = f"id,measurement_point_id,overlap_ratio,contribution_weight,source,version,is_approved\n,{point.id},0.6,0.6,EXPERT,1.0,true\n"
+
+    result = import_resource(
+        "process.brush-contributions",
+        csv_content.encode("utf-8"),
+        filename="brush-contributions.csv",
+        mode="upsert",
+        default_values={"brush_id": brush.id},
+        db=db,
+    )
+
+    assert result["created"] == 1
+    contribution = db.query(BrushPointContribution).filter_by(brush_id=brush.id, measurement_point_id=point.id).one()
+    assert contribution.contribution_weight == 0.6
     db.close()
