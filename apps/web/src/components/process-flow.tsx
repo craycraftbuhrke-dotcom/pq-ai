@@ -38,7 +38,7 @@ export function ProcessFlow({ stages }: ProcessFlowProps) {
                   流量 <strong>{stage.flow}</strong>
                 </span>
                 <span>
-                  RPM <strong>{stage.rpm.toLocaleString()}</strong>
+                  转速 <strong>{stage.rpm.toLocaleString()}</strong>
                 </span>
               </div>
               <div className="health-track">

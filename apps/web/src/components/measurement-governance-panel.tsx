@@ -7,6 +7,7 @@ import { BulkDataActions } from "@/components/bulk-data-actions";
 import { ModalShell } from "@/components/modal-shell";
 import { JsonObjectEditor } from "@/components/structured-json-editor";
 import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
+import { qualityTypeLabel, statusLabel } from "@/lib/display-labels";
 
 type Kind = "instruments" | "methods" | "references" | "calibrations" | "import-profiles";
 type FormState = Record<string, string | boolean>;
@@ -67,6 +68,29 @@ const kindLabels: Record<Kind, string> = {
 };
 const qualityOptions = [["ORANGE_PEEL", "橘皮"], ["COLOR_DIFFERENCE", "色差/效应"], ["THICKNESS", "膜厚"]] as const;
 const instrumentOptions = [["BYK_ORANGE_PEEL", "BYK 橘皮仪"], ["BYK_COLOR", "BYK 色差仪"], ["FISCHER_THICKNESS", "Fischer 膜厚仪"]] as const;
+const INSTRUMENT_TYPE_LABELS: Record<string, string> = {
+  BYK_ORANGE_PEEL: "BYK 橘皮仪",
+  BYK_COLOR: "BYK 色差仪",
+  FISCHER_THICKNESS: "Fischer 膜厚仪",
+};
+
+function instrumentTypeLabel(code: string | null | undefined): string {
+  if (!code) return "—";
+  return INSTRUMENT_TYPE_LABELS[code] ?? statusLabel(code);
+}
+
+function versionValidityLabel(row: GovernanceResource): string {
+  if (row.version) return row.version;
+  if (row.result) return statusLabel(row.result);
+  if (row.status) return statusLabel(row.status);
+  return statusLabel(row.is_active ? "ACTIVE" : "INACTIVE");
+}
+
+function typeScopeLabel(row: GovernanceResource, lookup: { instruments: Map<string, GovernanceResource> }): string {
+  if (row.instrument_type) return instrumentTypeLabel(row.instrument_type);
+  if (row.quality_type) return qualityTypeLabel(row.quality_type);
+  return lookup.instruments.get(row.instrument_id ?? "")?.name ?? "—";
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { cache: "no-store", ...init });
@@ -197,8 +221,8 @@ export function MeasurementGovernancePanel() {
           <thead><tr><th>编号 / 名称</th><th>类型与适用范围</th><th>版本 / 有效性</th><th>追溯详情</th><th>操作</th></tr></thead>
           <tbody>{rows.map((row) => <tr key={row.id}>
             <td><strong>{row.calibration_no ?? row.code}</strong><small>{row.name ?? row.performed_by ?? "—"}</small></td>
-            <td>{row.instrument_type ?? row.quality_type ?? lookup.instruments.get(row.instrument_id ?? "")?.name ?? "—"}</td>
-            <td>{row.version ?? row.result ?? row.status ?? (row.is_active ? "ACTIVE" : "INACTIVE")}</td>
+            <td>{typeScopeLabel(row, lookup)}</td>
+            <td>{versionValidityLabel(row)}</td>
             <td>{governanceDetail(kind, row, lookup)}</td>
             <td><div className="row-actions"><button className="icon-button" onClick={() => open(row)} aria-label={`编辑${kindLabels[kind]}`}><Pencil /></button><button className="icon-button icon-button-danger" onClick={() => void remove(row)} aria-label={`删除${kindLabels[kind]}`}><Trash2 /></button></div></td>
           </tr>)}</tbody>
@@ -215,7 +239,7 @@ function governanceDetail(kind: Kind, row: GovernanceResource, lookup: { instrum
   if (kind === "methods") return `${row.method_type} · 重复 ${row.minimum_repeats} · ${row.requires_reference ? "需参考件" : "无需参考件"}`;
   if (kind === "references") return `SN ${row.serial_no ?? "—"} · 有效至 ${row.valid_until ? new Date(row.valid_until).toLocaleDateString("zh-CN") : "未限制"}`;
   if (kind === "calibrations") return `${lookup.instruments.get(row.instrument_id ?? "")?.code ?? "未知仪器"} · ${lookup.methods.get(row.method_id ?? "")?.code ?? "通用检查"} · 有效至 ${row.valid_until ? new Date(row.valid_until).toLocaleString("zh-CN") : "—"}`;
-  return `${row.schema_version} · ${row.quality_type}`;
+  return `${row.schema_version} · ${qualityTypeLabel(row.quality_type)}`;
 }
 
 function initialForm(kind: Kind, record?: GovernanceResource): FormState {

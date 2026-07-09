@@ -15,6 +15,7 @@ import { CSSProperties, FormEvent, ReactNode, useCallback, useEffect, useMemo, u
 import { BulkDataActions } from "@/components/bulk-data-actions";
 import { ModalShell } from "@/components/modal-shell";
 import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
+import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type Resource = {
@@ -688,7 +689,7 @@ export function QualityWorkspace() {
           {tab === "measurements" || tab === "standards" ? <button className="button button-primary" onClick={() => tab === "measurements" ? openMeasurement() : openStandard()}><Plus />新建{tab === "measurements" ? "质量测量" : "质量标准"}</button> : null}
         </div>
       </header>
-      <div className="freshness"><span className="live-dot" /> 实时质量数据 · 自动匹配最具体标准</div>
+      <div className="freshness"><span className="live-dot" /> 实时质量数据</div>
       <section className="module-stat-strip">
         <article><span>质量测量</span><strong>{loading ? "…" : summary?.measurements ?? 0}</strong><small>{summary?.verified_measurements ?? 0} 条通过可靠性门禁</small></article>
         <article><span>指标值</span><strong>{loading ? "…" : summary?.metric_values ?? 0}</strong><small>当前受治理目录 {definitions.length} 项</small></article>
@@ -697,7 +698,7 @@ export function QualityWorkspace() {
       </section>
       {error ? <div className="message-banner message-error">{error}</div> : null}
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
-      <div className="freshness">质量测量与质量标准采用追加、修订和版本化治理；当前页面不提供物理删除。</div>
+      <div className="freshness">记录采用追加与版本修订，不支持直接删除。</div>
 
       <section className="panel quality-workspace">
         <div className="master-tabs">
@@ -735,16 +736,24 @@ export function QualityWorkspace() {
               <article className="quality-measurement-card" key={measurement.id}>
                 <div className="quality-record-identity"><span className="mono">{measurement.data_no}</span><strong>{measurement.measurement_point_code} · {measurement.measurement_point_name}</strong><small>{qualityLabels[measurement.quality_type]} · {new Date(measurement.measured_at).toLocaleString("zh-CN", { hour12: false })}</small><small className={`reliability-${measurement.reliability_status.toLowerCase()}`}>{reliabilityLabels[measurement.reliability_status] ?? measurement.reliability_status} · {measurement.instrument_code ?? "未绑定仪器"}</small></div>
                 <div className="quality-metrics">{measurement.metrics.slice(0, 5).map((metric) => <span key={metric.id}><small>{metric.metric_name}</small><strong className="mono">{metric.corrected_value ?? metric.raw_value} {metric.unit}</strong></span>)}</div>
-                <div className={`quality-judgement judgement-${measurement.judgement.toLowerCase()}`}><strong>{judgementLabels[measurement.judgement] ?? measurement.judgement}</strong><small>{measurement.reliability_issues[0] ?? measurement.violations[0] ?? `${measurement.measured_by ?? "未记录测量人"} · ${measurement.data_type}`}</small></div>
+                <div className={`quality-judgement judgement-${measurement.judgement.toLowerCase()}`}><strong>{judgementLabels[measurement.judgement] ?? measurement.judgement}</strong><small>{measurement.reliability_issues[0] ?? measurement.violations[0] ?? `${measurement.measured_by ?? "未记录测量人"} · ${{ TEST: "测试数据", MASTER_SAMPLE: "封样数据", STANDARD: "标准数据" }[measurement.data_type] ?? measurement.data_type}`}</small></div>
                 <div className="row-actions"><button className="icon-button" onClick={() => openMeasurement(measurement)} aria-label={`编辑测量 ${measurement.data_no}`}><Pencil /></button></div>
               </article>
             ))}
+            {!filteredMeasurements.length ? (
+              <WorkspaceEmptyState
+                icon={Activity}
+                title="暂无质量测量记录"
+                description="请先选择生产车身与测量点，或点击新建录入。"
+                compact
+              />
+            ) : null}
           </div>
         ) : tab === "standards" ? (
           <div className="master-table-wrap">
             <table className="master-table quality-standard-table"><thead><tr><th>标准编号</th><th>质量类型 / 指标</th><th>范围</th><th>适用上下文</th><th>状态</th><th>操作</th></tr></thead><tbody>
               {filteredStandards.map((standard) => (
-                <tr key={standard.id}><td className="mono">{standard.standard_no} · {standard.version}</td><td>{qualityLabels[standard.quality_type]} / {standard.metric_code}</td><td className="mono">{standard.min_value ?? "—"} ~ {standard.max_value ?? "—"} {standard.unit}</td><td>{[relationName(vehicleModels, standard.vehicle_model_id), relationName(colors, standard.color_id), relationName(parts, standard.part_id), relationName(points, standard.measurement_point_id)].filter((value) => value !== "全部").join(" · ") || "全局标准"}</td><td>{standard.is_active ? "生效" : "停用"}</td><td><div className="row-actions"><button className="icon-button" onClick={() => openStandard(standard)} aria-label={`编辑标准 ${standard.standard_no}`}><Pencil /></button></div></td></tr>
+                <tr key={standard.id}><td className="mono">{standard.standard_no} · {standard.version}</td><td>{qualityLabels[standard.quality_type]} · {definitions.find((item) => item.quality_type === standard.quality_type && item.code === standard.metric_code)?.name ?? standard.metric_code}</td><td className="mono">{standard.min_value ?? "—"} ~ {standard.max_value ?? "—"} {standard.unit}</td><td>{[relationName(vehicleModels, standard.vehicle_model_id), relationName(colors, standard.color_id), relationName(parts, standard.part_id), relationName(points, standard.measurement_point_id)].filter((value) => value !== "全部").join(" · ") || "全局标准"}</td><td>{standard.is_active ? "生效" : "停用"}</td><td><div className="row-actions"><button className="icon-button" onClick={() => openStandard(standard)} aria-label={`编辑标准 ${standard.standard_no}`}><Pencil /></button></div></td></tr>
               ))}
             </tbody></table>
           </div>
@@ -752,7 +761,7 @@ export function QualityWorkspace() {
       </section>
 
       {modal ? (
-        <ModalShell className="quality-modal" eyebrow={modal.record ? "EDIT" : "CREATE"} title={`${modal.record ? "编辑" : "新建"}${modal.kind === "measurement" ? "质量测量" : "质量标准"}`} description={modal.kind === "measurement" ? "统一收口质量测量弹窗的治理对象选择、指标录入和重复读数编辑体验。" : "统一维护质量标准的适用范围、上下限和状态信息。"} onClose={closeModal} busy={submitting}>
+        <ModalShell className="quality-modal" eyebrow={modal.record ? "编辑" : "新建"} title={`${modal.record ? "编辑" : "新建"}${modal.kind === "measurement" ? "质量测量" : "质量标准"}`} description={modal.kind === "measurement" ? "统一收口质量测量弹窗的治理对象选择、指标录入和重复读数编辑体验。" : "统一维护质量标准的适用范围、上下限和状态信息。"} onClose={closeModal} busy={submitting}>
           <form onSubmit={(event) => void submit(event)}>
             <div className="form-grid">
               {modal.kind === "measurement"

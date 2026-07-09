@@ -57,7 +57,7 @@ type FieldConfig = {
   key: keyof MasterRecord;
   label: string;
   required?: boolean;
-  type?: "text" | "textarea" | "json" | "select" | "checkbox" | "number";
+  type?: "text" | "textarea" | "json" | "select" | "checkbox" | "number" | "multiselect";
   options?: Array<{ label: string; value: string }>;
   relation?: ResourceKey;
   placeholder?: string;
@@ -258,9 +258,13 @@ const resourceConfigs: Record<ResourceKey, ResourceConfig> = {
       { key: "name", label: "点位名称", required: true },
       { key: "vehicle_model_id", label: "车型", required: true, type: "select", relation: "vehicle-models" },
       { key: "part_id", label: "零件", required: true, type: "select", relation: "parts" },
-      { key: "point_type", label: "点位类型", required: true },
+      { key: "point_type", label: "点位类型", required: true, type: "select", options: [
+        { label: "质量点", value: "QUALITY" },
+        { label: "匹配点", value: "MATCH" },
+        { label: "工艺点", value: "PROCESS" },
+      ]},
       { key: "region", label: "点位区域" },
-      { key: "quality_types", label: "质量类型代码（高级）", required: true, placeholder: "例如：ORANGE_PEEL,COLOR_DIFFERENCE,THICKNESS（橘皮/色差/膜厚）" },
+      { key: "quality_types", label: "适用质量类型", required: true, type: "multiselect", options: qualityTypeOptions },
       { key: "is_match_point", label: "匹配点", type: "checkbox" },
     ],
     columns: [
@@ -321,6 +325,8 @@ function recordToForm(
       state[field.key] = typeof value === "string" ? value : (data[field.relation][0]?.id ?? "");
     } else if (field.type === "select") {
       state[field.key] = typeof value === "string" ? value : (field.options?.[0]?.value ?? "");
+    } else if (field.key === "quality_types" || field.type === "multiselect") {
+      state[field.key] = Array.isArray(value) ? value.join(",") : String(value ?? "");
     } else if (field.type === "json") {
       state[field.key] = value ? JSON.stringify(value, null, 2) : "";
     } else if (field.key === "point_type") {
@@ -728,7 +734,7 @@ export function MasterDataWorkspace() {
 
       {modalMode ? (
         <ModalShell
-          eyebrow={modalMode === "create" ? "CREATE" : "EDIT"}
+          eyebrow={modalMode === "create" ? "新建" : "编辑"}
           title={`${modalMode === "create" ? "新建" : "编辑"}${config.singular}`}
           description={config.description}
           onClose={closeModal}
@@ -774,6 +780,25 @@ export function MasterDataWorkspace() {
                           <option value={option.value} key={option.value}>{option.label}</option>
                         ))}
                       </select>
+                    ) : field.type === "multiselect" ? (
+                      <div className="checkbox-group">
+                        {field.options?.map((opt) => (
+                          <label key={opt.value} className="checkbox-field">
+                            <input
+                              type="checkbox"
+                              checked={String(form[field.key] ?? "").split(",").filter(Boolean).includes(opt.value)}
+                              onChange={(e) => {
+                                const current = String(form[field.key] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+                                const next = e.target.checked
+                                  ? [...new Set([...current, opt.value])]
+                                  : current.filter((v) => v !== opt.value);
+                                setForm((c) => ({ ...c, [field.key]: next.join(",") }));
+                              }}
+                            />
+                            {opt.label}
+                          </label>
+                        ))}
+                      </div>
                     ) : field.type === "checkbox" ? (
                       <span className="checkbox-field">
                         <input
@@ -784,19 +809,14 @@ export function MasterDataWorkspace() {
                         {field.key === "is_active" ? "当前工厂可用于业务数据关联" : "该点位用于匹配质量数据"}
                       </span>
                     ) : (
-                      <>
-                        <input
-                          type={field.type === "number" ? "number" : "text"}
-                          value={String(form[field.key] ?? "")}
-                          onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))}
-                          required={field.required}
-                          maxLength={field.key === "name" ? 120 : 80}
-                          placeholder={field.placeholder}
-                        />
-                        {field.key === "quality_types" ? (
-                          <small className="field-hint">橘皮=ORANGE_PEEL，色差=COLOR_DIFFERENCE，膜厚=THICKNESS；多个用英文逗号分隔</small>
-                        ) : null}
-                      </>
+                      <input
+                        type={field.type === "number" ? "number" : "text"}
+                        value={String(form[field.key] ?? "")}
+                        onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))}
+                        required={field.required}
+                        maxLength={field.key === "name" ? 120 : 80}
+                        placeholder={field.placeholder}
+                      />
                     )}
                   </label>
                 ))}

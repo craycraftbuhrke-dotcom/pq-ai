@@ -20,7 +20,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ValidationChart } from "@/components/validation-chart";
 import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 import { useAuth } from "@/lib/auth-context";
-import { qualityTypeLabel } from "@/lib/display-labels";
+import { qualityTypeLabel, stageLabel } from "@/lib/display-labels";
 
 const DEFAULT_FEATURE_SET_VERSION = "point-features-v4-material-governed";
 
@@ -461,6 +461,7 @@ function statusLabel(status: string): string {
     DURR_DEVICE_LIMIT: "Dürr 设备极限",
     MATERIAL_TDS: "材料 TDS",
     ENGINEERING_TRIAL: "工程试验",
+    CORRELATION_ONLY: "仅关联分析（非因果）",
   }[status] ?? status;
 }
 
@@ -876,7 +877,7 @@ export function AiWorkbench() {
         }),
       });
       setSelectedDatasetId(dataset.id);
-      showSuccess("数据集快照已固化，并通过分组与时间泄漏检查");
+      showSuccess("训练集已生成，并完成数据交叉检查");
       await reload();
     } catch (operationError) {
       showError(operationError);
@@ -1432,7 +1433,7 @@ export function AiWorkbench() {
                   {selectedAxisEntries.length ? <div className="ai-validation-grid">
                     {selectedAxisEntries.map(([axis, summary]) => <article key={axis}><span className={`status-badge ${validationStatusClass(summary.status)}`}>{statusLabel(summary.status)}</span><strong>{axis}</strong><small>{summary.evaluated_fold_count ?? 0}/{summary.fold_count ?? 0} 折 · RMSE {formatNumber(summary.rmse)} · R² {formatNumber(summary.r2)}</small></article>)}
                   </div> : <p className="ai-hint">当前模型没有多维验证折报告，不能验收或激活。</p>}
-                  {selectedArtifact ? <div className="ai-artifact-row"><span><b>{selectedArtifact.artifact_type}</b><small>{selectedArtifact.storage_backend} · {statusLabel(selectedArtifact.status)} · {shortHash(selectedArtifact.payload_hash)}</small></span><code>{selectedArtifact.artifact_uri}</code></div> : <p className="ai-hint">当前模型没有已登记工件哈希，不能验收或激活。</p>}
+                  {selectedArtifact ? <div className="ai-artifact-row"><span><b>{selectedArtifact.artifact_type}</b><small>{selectedArtifact.storage_backend} · {statusLabel(selectedArtifact.status)} · {shortHash(selectedArtifact.payload_hash)}</small></span><code>{selectedArtifact.artifact_uri}</code></div> : <p className="ai-hint">当前模型没有已登记模型校验码，不能验收或激活。</p>}
                 </div>
                 <div className="ai-governance-block">
                   <strong>工厂模型验收策略</strong>
@@ -1504,7 +1505,7 @@ export function AiWorkbench() {
                 <WorkspaceEmptyState
                   icon={Activity}
                   title="请选择模型版本查看治理报告"
-                  description="治理报告会展示漂移、验证证据、工件哈希和适用范围，请先从左侧选择具体模型版本。"
+                  description="治理报告会展示漂移、验证证据、模型校验码和适用范围，请先从左侧选择具体模型版本。"
                   compact
                 />
               ) : null}
@@ -1515,7 +1516,7 @@ export function AiWorkbench() {
                 if (entries.length === 0) return null;
                 return (
                   <div className="validation-chart-panel">
-                    <div className="program-subheading"><div><span className="eyebrow">Multi-Axis Validation</span><h3>多轴验证证据</h3></div></div>
+                    <div className="program-subheading"><div><span className="eyebrow">多维验证</span><h3>多轴验证证据</h3></div></div>
                     <ValidationChart
                       axes={entries.map(([axis, summary]) => {
                         const s = summary as Record<string, unknown>;
@@ -1538,11 +1539,11 @@ export function AiWorkbench() {
         {activeTab === "predictions" ? (
           <div className="ai-split">
             <div className="ai-control-panel">
-              <div className="program-subheading"><div><span className="eyebrow">Inference</span><h3>执行点位预测</h3></div><Target /></div>
+              <div className="program-subheading"><div><span className="eyebrow">质量预测</span><h3>执行点位预测</h3></div><Target /></div>
               <div className="ai-form-stack">
                 <label className="form-field"><span>生效模型</span><select value={selectedModelId} onChange={(event) => { setSelectedModelId(event.target.value); setSelectedSnapshotId(""); }}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {model.target_metric}</option>)}</select></label>
                 <label className="form-field"><span>选择车身与测量点</span><select value={selectedSnapshot?.id ?? ""} onChange={(event) => setSelectedSnapshotId(event.target.value)}>{compatibleSnapshots.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{snapshot.production_run_no} · {snapshot.measurement_point_code} · {snapshot.factory_code}/{snapshot.vehicle_model_code}/{snapshot.color_code}</option>)}</select></label>
-                <div className="ai-context-box"><span>生产上下文</span><strong>{selectedSnapshot ? `${selectedSnapshot.factory_code} / ${selectedSnapshot.vehicle_model_code} / ${selectedSnapshot.color_code}` : "—"}</strong><span>特征版本 / 数量</span><strong>{selectedSnapshot ? `${selectedSnapshot.feature_set_version} / ${selectedSnapshot.feature_count}` : "—"}</strong><span>适用范围</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.applicability_status ?? "—")}</strong><span>输入分布</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.ood_status ?? "—")}</strong><span>完整率 / 最大偏移</span><strong>{governanceCheck ? `${formatNumber(governanceCheck.evidence.feature_completeness * 100, 1)}% / ${formatNumber(governanceCheck.evidence.max_abs_standardized_shift)}` : "—"}</strong></div>
+                <div className="ai-context-box"><span>生产上下文</span><strong>{selectedSnapshot ? `${selectedSnapshot.factory_code} / ${selectedSnapshot.vehicle_model_code} / ${selectedSnapshot.color_code}` : "—"}</strong><span>参数版本 / 数量</span><strong>{selectedSnapshot ? `${selectedSnapshot.feature_set_version} / ${selectedSnapshot.feature_count}` : "—"}</strong><span>适用范围</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.applicability_status ?? "—")}</strong><span>输入是否正常</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.ood_status ?? "—")}</strong><span>完整率 / 最大偏移</span><strong>{governanceCheck ? `${formatNumber(governanceCheck.evidence.feature_completeness * 100, 1)}% / ${formatNumber(governanceCheck.evidence.max_abs_standardized_shift)}` : "—"}</strong></div>
                 {governanceCheck && !governanceAllowed && !governanceLoading ? <p className="ai-governance-warning">当前车型/颜色不在模型适用范围内，或输入参数偏离训练数据过多，已暂停预测与推荐。</p> : null}
                 <button className="button button-primary" onClick={() => void runPrediction()} disabled={!selectedModel || selectedModel.status !== "ACTIVE" || !selectedSnapshot || governanceLoading || !governanceAllowed || submitting === "predict"}>{submitting === "predict" ? <LoaderCircle className="spin" /> : <Play />} 执行并保存预测</button>
               </div>
@@ -1565,7 +1566,7 @@ export function AiWorkbench() {
                 />
               ) : null}
               {selectedPrediction ? <div className="ai-evidence-panel">
-                <div className="program-subheading"><div><span className="eyebrow">Explainability</span><h3>诊断证据</h3></div>{!selectedDiagnosis ? <button className="button button-primary" onClick={() => void runDiagnosis(selectedPrediction.id)} disabled={submitting === `diagnose-${selectedPrediction.id}`}>{submitting ? <LoaderCircle className="spin" /> : <Sparkles />} 生成诊断</button> : <span className="record-status status-on">{selectedDiagnosis.causality_status}</span>}</div>
+                <div className="program-subheading"><div><span className="eyebrow">原因提示</span><h3>诊断证据</h3></div>{!selectedDiagnosis ? <button className="button button-primary" onClick={() => void runDiagnosis(selectedPrediction.id)} disabled={submitting === `diagnose-${selectedPrediction.id}`}>{submitting ? <LoaderCircle className="spin" /> : <Sparkles />} 生成诊断</button> : <span className="record-status status-on">{statusLabel(selectedDiagnosis.causality_status)}</span>}</div>
                 {selectedDiagnosis ? <><p className="ai-summary">{selectedDiagnosis.summary}</p><div className="ai-factor-list">{selectedDiagnosis.factor_contributions.map((factor) => <div key={factor.feature}><span><strong>{factor.feature}</strong><small>当前值 {formatNumber(factor.value)} · {factor.basis}</small></span><b className={factor.impact >= 0 ? "positive" : "negative"}>{factor.impact >= 0 ? "+" : ""}{formatNumber(factor.impact)}</b></div>)}</div></> : <div className="program-empty">选择“生成诊断”后保存局部特征贡献和相关性说明。</div>}
               </div> : null}
             </div>
@@ -1575,11 +1576,11 @@ export function AiWorkbench() {
         {activeTab === "recommendations" ? (
           <div className="ai-split">
             <form className="ai-control-panel" onSubmit={generateRecommendation}>
-              <div className="program-subheading"><div><span className="eyebrow">Constrained Optimization</span><h3>生成参数推荐</h3></div><ShieldCheck /></div>
+              <div className="program-subheading"><div><span className="eyebrow">参数推荐</span><h3>生成参数推荐</h3></div><ShieldCheck /></div>
               <div className="ai-form-stack">
                 <label className="form-field"><span>模型</span><select value={selectedModelId} onChange={(event) => { setSelectedModelId(event.target.value); setSelectedSnapshotId(""); }}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {model.target_metric}</option>)}</select></label>
                 <label className="form-field"><span>选择车身与测量点</span><select value={selectedSnapshot?.id ?? ""} onChange={(event) => setSelectedSnapshotId(event.target.value)}>{compatibleSnapshots.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{snapshot.production_run_no} · {snapshot.measurement_point_code}</option>)}</select></label>
-                <div className="ai-context-box"><span>生产上下文</span><strong>{selectedSnapshot ? `${selectedSnapshot.factory_code} / ${selectedSnapshot.vehicle_model_code} / ${selectedSnapshot.color_code}` : "—"}</strong><span>适用范围</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.applicability_status ?? "—")}</strong><span>输入分布</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.ood_status ?? "—")}</strong><span>异常特征比例</span><strong>{governanceCheck ? `${formatNumber(governanceCheck.evidence.outlier_feature_ratio * 100, 1)}%` : "—"}</strong></div>
+                <div className="ai-context-box"><span>生产上下文</span><strong>{selectedSnapshot ? `${selectedSnapshot.factory_code} / ${selectedSnapshot.vehicle_model_code} / ${selectedSnapshot.color_code}` : "—"}</strong><span>适用范围</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.applicability_status ?? "—")}</strong><span>输入是否正常</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.ood_status ?? "—")}</strong><span>异常特征比例</span><strong>{governanceCheck ? `${formatNumber(governanceCheck.evidence.outlier_feature_ratio * 100, 1)}%` : "—"}</strong></div>
                 <div className="ai-two-fields"><label className="form-field"><span>目标下限</span><input type="number" step="any" value={targetMin} onChange={(event) => setTargetMin(event.target.value)} /></label><label className="form-field"><span>目标上限</span><input type="number" step="any" value={targetMax} onChange={(event) => setTargetMax(event.target.value)} /></label></div>
                 <p className="ai-hint">至少填写一个目标上下限。系统会在安全边界内给出可执行的参数调整建议；确认后请到「受控试验」跟进。</p>
                 <button className="button button-primary" disabled={!selectedModel || selectedModel.status !== "ACTIVE" || !selectedSnapshot || governanceLoading || !governanceAllowed || (!targetMin && !targetMax) || submitting === "recommend"}>{submitting === "recommend" ? <LoaderCircle className="spin" /> : <Sparkles />} 生成约束推荐</button>
@@ -1605,7 +1606,7 @@ export function AiWorkbench() {
                 </div>
                 <div className="ai-action-table">
                   <div className="ai-action-row ai-action-head"><span>参数</span><span>当前值</span><span>推荐值</span><span>实际执行值</span><span>硬边界</span></div>
-                  {selectedRecommendation.actions.map((action) => <div className="ai-action-row" key={action.id}><span><strong>{action.parameter_name}</strong><small>{action.process_stage} · {action.parameter_code}</small></span><span>{formatNumber(action.current_value)} {action.unit}</span><span>{formatNumber(action.recommended_value)} {action.unit}</span><span>{selectedRecommendation.status === "APPROVED" ? <input type="number" step="any" value={executedValues[action.id] ?? ""} onChange={(event) => setExecutedValues((current) => ({ ...current, [action.id]: event.target.value }))} /> : `${formatNumber(action.executed_value)} ${action.unit}`}</span><span>{formatNumber(action.hard_min)} - {formatNumber(action.hard_max)}<small>{action.constraint_source_code ? `${statusLabel(action.constraint_source_type ?? "")} · ${action.constraint_source_code} / ${action.constraint_source_version ?? "—"}` : "约束来源未固化"}</small></span></div>)}
+                  {selectedRecommendation.actions.map((action) => <div className="ai-action-row" key={action.id}><span><strong>{action.parameter_name}</strong><small>{stageLabel(action.process_stage)} · {action.parameter_code}</small></span><span>{formatNumber(action.current_value)} {action.unit}</span><span>{formatNumber(action.recommended_value)} {action.unit}</span><span>{selectedRecommendation.status === "APPROVED" ? <input type="number" step="any" value={executedValues[action.id] ?? ""} onChange={(event) => setExecutedValues((current) => ({ ...current, [action.id]: event.target.value }))} /> : `${formatNumber(action.executed_value)} ${action.unit}`}</span><span>{formatNumber(action.hard_min)} - {formatNumber(action.hard_max)}<small>{action.constraint_source_code ? `${statusLabel(action.constraint_source_type ?? "")} · ${action.constraint_source_code} / ${action.constraint_source_version ?? "—"}` : "约束来源未固化"}</small></span></div>)}
                 </div>
                 {selectedRecommendation.status === "PENDING" ? <div className="ai-workflow-actions"><button className="button button-secondary danger-button" onClick={() => void approveRecommendation(selectedRecommendation, false)}><X /> 驳回推荐</button><button className="button button-primary" disabled={!selectedTrialApproved || submitting === `approval-${selectedRecommendation.id}`} onClick={() => void approveRecommendation(selectedRecommendation, true)}><Check /> 批准推荐执行</button></div> : null}
                 {selectedRecommendation.status === "APPROVED" ? <div className="ai-workflow-actions"><button className="button button-primary" onClick={() => void executeRecommendation(selectedRecommendation)}><Play /> 记录实际执行</button></div> : null}

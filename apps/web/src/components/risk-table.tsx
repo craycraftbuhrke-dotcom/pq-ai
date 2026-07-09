@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 
@@ -20,7 +21,9 @@ export function RiskTable({ riskPoints, onSelect }: RiskTableProps) {
           <span className="eyebrow">风险点位</span>
           <h2>点位质量风险</h2>
         </div>
-        <button className="text-button">查看全部点位</button>
+        <Link className="text-button" href="/quality">
+          去质量页查看
+        </Link>
       </div>
       <div className="risk-table" role="table" aria-label="点位风险">
         <div className="risk-row risk-head" role="row">
@@ -30,36 +33,40 @@ export function RiskTable({ riskPoints, onSelect }: RiskTableProps) {
           <span>风险</span>
           <span />
         </div>
-        {riskPoints.length ? riskPoints.map((point) => (
-          <button
-            className={`risk-row ${selected === point.code ? "risk-row-selected" : ""}`}
-            key={point.code}
-            onClick={() => {
-              setSelected(point.code);
-              onSelect?.(point.code);
-            }}
-            role="row"
-          >
-            <span className="point-identity">
-              <strong>{point.name}</strong>
-              <span>
-                {point.part} · <span className="mono">{point.code}</span>
+        {riskPoints.length ? (
+          riskPoints.map((point) => (
+            <button
+              className={`risk-row ${selected === point.code ? "risk-row-selected" : ""}`}
+              key={point.code}
+              onClick={() => {
+                setSelected(point.code);
+                onSelect?.(point.code);
+              }}
+              role="row"
+            >
+              <span className="point-identity">
+                <strong>{point.name}</strong>
+                <span>
+                  {point.part} · <span className="mono">{point.code}</span>
+                </span>
               </span>
-            </span>
-            <strong>{point.metric}</strong>
-            <span className="value-standard">
-              <strong>{point.predicted}</strong>
-              <span>{point.standard}</span>
-            </span>
-            <span className="risk-meter">
-              <span className="risk-meter-track">
-                <span style={{ width: `${point.risk}%` }} />
+              <strong>{point.metric}</strong>
+              <span className="value-standard">
+                <strong>{point.predicted}</strong>
+                <span>{point.standard}</span>
               </span>
-              <strong>{point.risk}</strong>
-            </span>
-            <ChevronRight aria-hidden="true" />
-          </button>
-        )) : <div className="master-empty">暂无点位风险数据</div>}
+              <span className="risk-meter">
+                <span className="risk-meter-track">
+                  <span style={{ width: `${point.risk}%` }} />
+                </span>
+                <strong>{point.risk}</strong>
+              </span>
+              <ChevronRight aria-hidden="true" />
+            </button>
+          ))
+        ) : (
+          <div className="master-empty">暂无点位风险数据</div>
+        )}
       </div>
     </section>
   );

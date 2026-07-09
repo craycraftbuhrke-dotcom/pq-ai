@@ -3,6 +3,8 @@
 import { ArrowDown, ArrowRight, ArrowUp, GitCompareArrows, Minus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { statusLabel } from "@/lib/display-labels";
+
 type BrushParam = {
   id: string;
   brush_no: string;
@@ -57,11 +59,12 @@ async function apiRequest<T>(path: string): Promise<T> {
 
 export function VersionDiffPanel({
   versions,
-  programId,
+  programId: _programId,
 }: {
   versions: ProgramVersion[];
   programId: string;
 }) {
+  void _programId;
   const [sourceId, setSourceId] = useState("");
   const [targetId, setTargetId] = useState("");
   const [sourceParams, setSourceParams] = useState<BrushParam[]>([]);
@@ -204,18 +207,18 @@ export function VersionDiffPanel({
         <label className="form-field">
           <span>基准版本</span>
           <select value={effectiveSourceId} onChange={(e) => setSourceId(e.target.value)}>
-            {versions.map((v) => <option key={v.id} value={v.id}>{v.version} ({v.status})</option>)}
+            {versions.map((v) => <option key={v.id} value={v.id}>{v.version}（{statusLabel(v.status)}）</option>)}
           </select>
         </label>
         <ArrowRight className="diff-arrow-icon" />
         <label className="form-field">
           <span>对比版本</span>
           <select value={effectiveTargetId} onChange={(e) => setTargetId(e.target.value)}>
-            {versions.map((v) => <option key={v.id} value={v.id}>{v.version} ({v.status})</option>)}
+            {versions.map((v) => <option key={v.id} value={v.id}>{v.version}（{statusLabel(v.status)}）</option>)}
           </select>
         </label>
       </div>
-      <div className="section-subtitle">程序 ID：{programId}</div>
+      <div className="section-subtitle">当前程序</div>
       {loading ? <div className="message-banner">正在加载版本参数...</div> : null}
       {error ? <div className="message-banner message-error">{error}</div> : null}
       <div className="diff-stats">

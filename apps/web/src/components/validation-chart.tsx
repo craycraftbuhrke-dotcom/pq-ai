@@ -110,7 +110,7 @@ export function ValidationChart({
           className="chart-figure-title"
           style={{ paddingLeft: VALIDATION_MARGIN.left + labelW + 12 }}
         >
-          Multi-Axis Validation
+          多维验证
         </figcaption>
         <div
           className="chart-empty"
@@ -118,7 +118,7 @@ export function ValidationChart({
             height: svgH - 28,
           }}
         >
-          No axes
+          暂无验证轴数据
         </div>
       </figure>
     );
@@ -130,12 +130,12 @@ export function ValidationChart({
         className="chart-figure-title"
         style={{ paddingLeft: chartLeft }}
       >
-        Multi-Axis Validation
+        多维验证
       </figcaption>
       <svg
         viewBox={`0 0 ${width} ${svgH}`}
         role="img"
-        aria-label="Multi-Axis Validation"
+        aria-label="多维验证"
         className="chart-svg"
       >
         {/* Background grid line at 0 */}

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { RefreshCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -19,13 +20,9 @@ export function Dashboard({ snapshot }: DashboardProps) {
   const router = useRouter();
   const [selectedPoint, setSelectedPoint] = useState(snapshot.diagnosis.pointCode || "");
   const [isRefreshing, startTransition] = useTransition();
-  // 展示的“数据更新时间”来自后端 snapshot.context.refreshedAt——每次 router.refresh() 触发
-  // Server Component 重跑后，props 会带回新的时间戳，无需在客户端手动 setState 维护。
   const refreshedAt = new Date(snapshot.context.refreshedAt).toLocaleTimeString("zh-CN", { hour12: false });
 
   function handleRefresh() {
-    // Server Component 数据源真正重新拉：router.refresh() 让当前路由的 RSC payload 全量重取，
-    // 页面 SSR 会重新执行 getDashboardSnapshot()，拿到最新指标/风险点/诊断。
     startTransition(() => router.refresh());
   }
 
@@ -41,11 +38,10 @@ export function Dashboard({ snapshot }: DashboardProps) {
               .filter(Boolean)
               .join(" · ") || "未选择生产上下文"}
           </span>
-          <h1>工艺质量驾驶舱</h1>
-          <p>基于生产事件与测量点，监控三个涂层体系、五个喷涂执行阶段和 AI 闭环任务。</p>
+          <h1>今日总览</h1>
+          <p>先看五站喷涂状态与风险点位，再进入质量录入、问题处理或智能推荐。</p>
         </div>
         <div className="page-actions">
-          {/* 展示当前生产上下文；实际切换通过左侧 <ContextSelector> 完成，此处仅只读展示，避免误导用户以为可以点击。 */}
           <div className="context-button" role="status" aria-label={`当前车型与颜色：${contextLabel}`}>
             当前车型与颜色
             <strong>{contextLabel}</strong>
@@ -62,13 +58,31 @@ export function Dashboard({ snapshot }: DashboardProps) {
       </header>
       <div className="freshness">
         <span className="live-dot" /> 数据更新时间 {refreshedAt} ·
-        {snapshot.source === "api" ? " API 实时数据" : " 空状态"}
+        {snapshot.source === "api" ? " 实时业务数据" : " 暂无数据"}
       </div>
       {snapshot.error ? (
         <div className="message-banner message-error" role="alert">
-          <span>后端数据库/服务异常：{snapshot.error}</span>
+          <span>服务暂时异常：{snapshot.error}</span>
         </div>
       ) : null}
+      <section className="dashboard-quick-links" aria-label="常用入口">
+        <Link className="dashboard-quick-link" href="/quality">
+          <strong>录入质量</strong>
+          <span>登记膜厚、色差、橘皮测量</span>
+        </Link>
+        <Link className="dashboard-quick-link" href="/production">
+          <strong>查看生产车身</strong>
+          <span>核对五站喷涂实绩参数</span>
+        </Link>
+        <Link className="dashboard-quick-link" href="/ai-workbench">
+          <strong>智能分析与推荐</strong>
+          <span>预测质量并获取参数建议</span>
+        </Link>
+        <Link className="dashboard-quick-link" href="/engineering">
+          <strong>问题与调试</strong>
+          <span>记录异常并跟进闭环</span>
+        </Link>
+      </section>
       <MetricStrip snapshot={snapshot} />
       <ProcessFlow stages={snapshot.stages} />
       <div className="dashboard-grid">

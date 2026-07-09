@@ -19,6 +19,7 @@ import { DurrTrajectoryPanel } from "@/components/durr-trajectory-panel";
 import { ModalShell } from "@/components/modal-shell";
 import { VersionDiffPanel } from "@/components/version-diff-panel";
 import { useAuth } from "@/lib/auth-context";
+import { stageLabel } from "@/lib/display-labels";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type Resource = { id: string; code: string; name: string };
@@ -550,14 +551,14 @@ export function ProgramWorkspace() {
 
       <div className="master-tabs program-workspace-tabs">
         <button className={workspaceTab === "programs" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("programs")}>程序、刷子与参数</button>
-        <button className={workspaceTab === "durr" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("durr")}>Dürr 设备、轨迹与贡献治理</button>
+        <button className={workspaceTab === "durr" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("durr")}>机器人设备与轨迹</button>
         <button className={workspaceTab === "diff" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("diff")}>版本对比</button>
         {contextFilterActive && workspaceTab === "programs" ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}
       </div>
 
       {workspaceTab === "programs" ? <section className="program-config-grid">
         <article className="panel program-column">
-          <div className="program-column-heading"><div><span className="eyebrow">01 PROGRAM</span><h2>喷涂程序</h2></div><span>{filteredPrograms.length}</span></div>
+          <div className="program-column-heading"><div><span className="eyebrow">第 1 步</span><h2>喷涂程序</h2></div><span>{filteredPrograms.length}</span></div>
           <div className="program-list">
             {filteredPrograms.map((program) => (
               <button
@@ -565,7 +566,7 @@ export function ProgramWorkspace() {
                 key={program.id}
                 onClick={() => void loadProgram(program.id)}
               >
-                <div><strong>{program.program_code}</strong><span>{program.name}</span><small>{program.station_code} · {program.process_stage}</small></div>
+                <div><strong>{program.program_code}</strong><span>{program.name}</span><small>{program.station_code} · {stageLabel(program.process_stage)}</small></div>
                 <ChevronRight />
               </button>
             ))}
@@ -580,7 +581,7 @@ export function ProgramWorkspace() {
 
         <article className="panel program-column">
           <div className="program-column-heading">
-            <div><span className="eyebrow">02 VERSION</span><h2>受控版本</h2><small>{selectedProgram ? `当前归属 ${selectedProgram.program_code}` : "先选择左侧程序后，才能新建或导入版本"}</small></div>
+            <div><span className="eyebrow">第 2 步</span><h2>受控版本</h2><small>{selectedProgram ? `当前归属 ${selectedProgram.program_code}` : "先选择左侧程序后，才能新建或导入版本"}</small></div>
             <div className="row-actions program-heading-actions">
               <BulkDataActions
                 resourceKey="process.program-versions"
@@ -604,7 +605,7 @@ export function ProgramWorkspace() {
                 key={version.id}
                 onClick={() => void loadVersion(version.id)}
               >
-                <div><strong>{version.version}</strong><span>{statusLabels[version.status] ?? version.status}</span><small>{version.source_type}{version.is_master_sample ? " · 封样" : ""}</small></div>
+                <div><strong>{version.version}</strong><span>{statusLabels[version.status] ?? version.status}</span><small>{{ MANUAL: "人工配置", AI: "智能推荐", IMPORT: "外部导入" }[version.source_type] ?? version.source_type}{version.is_master_sample ? " · 封样" : ""}</small></div>
                 <span className={`version-dot version-${version.status.toLowerCase()}`} />
               </button>
             ))}
@@ -627,7 +628,7 @@ export function ProgramWorkspace() {
 
         <article className="panel program-detail-column">
           <div className="program-column-heading">
-            <div><span className="eyebrow">03 BRUSH & POINT</span><h2>刷子与点位贡献</h2><small>{selectedVersion ? `当前归属 ${selectedVersion.version}` : "先选择受控版本后，才能导入或新建刷子"}</small></div>
+            <div><span className="eyebrow">第 3 步</span><h2>刷子与点位贡献</h2><small>{selectedVersion ? `当前归属 ${selectedVersion.version}` : "先选择受控版本后，才能导入或新建刷子"}</small></div>
             <div className="row-actions program-heading-actions">
               <BulkDataActions
                 resourceKey="process.brushes"
@@ -700,7 +701,7 @@ export function ProgramWorkspace() {
       </section> : workspaceTab === "durr" ? <section className="panel"><DurrTrajectoryPanel /></section> : <section className="panel"><VersionDiffPanel versions={versions} programId={selectedProgramId} /></section>}
 
       {modal ? (
-        <ModalShell eyebrow={modal.record ? "EDIT" : "CREATE"} title={`${modal.record ? "编辑" : "新建"}${modalTitle(modal.kind)}`} description="统一维护程序、版本、刷子、参数和点位贡献弹窗的结构与关闭交互。" onClose={closeModal} busy={submitting}>
+        <ModalShell eyebrow={modal.record ? "编辑" : "新建"} title={`${modal.record ? "编辑" : "新建"}${modalTitle(modal.kind)}`} description="统一维护程序、版本、刷子、参数和点位贡献弹窗的结构与关闭交互。" onClose={closeModal} busy={submitting}>
           <form onSubmit={(event) => void submitModal(event)}>
             <div className="form-grid">{renderFields(modal.kind, form, setForm, { factories, vehicleModels, colors, parts, points: selectableContributionPoints, definitions, selectedProgram, selectedVersion, selectedBrush })}</div>
             <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存"}</button></div>

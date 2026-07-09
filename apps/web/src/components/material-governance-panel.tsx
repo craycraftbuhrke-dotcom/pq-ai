@@ -7,6 +7,7 @@ import { BulkDataActions } from "@/components/bulk-data-actions";
 import { ModalShell } from "@/components/modal-shell";
 import { JsonObjectEditor } from "@/components/structured-json-editor";
 import { physicalDeleteDisabledMessage } from "@/lib/delete-policy";
+import { qualityTypeLabel, reliabilityLabel, stageLabel, statusLabel } from "@/lib/display-labels";
 
 type Kind = "definitions" | "methods" | "specifications" | "applicabilities" | "results";
 type FormState = Record<string, string | boolean>;
@@ -73,6 +74,12 @@ const kinds: Array<[Kind, string]> = [
 const stageOptions: Array<[string, string]> = [["MIDCOAT_EXT", "中涂外喷"], ["BASECOAT_1", "色漆一站"], ["BASECOAT_2", "色漆二站"], ["CLEARCOAT_1", "清漆一站"], ["CLEARCOAT_2", "清漆二站"]];
 const qualityOptions: Array<[string, string]> = [["ORANGE_PEEL", "橘皮"], ["COLOR_DIFFERENCE", "色差/效应"], ["THICKNESS", "膜厚"]];
 const statusOptions: Array<[string, string]> = [["DRAFT", "草稿"], ["APPROVED", "已批准"], ["ACTIVE", "生效"], ["RETIRED", "退役"]];
+const MATERIAL_TYPE_LABELS: Record<string, string> = { MIDCOAT: "中涂", BASECOAT: "色漆", CLEARCOAT: "清漆" };
+
+function materialTypeLabel(code: string | null | undefined): string {
+  if (!code) return "—";
+  return MATERIAL_TYPE_LABELS[code] ?? code;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { cache: "no-store", ...init });
@@ -203,7 +210,7 @@ export function MaterialGovernancePanel() {
         <article><span>特性定义 / 方法</span><strong>{summary?.definitions ?? 0} / {summary?.methods ?? 0}</strong><small>稳定字段语义、单位与检测方法版本</small></article>
         <article><span>生效规格 / 总规格</span><strong>{summary?.active_specifications ?? 0} / {summary?.specifications ?? 0}</strong><small>来源、有效期、批准人与可选上下限</small></article>
         <article><span>生效适用关系</span><strong>{summary?.active_applicabilities ?? 0} / {summary?.applicabilities ?? 0}</strong><small>按材料类型、工序和质量目标族治理</small></article>
-        <article><span>可信结果 / 失败结果</span><strong>{summary?.verified_results ?? 0} / {summary?.failed_results ?? 0}</strong><small>只有 VERIFIED 且生产前检测结果进入 AI</small></article>
+        <article><span>可信结果 / 失败结果</span><strong>{summary?.verified_results ?? 0} / {summary?.failed_results ?? 0}</strong><small>只有「已验证」且在投产前完成的检测结果才会进入智能分析</small></article>
       </section>
       <div className="governance-toolbar">
         <div className="master-tabs">{kinds.map(([key, text]) => <button key={key} className={kind === key ? "master-tab master-tab-active" : "master-tab"} onClick={() => setKind(key)}>{text}<span>{resources[key].length}</span></button>)}</div>
@@ -212,7 +219,7 @@ export function MaterialGovernancePanel() {
       <div className="master-table-wrap">
         <table className="master-table governance-table material-governance-table">
           <thead><tr><th>编号 / 名称</th><th>受控关系</th><th>状态</th><th>规格、方法与追溯</th><th>操作</th></tr></thead>
-          <tbody>{resources[kind].map((row) => <tr key={row.id}><td><strong>{primary(row)}</strong><small>{row.name ?? row.description ?? row.remark ?? "—"}</small></td><td>{relation(kind, row, maps)}</td><td><span className={`status-badge ${row.reliability_status === "FAILED" ? "status-danger" : ""}`}>{row.reliability_status ?? row.status ?? "受控"}</span></td><td>{detail(kind, row)}</td><td><div className="row-actions"><button className="icon-button" onClick={() => open(row)} aria-label={`编辑${kindName(kind)}`}><Pencil /></button><button className="icon-button icon-button-danger" onClick={() => void remove(row)} aria-label={`删除${kindName(kind)}`}><Trash2 /></button></div></td></tr>)}</tbody>
+          <tbody>{resources[kind].map((row) => <tr key={row.id}><td><strong>{primary(row)}</strong><small>{row.name ?? row.description ?? row.remark ?? "—"}</small></td><td>{relation(kind, row, maps)}</td><td><span className={`status-badge ${row.reliability_status === "FAILED" ? "status-danger" : ""}`}>{row.reliability_status ? reliabilityLabel(row.reliability_status) : row.status ? statusLabel(row.status) : "受控"}</span></td><td>{detail(kind, row)}</td><td><div className="row-actions"><button className="icon-button" onClick={() => open(row)} aria-label={`编辑${kindName(kind)}`}><Pencil /></button><button className="icon-button icon-button-danger" onClick={() => void remove(row)} aria-label={`删除${kindName(kind)}`}><Trash2 /></button></div></td></tr>)}</tbody>
         </table>
         {!resources[kind].length ? <div className="large-empty"><FlaskConical />暂无{kindName(kind)}，自由 COA 字段不会进入批准 AI 特征。</div> : null}
       </div>
@@ -230,10 +237,13 @@ function primary(row: Resource): string {
 }
 
 function relation(kind: Kind, row: Resource, maps: { definitions: Map<string, Resource>; methods: Map<string, Resource>; materials: Map<string, MaterialBatch> }): string {
-  if (kind === "definitions") return (row.target_families ?? []).join(" / ");
+  if (kind === "definitions") {
+    const families = (row.target_families ?? []).map((item) => qualityTypeLabel(item));
+    return families.length ? families.join(" / ") : "—";
+  }
   if (kind === "methods") return maps.definitions.get(row.characteristic_definition_id ?? "")?.name ?? "未知特性";
   if (kind === "specifications") return `${row.material_code} · ${maps.definitions.get(row.characteristic_definition_id ?? "")?.name ?? "未知特性"} · ${maps.methods.get(row.method_id ?? "")?.code ?? "未知方法"}`;
-  if (kind === "applicabilities") return `${row.material_type} · ${row.process_stage} · ${row.target_family}`;
+  if (kind === "applicabilities") return `${materialTypeLabel(row.material_type)} · ${stageLabel(row.process_stage)} · ${qualityTypeLabel(row.target_family)}`;
   const batch = maps.materials.get(row.material_batch_id ?? "");
   return `${batch?.batch_no ?? "未知批次"} · ${maps.definitions.get(row.characteristic_definition_id ?? "")?.name ?? "未知特性"}`;
 }

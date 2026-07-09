@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SectionHeader } from "@/components/section-header";
 import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 import { useAuth } from "@/lib/auth-context";
+import { statusLabel } from "@/lib/display-labels";
 
 type EndpointHealth = {
   id: string; code: string; name: string; system_type: string; is_active: boolean;
@@ -70,7 +71,7 @@ export default function IntegrationMonitorPage() {
         <WorkspaceEmptyState
           icon={PlugZap}
           title="请先登录后查看集成监控"
-          description="集成监控会展示端点健康度、失败事件和待处理死信，需要登录后再继续。"
+          description="集成监控会展示端点健康度、失败事件和需人工处理的记录，需要登录后再继续。"
           compact
         />
       </div>
@@ -85,13 +86,13 @@ export default function IntegrationMonitorPage() {
         <section className="module-stat-strip">
           <article><PlugZap /><span>活跃端点</span><strong>{health.active_endpoints}/{health.total_endpoints}</strong><small>集成连接</small></article>
           <article><CheckCircle2 /><span>处理成功率</span><strong>{health.success_rate}%</strong><small>{health.total_events} 个事件</small></article>
-          <article><CircleAlert /><span>死信</span><strong>{health.dead_letter_count}</strong><small>需人工重放</small></article>
+          <article><CircleAlert /><span>需人工处理</span><strong>{health.dead_letter_count}</strong><small>需人工重放</small></article>
           <article><Activity /><span>最近失败</span><strong>{health.recent_failures.length}</strong><small>条待处理</small></article>
         </section>
         <div className="integration-monitor-grid">
           <section className="panel">
             <SectionHeader eyebrow="对接端点" title="端点状态" className="panel-heading" compact />
-            <div className="master-table-wrap"><table className="master-table"><thead><tr><th>端点</th><th>类型</th><th>事件数</th><th>成功</th><th>失败</th><th>待处理</th><th>最近成功</th><th>状态</th></tr></thead><tbody>{health.endpoints.map((ep) => <tr key={ep.id}><td><strong>{ep.code}</strong><small>{ep.name}</small></td><td>{SYSTEM_ICONS[ep.system_type] ?? "🔌"} {ep.system_type}</td><td>{ep.event_count}</td><td className="cell-good">{ep.success_count}</td><td className={ep.failed_count > 0 ? "cell-warn" : ""}>{ep.failed_count}</td><td className={ep.pending_count > 0 ? "cell-warn" : ""}>{ep.pending_count}</td><td><small>{timeSince(ep.last_success_at)}</small></td><td><span className={`record-status ${ep.is_active ? "status-on" : "status-off"}`}>{ep.is_active ? "在线" : "离线"}</span></td></tr>)}</tbody></table>{!health.endpoints.length ? <WorkspaceEmptyState icon={PlugZap} title="暂无集成端点" description="先在集成与任务中心维护端点后，这里才会展示健康度与事件统计。" compact /> : null}</div>
+            <div className="master-table-wrap"><table className="master-table"><thead><tr><th>端点</th><th>类型</th><th>事件数</th><th>成功</th><th>失败</th><th>待处理</th><th>最近成功</th><th>状态</th></tr></thead><tbody>{health.endpoints.map((ep) => <tr key={ep.id}><td><strong>{ep.code}</strong><small>{ep.name}</small></td><td>{SYSTEM_ICONS[ep.system_type] ?? "🔌"} {statusLabel(ep.system_type)}</td><td>{ep.event_count}</td><td className="cell-good">{ep.success_count}</td><td className={ep.failed_count > 0 ? "cell-warn" : ""}>{ep.failed_count}</td><td className={ep.pending_count > 0 ? "cell-warn" : ""}>{ep.pending_count}</td><td><small>{timeSince(ep.last_success_at)}</small></td><td><span className={`record-status ${ep.is_active ? "status-on" : "status-off"}`}>{ep.is_active ? "在线" : "离线"}</span></td></tr>)}</tbody></table>{!health.endpoints.length ? <WorkspaceEmptyState icon={PlugZap} title="暂无集成端点" description="先在集成与任务中心维护端点后，这里才会展示健康度与事件统计。" compact /> : null}</div>
           </section>
           <section className="panel">
             <SectionHeader
@@ -103,7 +104,7 @@ export default function IntegrationMonitorPage() {
             />
             {health.recent_failures.length > 0 ? (
               <div className="failure-list">
-                {health.recent_failures.map((f, i) => <div className="failure-card" key={i}><CircleAlert className="alert-icon" /><div className="failure-body"><div className="failure-header"><strong className="mono">{f.endpoint_code}</strong><span>{f.event_type}</span><small>{timeSince(f.created_at)}</small></div><p className="failure-error">{f.last_error}</p></div></div>)}
+                {health.recent_failures.map((f, i) => <div className="failure-card" key={i}><CircleAlert className="alert-icon" /><div className="failure-body"><div className="failure-header"><strong className="mono">{f.endpoint_code}</strong><span>{statusLabel(f.event_type)}</span><small>{timeSince(f.created_at)}</small></div><p className="failure-error">{f.last_error}</p></div></div>)}
               </div>
             ) : (
               <WorkspaceEmptyState icon={CheckCircle2} title="最近未发现失败事件" description="最近的集成事件处理状态稳定，当前没有需要人工复盘的失败记录。" compact />

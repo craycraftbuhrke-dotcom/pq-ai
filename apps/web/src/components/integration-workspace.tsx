@@ -400,7 +400,7 @@ export function IntegrationWorkspace() {
         <div>
           <span className="page-kicker">系统对接</span>
           <h1>集成与任务中心</h1>
-          <p>管理外部系统端点、幂等事件、业务映射、失败重试、死信与人工重放。</p>
+          <p>系统对接任务：接收外部数据、自动映射、失败重试与人工处理</p>
         </div>
         <div className="page-actions">
           <BulkDataActions
@@ -421,9 +421,9 @@ export function IntegrationWorkspace() {
 
       <section className="module-stat-strip">
         <article><span>集成端点</span><strong>{summary?.endpoints ?? 0}</strong><small>{summary?.active_endpoints ?? 0} 个已启用</small></article>
-        <article><span>累计事件</span><strong>{summary?.events ?? 0}</strong><small>幂等接收与业务映射</small></article>
+        <article><span>累计事件</span><strong>{summary?.events ?? 0}</strong><small>自动接收并映射业务数据</small></article>
         <article><span>处理成功</span><strong>{summary?.events_by_status.SUCCEEDED ?? 0}</strong><small>已落入业务数据表</small></article>
-        <article><span>失败 / 死信</span><strong>{summary?.failed_events ?? 0}</strong><small>支持人工重放</small></article>
+        <article><span>失败 / 需人工处理</span><strong>{summary?.failed_events ?? 0}</strong><small>支持人工重放</small></article>
       </section>
 
       <section className="panel integration-workspace">
@@ -440,7 +440,7 @@ export function IntegrationWorkspace() {
             <div className="ai-form-stack">
               <label className="form-field"><span>集成端点 <b>*</b></span><select required value={eventEndpointId} onChange={(event) => setEventEndpointId(event.target.value)}>{endpoints.filter((item) => item.is_active).map((endpoint) => <option value={endpoint.id} key={endpoint.id}>{endpoint.code} · {endpoint.name}</option>)}</select></label>
               <label className="form-field"><span>事件类型 <b>*</b></span><select value={eventType} onChange={(event) => changeEventType(event.target.value)}>{eventTypes.map((value) => <option value={value} key={value}>{sharedStatusLabel(value)}</option>)}</select></label>
-              <label className="form-field"><span>来源事件 ID / 幂等键 <b>*</b></span><input required value={sourceEventId} onChange={(event) => setSourceEventId(event.target.value)} placeholder="例如 MES-20260611-0001" /></label>
+              <label className="form-field"><span>来源事件编号（防重复） <b>*</b></span><input required value={sourceEventId} onChange={(event) => setSourceEventId(event.target.value)} placeholder="例如 MES-20260611-0001" /></label>
               <label className="form-field form-field-wide"><span>事件数据明细 <b>*</b></span><IntegrationEventPayloadEditor eventType={eventType} value={eventPayload} onChange={setEventPayload} /></label>
               <label className="checkbox-field"><input type="checkbox" checked={processImmediately} onChange={(event) => setProcessImmediately(event.target.checked)} />接收后立即处理</label>
               <button className="button button-primary" disabled={!eventEndpointId || !sourceEventId || submitting === "event"}>{submitting === "event" ? <LoaderCircle className="spin" /> : <Play />} 接收并处理</button>

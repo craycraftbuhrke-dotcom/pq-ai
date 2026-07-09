@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { useAuth } from "@/lib/auth-context";
+import { roleLabel } from "@/lib/display-labels";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -162,7 +163,11 @@ export default function ProfilePage() {
               <span>角色</span>
               <input
                 disabled
-                value={actor.roles.length ? actor.roles.join(" / ") : "无角色"}
+                value={
+                  actor.roles.length
+                    ? actor.roles.map((role) => roleLabel(role)).join(" / ")
+                    : "无角色"
+                }
                 className="readonly-input"
               />
             </label>
