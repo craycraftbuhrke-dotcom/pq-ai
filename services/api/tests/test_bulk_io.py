@@ -402,6 +402,27 @@ def test_quality_measurement_bulk_import_transforms_flat_metric_columns() -> Non
     db.close()
 
 
+def test_quality_measurement_template_prefills_production_context() -> None:
+    db = build_session()
+    context = build_quality_bulk_context(db)
+
+    response = render_template(
+        "quality.measurements",
+        "csv",
+        db=db,
+        quality_type="ORANGE_PEEL",
+        factory_code=context["factory_code"],
+        color_code=context["color_code"],
+        vehicle_model_code=context["vehicle_code"],
+        shift="A",
+    )
+    content = response.body.decode("utf-8-sig")
+    assert context["factory_code"] in content
+    assert context["color_code"] in content
+    assert ",A," in content or content.endswith(",A")
+    db.close()
+
+
 def test_quality_measurement_bulk_import_creates_production_run_with_body_no() -> None:
     db = build_session()
     context = build_quality_bulk_context(db)
@@ -423,5 +444,29 @@ def test_quality_measurement_bulk_import_creates_production_run_with_body_no() -
     measurement = db.query(QualityMeasurement).filter_by(data_no="QM-BULK-2").one()
     assert run.body_no == "BODY-9001"
     assert run.shift == "B"
+    assert measurement.production_run_id == run.id
+    db.close()
+
+
+def test_quality_measurement_bulk_import_auto_generates_run_no_from_body() -> None:
+    db = build_session()
+    context = build_quality_bulk_context(db)
+    csv_content = (
+        "data_no,production_run_no,body_no,factory_code,measurement_group_code,measurement_point_code,vehicle_model_code,quality_type,color_code,measured_at,metric__doi\n"
+        f"QM-BULK-3,,BODY-AUTO-1,{context['factory_code']},{context['group_code']},{context['point_code']},{context['vehicle_code']},ORANGE_PEEL,{context['color_code']},2026-07-08T08:00:00+00:00,90.1\n"
+    )
+
+    result = import_resource(
+        "quality.measurements",
+        csv_content.encode("utf-8"),
+        filename="quality-measurements-auto-run.csv",
+        mode="upsert",
+        db=db,
+    )
+
+    assert result["created"] == 1
+    run = db.query(ProductionRun).filter_by(run_no="RUN-BODY-AUTO-1").one()
+    measurement = db.query(QualityMeasurement).filter_by(data_no="QM-BULK-3").one()
+    assert run.body_no == "BODY-AUTO-1"
     assert measurement.production_run_id == run.id
     db.close()

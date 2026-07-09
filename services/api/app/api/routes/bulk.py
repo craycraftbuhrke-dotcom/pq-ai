@@ -25,9 +25,22 @@ def bulk_template(
     resource_key: str,
     file_format: Literal["csv", "xlsx"] = Query(default="xlsx", alias="format"),
     quality_type: str | None = Query(default=None),
+    factory_code: str | None = Query(default=None),
+    color_code: str | None = Query(default=None),
+    vehicle_model_code: str | None = Query(default=None),
+    shift: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    return render_template(resource_key, file_format, db=db, quality_type=quality_type)
+    return render_template(
+        resource_key,
+        file_format,
+        db=db,
+        quality_type=quality_type,
+        factory_code=factory_code,
+        color_code=color_code,
+        vehicle_model_code=vehicle_model_code,
+        shift=shift,
+    )
 
 
 @router.get("/{resource_key}/export")

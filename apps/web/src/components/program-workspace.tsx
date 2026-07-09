@@ -14,12 +14,14 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { BrushConfigForm } from "@/components/brush-config-form";
 import { BulkDataActions } from "@/components/bulk-data-actions";
 import { DurrTrajectoryPanel } from "@/components/durr-trajectory-panel";
 import { ModalShell } from "@/components/modal-shell";
 import { VersionDiffPanel } from "@/components/version-diff-panel";
 import { useAuth } from "@/lib/auth-context";
 import { stageLabel } from "@/lib/display-labels";
+import { definitionsForProcessStage } from "@/lib/parameter-stage-scope";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type Resource = { id: string; code: string; name: string };
@@ -97,10 +99,11 @@ type Contribution = {
   version: string;
   is_approved: boolean;
 };
-type ModalKind = "program" | "version" | "brush" | "parameter" | "contribution";
-type ModalState = { kind: ModalKind; record?: Program | Version | Brush | BrushParameter | Contribution };
+type ModalKind = "program" | "version";
+type ModalState = { kind: ModalKind; record?: Program | Version };
 type FormValue = string | boolean | string[];
 type FormState = Record<string, FormValue>;
+type BrushConfigState = { mode: "create" | "edit"; brush?: Brush } | null;
 
 const stageOptions = [
   ["MIDCOAT_EXT", "中涂外喷"],
@@ -170,6 +173,7 @@ export function ProgramWorkspace() {
   const [notice, setNotice] = useState("");
   const [modal, setModal] = useState<ModalState | null>(null);
   const [form, setForm] = useState<FormState>({});
+  const [brushConfig, setBrushConfig] = useState<BrushConfigState>(null);
 
   const closeModal = useCallback(() => {
     if (submitting) return;
@@ -178,6 +182,10 @@ export function ProgramWorkspace() {
   const selectedProgram = programs.find((item) => item.id === selectedProgramId);
   const selectedVersion = versions.find((item) => item.id === selectedVersionId);
   const selectedBrush = brushes.find((item) => item.id === selectedBrushId);
+  const stageDefinitions = useMemo(
+    () => definitionsForProcessStage(definitions, selectedProgram?.process_stage),
+    [definitions, selectedProgram?.process_stage],
+  );
   const filteredPrograms = useMemo(
     () =>
       programs.filter(
@@ -207,13 +215,6 @@ export function ProgramWorkspace() {
   const contributionImportQuery = selectedBrushId
     ? { default_values: JSON.stringify({ brush_id: selectedBrushId }) }
     : undefined;
-  const selectableContributionPoints = points.filter((point) => {
-    if (point.point_type && point.point_type !== "QUALITY") return false;
-    if (selectedBrush?.part_id && point.part_id !== selectedBrush.part_id) return false;
-    if (selectedVersion?.vehicle_model_ids?.length && !selectedVersion.vehicle_model_ids.includes(point.vehicle_model_id)) return false;
-    return true;
-  });
-
   const loadBrush = useCallback(async (brushId: string) => {
     if (!brushId) {
       setParameters([]);
@@ -322,24 +323,6 @@ export function ProgramWorkspace() {
       setError("请先选择喷涂程序，再新建程序版本");
       return;
     }
-    if (kind === "brush" && !record && !selectedVersion) {
-      setError("请先选择程序版本，再新增刷子");
-      return;
-    }
-    if (kind === "parameter" && !record && !selectedBrush) {
-      setError("请先选择刷子，再维护刷子参数");
-      return;
-    }
-    if (kind === "contribution" && !record) {
-      if (!selectedBrush) {
-        setError("请先选择刷子，再配置点位贡献");
-        return;
-      }
-      if (!selectableContributionPoints.length) {
-        setError("当前刷子下暂无可配置的质量测量点；请先补齐版本适用车型、刷子负责零件或测量点主数据");
-        return;
-      }
-    }
     setModal({ kind, record });
     if (kind === "program") {
       const item = record as Program | undefined;
@@ -353,46 +336,31 @@ export function ProgramWorkspace() {
         robot_model: item?.robot_model ?? "",
         remark: item?.remark ?? "",
       });
-    } else if (kind === "version") {
-      const item = record as Version | undefined;
-      setForm({
-        version: item?.version ?? "",
-        status: item?.status ?? "DRAFT",
-        source_type: item?.source_type ?? "MANUAL",
-        is_master_sample: item?.is_master_sample ?? false,
-        approved_by: item?.approved_by ?? "",
-        vehicle_model_ids: item?.vehicle_model_ids ?? [],
-        color_ids: item?.color_ids ?? [],
-      });
-    } else if (kind === "brush") {
-      const item = record as Brush | undefined;
-      setForm({
-        brush_no: item?.brush_no ?? "",
-        brush_table_no: item?.brush_table_no ?? "",
-        spray_position: item?.spray_position ?? "",
-        part_id: item?.part_id ?? "",
-        remark: item?.remark ?? "",
-      });
-    } else if (kind === "parameter") {
-      const item = record as BrushParameter | undefined;
-      setForm({
-        parameter_definition_id: item?.parameter_definition_id ?? definitions[0]?.id ?? "",
-        configured_value: item ? String(item.configured_value) : "",
-        soft_min: item?.soft_min === null || item?.soft_min === undefined ? "" : String(item.soft_min),
-        soft_max: item?.soft_max === null || item?.soft_max === undefined ? "" : String(item.soft_max),
-        is_recommendable: item?.is_recommendable ?? true,
-      });
-    } else {
-      const item = record as Contribution | undefined;
-      setForm({
-        measurement_point_id: item?.measurement_point_id ?? selectableContributionPoints[0]?.id ?? "",
-        overlap_ratio: item ? String(item.overlap_ratio) : "0.5",
-        contribution_weight: item ? String(item.contribution_weight) : "0.5",
-        source: item?.source ?? "EXPERT",
-        version: item?.version ?? "1.0",
-        is_approved: item?.is_approved ?? false,
-      });
+      return;
     }
+    const item = record as Version | undefined;
+    setForm({
+      version: item?.version ?? "",
+      status: item?.status ?? "DRAFT",
+      source_type: item?.source_type ?? "MANUAL",
+      is_master_sample: item?.is_master_sample ?? false,
+      approved_by: item?.approved_by ?? "",
+      vehicle_model_ids: item?.vehicle_model_ids ?? [],
+      color_ids: item?.color_ids ?? [],
+    });
+  }
+
+  function openBrushConfig(mode: "create" | "edit", brush?: Brush) {
+    setError("");
+    if (!selectedProgram || !selectedVersion) {
+      setError("请先选择喷涂程序和受控版本，再配置刷子");
+      return;
+    }
+    if (mode === "edit" && !brush) {
+      setError("请先选择要编辑的刷子");
+      return;
+    }
+    setBrushConfig({ mode, brush });
   }
 
   async function submitModal(event: FormEvent<HTMLFormElement>) {
@@ -411,7 +379,7 @@ export function ProgramWorkspace() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(form),
         });
-      } else if (modal.kind === "version") {
+      } else {
         const path = editing
           ? `/api/process/program-versions/${(modal.record as Version).id}`
           : `/api/process/spray-programs/${selectedProgramId}/versions`;
@@ -419,54 +387,6 @@ export function ProgramWorkspace() {
           method: editing ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(form),
-        });
-      } else if (modal.kind === "brush") {
-        const body = { ...form, part_id: form.part_id || null };
-        const path = editing
-          ? `/api/process/brushes/${(modal.record as Brush).id}`
-          : `/api/process/program-versions/${selectedVersionId}/brushes`;
-        await request(path, {
-          method: editing ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-      } else if (modal.kind === "parameter") {
-        const definition = definitions.find((item) => item.id === form.parameter_definition_id);
-        if (!definition) throw new Error("请选择有效参数定义");
-        const body = {
-          parameter_definition_id: definition.id,
-          parameter_code: definition.code,
-          parameter_name: definition.name,
-          configured_value: Number(form.configured_value),
-          unit: definition.unit,
-          soft_min: form.soft_min === "" ? null : Number(form.soft_min),
-          soft_max: form.soft_max === "" ? null : Number(form.soft_max),
-          hard_min: definition.hard_min ?? null,
-          hard_max: definition.hard_max ?? null,
-          is_recommendable: form.is_recommendable,
-        };
-        const path = editing
-          ? `/api/process/brush-parameters/${(modal.record as BrushParameter).id}`
-          : `/api/process/brushes/${selectedBrushId}/parameters`;
-        await request(path, {
-          method: editing ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-      } else {
-        const pointId = String(form.measurement_point_id);
-        if (!pointId) throw new Error("请先选择可用测量点，再配置点位贡献");
-        const body = {
-          overlap_ratio: Number(form.overlap_ratio),
-          contribution_weight: Number(form.contribution_weight),
-          source: form.source,
-          version: form.version,
-          is_approved: form.is_approved,
-        };
-        await request(`/api/process/brushes/${selectedBrushId}/contributions/${pointId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
         });
       }
       setNotice(`${modalTitle(modal.kind)}${editing ? "已更新" : "已创建"}`);
@@ -477,6 +397,13 @@ export function ProgramWorkspace() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function handleBrushConfigSaved(brushId: string) {
+    setBrushConfig(null);
+    setNotice("刷子、参数与点位贡献已保存");
+    await reload();
+    await loadBrush(brushId);
   }
 
   function bulkResult(message: string, type: "success" | "error") {
@@ -546,8 +473,8 @@ export function ProgramWorkspace() {
       </section>
       {error ? <div className="message-banner message-error">{error}</div> : null}
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
-      <div className="freshness">程序、版本、刷子、参数和点位贡献采用版本化与替换治理；当前页面不提供物理删除。</div>
-      <div className="freshness">当前流程建议按“先程序，再版本，再刷子，最后参数与点位贡献”顺序维护；点位贡献会按版本适用车型和刷子负责零件过滤候选点位。</div>
+      <div className="freshness">程序、版本、刷子采用版本化与替换治理；当前页面不提供物理删除。</div>
+      <div className="freshness">建议顺序：先程序 → 再版本 → 再一次填完刷子身份、本工序参数与测量点贡献。参数列表会按当前程序工序自动过滤（如中涂只显示中涂参数）。</div>
 
       <div className="master-tabs program-workspace-tabs">
         <button className={workspaceTab === "programs" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("programs")}>程序、刷子与参数</button>
@@ -628,7 +555,7 @@ export function ProgramWorkspace() {
 
         <article className="panel program-detail-column">
           <div className="program-column-heading">
-            <div><span className="eyebrow">第 3 步</span><h2>刷子与点位贡献</h2><small>{selectedVersion ? `当前归属 ${selectedVersion.version}` : "先选择受控版本后，才能导入或新建刷子"}</small></div>
+            <div><span className="eyebrow">第 3 步</span><h2>刷子与点位贡献</h2><small>{selectedVersion ? `当前归属 ${selectedVersion.version}${selectedProgram ? ` · ${stageLabel(selectedProgram.process_stage)}` : ""}` : "先选择受控版本后，才能导入或新建刷子"}</small></div>
             <div className="row-actions program-heading-actions">
               <BulkDataActions
                 resourceKey="process.brushes"
@@ -639,10 +566,10 @@ export function ProgramWorkspace() {
                 importQuery={brushImportQuery}
                 className="program-version-bulk-actions"
               />
-              <button className="button button-secondary" onClick={() => openModal("brush")} disabled={!selectedVersion}><Plus />新增刷子</button>
+              <button className="button button-primary" onClick={() => openBrushConfig("create")} disabled={!selectedVersion}><Plus />配置刷子（参数+贡献）</button>
             </div>
           </div>
-          {!selectedVersion ? <div className="program-empty">先选择程序版本，才能新增刷子、参数和点位贡献。</div> : null}
+          {!selectedVersion ? <div className="program-empty">先选择程序版本，再一次填完刷子身份、本工序参数与测量点贡献。</div> : null}
           <div className="brush-selector">
             {brushes.map((brush) => (
               <button className={brush.id === selectedBrushId ? "brush-chip selected" : "brush-chip"} key={brush.id} onClick={() => void loadBrush(brush.id)}>
@@ -659,61 +586,100 @@ export function ProgramWorkspace() {
                 <div><span>喷涂位置</span><strong>{selectedBrush.spray_position ?? "待维护"}</strong></div>
                 <div><span>负责零件</span><strong>{relationName(parts, selectedBrush.part_id)}</strong></div>
                 <div className="row-actions">
-                  <button className="icon-button" onClick={() => openModal("brush", selectedBrush)} aria-label="编辑刷子"><Pencil /></button>
+                  <button className="button button-secondary" onClick={() => openBrushConfig("edit", selectedBrush)}><Pencil />编辑完整配置</button>
                 </div>
               </div>
               <div className="program-subsection">
-                <div className="program-subheading"><div><span className="eyebrow">参数矩阵</span><h3>配置参数</h3><small>{selectedBrush ? `当前归属刷子 ${selectedBrush.brush_no}` : "先选择刷子后，才能导入或新增参数"}</small></div><div className="row-actions program-heading-actions"><BulkDataActions resourceKey="process.brush-parameters" resourceLabel="刷子参数" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={brushParameterImportQuery} className="program-version-bulk-actions" /><button className="button button-secondary" onClick={() => openModal("parameter")}><Plus />新增参数</button></div></div>
+                <div className="program-subheading">
+                  <div>
+                    <span className="eyebrow">参数矩阵</span>
+                    <h3>配置参数</h3>
+                    <small>
+                      {selectedProgram
+                        ? `仅展示 ${stageLabel(selectedProgram.process_stage)} 相关参数（目录 ${stageDefinitions.length} 项）· 刷子 ${selectedBrush.brush_no}`
+                        : `当前归属刷子 ${selectedBrush.brush_no}`}
+                    </small>
+                  </div>
+                  <div className="row-actions program-heading-actions">
+                    <BulkDataActions resourceKey="process.brush-parameters" resourceLabel="刷子参数" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={brushParameterImportQuery} className="program-version-bulk-actions" />
+                    <button className="button button-secondary" onClick={() => openBrushConfig("edit", selectedBrush)}><Pencil />在表单中改</button>
+                  </div>
+                </div>
                 <div className="compact-table">
-                  <div className="compact-row compact-head"><span>参数</span><span>配置值</span><span>软边界</span><span>可推荐</span><span /></div>
+                  <div className="compact-row compact-head"><span>参数</span><span>配置值</span><span>软边界</span><span>可推荐</span></div>
                   {parameters.map((parameter) => (
                     <div className="compact-row" key={parameter.id}>
                       <span><strong>{parameter.parameter_name}</strong><small>{parameter.parameter_code}</small></span>
                       <span className="mono">{parameter.configured_value} {parameter.unit}</span>
                       <span className="mono">{parameter.soft_min ?? "—"} ~ {parameter.soft_max ?? "—"}</span>
                       <span>{parameter.is_recommendable ? "是" : "否"}</span>
-                      <span className="row-actions"><button className="icon-button" onClick={() => openModal("parameter", parameter)} aria-label={`编辑参数 ${parameter.parameter_code}`}><Pencil /></button></span>
                     </div>
                   ))}
-                  {!parameters.length ? <div className="program-empty">当前刷子暂无配置参数，请先补齐参数定义与配置值。</div> : null}
+                  {!parameters.length ? <div className="program-empty">当前刷子暂无配置参数，请点「编辑完整配置」一次填完本工序参数。</div> : null}
                 </div>
               </div>
               <div className="program-subsection">
-                <div className="program-subheading"><div><span className="eyebrow">点位贡献</span><h3>测量点贡献权重</h3><small>{selectedBrush ? `当前归属刷子 ${selectedBrush.brush_no}` : "先选择刷子后，才能导入或配置贡献"}</small></div><div className="row-actions program-heading-actions"><BulkDataActions resourceKey="process.brush-contributions" resourceLabel="点位贡献" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={contributionImportQuery} className="program-version-bulk-actions" /><button className="button button-secondary" onClick={() => openModal("contribution")}><Plus />配置贡献</button></div></div>
-                {!selectableContributionPoints.length ? <div className="program-empty">当前刷子下暂无可用质量测量点。请检查版本适用车型、刷子负责零件和测量点主数据是否已补齐。</div> : null}
+                <div className="program-subheading">
+                  <div>
+                    <span className="eyebrow">点位贡献</span>
+                    <h3>测量点贡献权重</h3>
+                    <small>当前归属刷子 {selectedBrush.brush_no} · 与参数同表单维护</small>
+                  </div>
+                  <div className="row-actions program-heading-actions">
+                    <BulkDataActions resourceKey="process.brush-contributions" resourceLabel="点位贡献" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={contributionImportQuery} className="program-version-bulk-actions" />
+                    <button className="button button-secondary" onClick={() => openBrushConfig("edit", selectedBrush)}><Pencil />在表单中改</button>
+                  </div>
+                </div>
                 <div className="compact-table">
-                  <div className="compact-row contribution-row compact-head"><span>测量点</span><span>重叠率</span><span>贡献权重</span><span>审批</span><span /></div>
+                  <div className="compact-row contribution-row compact-head"><span>测量点</span><span>重叠率</span><span>贡献权重</span><span>审批</span></div>
                   {contributions.map((item) => (
                     <div className="compact-row contribution-row" key={item.id}>
                       <span><strong>{relationName(points, item.measurement_point_id)}</strong><small>{item.source} · {item.version}</small></span>
                       <span className="mono">{(item.overlap_ratio * 100).toFixed(1)}%</span>
                       <span className="mono">{(item.contribution_weight * 100).toFixed(1)}%</span>
                       <span>{item.is_approved ? "已审批" : "待审批"}</span>
-                      <span className="row-actions"><button className="icon-button" onClick={() => openModal("contribution", item)} aria-label={`编辑贡献 ${item.measurement_point_id}`}><Pencil /></button></span>
                     </div>
                   ))}
-                  {!contributions.length ? <div className="program-empty">当前刷子暂无点位贡献，请从可用测量点中显式选择后再配置。</div> : null}
+                  {!contributions.length ? <div className="program-empty">当前刷子暂无点位贡献，请在统一表单中勾选测量点并填写权重。</div> : null}
                 </div>
               </div>
             </>
-          ) : <div className="program-empty large-empty"><Settings2 />请选择或新增刷子以维护参数和点位贡献。</div>}
+          ) : <div className="program-empty large-empty"><Settings2 />请选择刷子查看摘要，或点「配置刷子（参数+贡献）」一次填完。</div>}
         </article>
       </section> : workspaceTab === "durr" ? <section className="panel"><DurrTrajectoryPanel /></section> : <section className="panel"><VersionDiffPanel versions={versions} programId={selectedProgramId} /></section>}
 
       {modal ? (
-        <ModalShell eyebrow={modal.record ? "编辑" : "新建"} title={`${modal.record ? "编辑" : "新建"}${modalTitle(modal.kind)}`} description="统一维护程序、版本、刷子、参数和点位贡献弹窗的结构与关闭交互。" onClose={closeModal} busy={submitting}>
+        <ModalShell eyebrow={modal.record ? "编辑" : "新建"} title={`${modal.record ? "编辑" : "新建"}${modalTitle(modal.kind)}`} description="维护喷涂程序或受控版本。刷子、参数与点位贡献请使用统一配置表单。" onClose={closeModal} busy={submitting}>
           <form onSubmit={(event) => void submitModal(event)}>
-            <div className="form-grid">{renderFields(modal.kind, form, setForm, { factories, vehicleModels, colors, parts, points: selectableContributionPoints, definitions, selectedProgram, selectedVersion, selectedBrush })}</div>
+            <div className="form-grid">{renderFields(modal.kind, form, setForm, { factories, vehicleModels, colors, selectedProgram })}</div>
             <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存"}</button></div>
           </form>
         </ModalShell>
+      ) : null}
+
+      {brushConfig && selectedProgram && selectedVersion ? (
+        <BrushConfigForm
+          open
+          editingBrush={brushConfig.mode === "edit" ? brushConfig.brush : null}
+          program={selectedProgram}
+          version={selectedVersion}
+          parts={parts}
+          points={points}
+          definitions={definitions}
+          existingParameters={brushConfig.mode === "edit" ? parameters : []}
+          existingContributions={brushConfig.mode === "edit" ? contributions : []}
+          busy={loading || submitting}
+          onClose={() => setBrushConfig(null)}
+          onSaved={(brushId) => void handleBrushConfigSaved(brushId)}
+          onError={setError}
+        />
       ) : null}
     </div>
   );
 }
 
 function modalTitle(kind: ModalKind): string {
-  return { program: "喷涂程序", version: "程序版本", brush: "刷子", parameter: "刷子参数", contribution: "点位贡献" }[kind];
+  return { program: "喷涂程序", version: "程序版本" }[kind];
 }
 
 function field(label: string, key: string, form: FormState, setForm: (value: FormState) => void, options?: { required?: boolean; type?: string }) {
@@ -737,7 +703,7 @@ function renderFields(
   kind: ModalKind,
   form: FormState,
   setForm: (value: FormState) => void,
-  refs: { factories: Factory[]; vehicleModels: VehicleModel[]; colors: Color[]; parts: Part[]; points: Point[]; definitions: ParameterDefinition[]; selectedProgram?: Program; selectedVersion?: Version; selectedBrush?: Brush },
+  refs: { factories: Factory[]; vehicleModels: VehicleModel[]; colors: Color[]; selectedProgram?: Program },
 ) {
   const relationOptions = (items: Resource[]) => items.map((item) => [item.id, `${item.code} / ${item.name}`] as [string, string]);
   if (kind === "program") return [
@@ -751,7 +717,7 @@ function renderFields(
     field("机器人型号", "robot_model", form, setForm),
     field("备注", "remark", form, setForm),
   ];
-  if (kind === "version") return [
+  return [
     <label className="form-field form-field-wide" key="version-hint"><span>录入提示</span><div className="master-empty">适用车型和适用颜色可暂时留空；若当前版本已对外使用，收缩适用范围需要新建版本，不建议直接在原版本删减。</div></label>,
     field("版本号", "version", form, setForm, { required: true }),
     selectField("版本状态", "status", form, setForm, Object.entries(statusLabels)),
@@ -760,30 +726,5 @@ function renderFields(
     selectField("适用车型（可多选）", "vehicle_model_ids", form, setForm, relationOptions(refs.vehicleModels), true, false),
     selectField("适用颜色（可多选）", "color_ids", form, setForm, relationOptions(refs.colors), true, false),
     checkField("是否封样版本", "is_master_sample", form, setForm),
-  ];
-  if (kind === "brush") return [
-    <label className="form-field form-field-wide" key="brush-hint"><span>录入提示</span><div className="master-empty">刷子属于当前已选程序版本；建议同步维护负责零件，后续点位贡献会按该零件过滤候选测量点。</div></label>,
-    field("刷子号", "brush_no", form, setForm, { required: true }),
-    field("刷子表号", "brush_table_no", form, setForm, { required: true }),
-    field("喷涂位置", "spray_position", form, setForm),
-    selectField("负责零件", "part_id", form, setForm, [["", "未关联"], ...relationOptions(refs.parts)], false, false),
-    field("备注", "remark", form, setForm),
-  ];
-  if (kind === "parameter") return [
-    <label className="form-field form-field-wide" key="parameter-hint"><span>录入提示</span><div className="master-empty">参数将绑定到当前已选刷子；请优先选用受治理参数定义，避免同一刷子重复维护相同参数代码。</div></label>,
-    selectField("参数定义", "parameter_definition_id", form, setForm, refs.definitions.map((item) => [item.id, `${item.name} · ${item.code} (${item.unit})`])),
-    field("配置值", "configured_value", form, setForm, { required: true, type: "number" }),
-    field("软下限", "soft_min", form, setForm, { type: "number" }),
-    field("软上限", "soft_max", form, setForm, { type: "number" }),
-    checkField("允许 AI 推荐", "is_recommendable", form, setForm),
-  ];
-  return [
-    <label className="form-field form-field-wide" key="contribution-hint"><span>录入提示</span><div className="master-empty">候选测量点会按当前版本适用车型、刷子负责零件和质量点类型自动过滤；如无可选点，请先补齐主数据或版本适用范围。</div></label>,
-    selectField("测量点", "measurement_point_id", form, setForm, relationOptions(refs.points)),
-    field("重叠率（0~1）", "overlap_ratio", form, setForm, { required: true, type: "number" }),
-    field("贡献权重（0~1）", "contribution_weight", form, setForm, { required: true, type: "number" }),
-    field("来源", "source", form, setForm, { required: true }),
-    field("权重版本", "version", form, setForm, { required: true }),
-    checkField("已审批", "is_approved", form, setForm),
   ];
 }

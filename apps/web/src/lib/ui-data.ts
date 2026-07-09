@@ -52,8 +52,8 @@ export const navSections: readonly NavSection[] = [
     key: "field",
     title: "现场作业",
     items: [
-      { href: "/quality", label: "录入与查看质量", icon: "quality" },
       { href: "/import-wizard", label: "批量导入测量", icon: "import" },
+      { href: "/quality", label: "录入与查看质量", icon: "quality" },
       { href: "/production", label: "生产车身记录", icon: "production" },
       { href: "/programs", label: "喷涂配方", icon: "program" },
     ],

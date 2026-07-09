@@ -8,8 +8,10 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Upload,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { CSSProperties, FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
@@ -316,6 +318,8 @@ export function QualityWorkspace() {
   const [vehicleModels, setVehicleModels] = useState<Resource[]>([]);
   const [colors, setColors] = useState<Resource[]>([]);
   const [parts, setParts] = useState<Resource[]>([]);
+  const [factories, setFactories] = useState<Resource[]>([]);
+  const [createRunInline, setCreateRunInline] = useState(false);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [methods, setMethods] = useState<Method[]>([]);
   const [calibrations, setCalibrations] = useState<Calibration[]>([]);
@@ -341,7 +345,7 @@ export function QualityWorkspace() {
     setLoading(true);
     setError("");
     try {
-      const [nextSummary, nextMeasurements, nextStandards, nextDefinitions, nextRuns, nextGroups, nextGroupPoints, nextPoints, nextModels, nextColors, nextParts, nextInstruments, nextMethods, nextCalibrations, nextReferences, nextProfiles] =
+      const [nextSummary, nextMeasurements, nextStandards, nextDefinitions, nextRuns, nextGroups, nextGroupPoints, nextPoints, nextModels, nextColors, nextParts, nextFactories, nextInstruments, nextMethods, nextCalibrations, nextReferences, nextProfiles] =
         await Promise.all([
           request<Summary>("/api/quality/summary"),
           request<Measurement[]>("/api/quality/measurements?limit=500"),
@@ -354,6 +358,7 @@ export function QualityWorkspace() {
           request<Resource[]>("/api/master-data/vehicle-models"),
           request<Resource[]>("/api/master-data/colors"),
           request<Resource[]>("/api/master-data/parts"),
+          request<Resource[]>("/api/master-data/factories"),
           request<Instrument[]>("/api/quality/governance/instruments"),
           request<Method[]>("/api/quality/governance/methods"),
           request<Calibration[]>("/api/quality/governance/calibrations"),
@@ -371,6 +376,7 @@ export function QualityWorkspace() {
       setVehicleModels(nextModels);
       setColors(nextColors);
       setParts(nextParts);
+      setFactories(nextFactories);
       setInstruments(nextInstruments);
       setMethods(nextMethods);
       setCalibrations(nextCalibrations);
@@ -507,7 +513,15 @@ export function QualityWorkspace() {
       raw_file_uri: record?.raw_file_uri ?? "",
       status_score: record?.status_score === null || record?.status_score === undefined ? "" : String(record.status_score),
       is_valid: record?.is_valid ?? true,
+      new_run_no: `RUN-${Date.now()}`,
+      new_body_no: "",
+      new_factory_id: factoryId || factories[0]?.id || "",
+      new_vehicle_model_id: modelId || vehicleModels[0]?.id || "",
+      new_color_id: colorId || colors[0]?.id || "",
+      new_shift: "",
+      new_started_at: localDateTime(),
     };
+    setCreateRunInline(!record && runs.length === 0);
     setModal({ kind: "measurement", record });
     setMeasurementForm(initialForm);
     const firstDefinition = definitionsFor(qualityType)[0];
@@ -555,6 +569,26 @@ export function QualityWorkspace() {
     setError("");
     try {
       if (modal.kind === "measurement") {
+        let productionRunId = String(form.production_run_id || "");
+        if (!modal.record && createRunInline) {
+          const createdRun = await request<ProductionRun>("/api/process/production-runs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              run_no: form.new_run_no,
+              body_no: form.new_body_no || null,
+              factory_id: form.new_factory_id,
+              vehicle_model_id: form.new_vehicle_model_id,
+              color_id: form.new_color_id,
+              shift: form.new_shift || null,
+              started_at: form.new_started_at,
+              completed_at: null,
+            }),
+          });
+          productionRunId = createdRun.id;
+          setRuns((prev) => [createdRun, ...prev]);
+        }
+        if (!productionRunId) throw new Error("请选择已有生产事件，或勾选「同时新建生产事件」");
         const metrics = metricRows.map((row) => {
           const definition = definitions.find(
             (item) => item.quality_type === form.quality_type && item.code === row.metric_code,
@@ -579,8 +613,15 @@ export function QualityWorkspace() {
             is_valid: true,
           }));
         const body = {
-          ...form,
+          data_no: form.data_no,
+          production_run_id: productionRunId,
           measurement_group_id: form.measurement_group_id || null,
+          measurement_point_id: form.measurement_point_id,
+          quality_type: form.quality_type,
+          data_type: form.data_type,
+          measured_at: form.measured_at,
+          measured_by: form.measured_by || null,
+          device_code: form.device_code || null,
           instrument_id: form.instrument_id || null,
           measurement_method_id: form.measurement_method_id || null,
           calibration_record_id: form.calibration_record_id || null,
@@ -588,8 +629,8 @@ export function QualityWorkspace() {
           import_profile_id: form.import_profile_id || null,
           measurement_direction: form.measurement_direction || null,
           raw_file_uri: form.raw_file_uri || null,
-          measured_at: form.measured_at,
           status_score: form.status_score === "" ? null : Number(form.status_score),
+          is_valid: form.is_valid,
           metrics,
           repeat_readings,
         };
@@ -601,6 +642,7 @@ export function QualityWorkspace() {
             body: JSON.stringify(body),
           },
         );
+        setCreateRunInline(false);
       } else {
         const body = {
           ...form,
@@ -713,21 +755,26 @@ export function QualityWorkspace() {
           <select value={tab === "analytics" ? typeFilter || "ORANGE_PEEL" : typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>{tab !== "analytics" ? <option value="">全部质量类型</option> : null}{Object.entries(qualityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
           {tab === "analytics" ? <select value={resolvedAnalyticsMetric} onChange={(event) => setAnalyticsMetric(event.target.value)}>{analyticsDefinitions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code}</option>)}</select> : null}
           {tab === "measurements" || tab === "standards" ? (
-            <BulkDataActions
-              resourceKey={tab === "measurements" ? "quality.measurements" : "quality.standards"}
-              resourceLabel={tab === "measurements" ? "质量测量" : "质量标准"}
-              disabled={loading || submitting}
-              onImported={reload}
-              onResult={bulkResult}
-              downloadQuery={tab === "measurements" && typeFilter ? { quality_type: typeFilter } : undefined}
-            />
+            tab === "measurements" ? (
+              <Link className="button button-secondary" href="/import-wizard">
+                <Upload /> 打开导入向导
+              </Link>
+            ) : (
+              <BulkDataActions
+                resourceKey="quality.standards"
+                resourceLabel="质量标准"
+                disabled={loading || submitting}
+                onImported={reload}
+                onResult={bulkResult}
+              />
+            )
           ) : (
             <button className="button button-secondary" onClick={exportCsv}><Download />导出 CSV</button>
           )}
         </div> : null}
         {tab === "measurements" ? (
-          <div className="master-empty">
-            批量模板会自动带出当前质量类型下的测量编组、编组内点位和对应质量指标列；用户可在同一份文件中同时填写车号、生产事件基础信息、测量时间和指标值。
+          <div className="quality-import-hint">
+            日常批量上数请用「批量导入测量」：同一份 CSV 可同时填写车号、工厂、车型、颜色与质量指标，生产事件不存在时会自动创建。本页「新建」适合单条补录。
           </div>
         ) : null}
         {tab === "measurements" ? (
@@ -744,7 +791,7 @@ export function QualityWorkspace() {
               <WorkspaceEmptyState
                 icon={Activity}
                 title="暂无质量测量记录"
-                description="请先选择生产车身与测量点，或点击新建录入。"
+                description="日常请打开「批量导入测量」一次上传车身上下文与质量数据；也可点新建做单条录入。"
                 compact
               />
             ) : null}
@@ -761,14 +808,14 @@ export function QualityWorkspace() {
       </section>
 
       {modal ? (
-        <ModalShell className="quality-modal" eyebrow={modal.record ? "编辑" : "新建"} title={`${modal.record ? "编辑" : "新建"}${modal.kind === "measurement" ? "质量测量" : "质量标准"}`} description={modal.kind === "measurement" ? "统一收口质量测量弹窗的治理对象选择、指标录入和重复读数编辑体验。" : "统一维护质量标准的适用范围、上下限和状态信息。"} onClose={closeModal} busy={submitting}>
+        <ModalShell className="quality-modal" eyebrow={modal.record ? "编辑" : "新建"} title={`${modal.record ? "编辑" : "新建"}${modal.kind === "measurement" ? "质量测量" : "质量标准"}`} description={modal.kind === "measurement" ? "可选择已有生产事件，或在本表单内同时新建生产事件后再录入质量数据。批量场景请使用导入向导。" : "统一维护质量标准的适用范围、上下限和状态信息。"} onClose={() => { if (!submitting) { setCreateRunInline(false); closeModal(); } }} busy={submitting}>
           <form onSubmit={(event) => void submit(event)}>
             <div className="form-grid">
               {modal.kind === "measurement"
-                ? renderMeasurementForm(form, setMeasurementForm, metricRows, setMetricRows, repeatRows, setRepeatRows, { runs, groups, groupPoints, points, definitions, instruments, methods, calibrations, references, importProfiles })
+                ? renderMeasurementForm(form, setMeasurementForm, metricRows, setMetricRows, repeatRows, setRepeatRows, { runs, groups, groupPoints, points, definitions, instruments, methods, calibrations, references, importProfiles, factories, vehicleModels, colors }, { createRunInline, setCreateRunInline, isEdit: Boolean(modal.record) })
                 : renderStandardForm(form, setForm, { vehicleModels, colors, parts, points, definitions })}
             </div>
-            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存"}</button></div>
+            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => { if (!submitting) { setCreateRunInline(false); closeModal(); } }} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存"}</button></div>
           </form>
         </ModalShell>
       ) : null}
@@ -893,7 +940,11 @@ function renderMeasurementForm(
     calibrations: Calibration[];
     references: ReferenceStandard[];
     importProfiles: ImportProfile[];
+    factories: Resource[];
+    vehicleModels: Resource[];
+    colors: Resource[];
   },
+  inline: { createRunInline: boolean; setCreateRunInline: (value: boolean) => void; isEdit: boolean },
 ) {
   const metricOptions = refs.definitions.filter((item) => item.quality_type === form.quality_type);
   const groups = filterMeasurementGroups(refs.runs, refs.groups, form);
@@ -904,12 +955,43 @@ function renderMeasurementForm(
   const calibrations = refs.calibrations.filter((item) => (!form.instrument_id || item.instrument_id === form.instrument_id) && (!form.measurement_method_id || !item.method_id || item.method_id === form.measurement_method_id));
   const references = refs.references.filter((item) => item.quality_type === form.quality_type);
   const profiles = refs.importProfiles.filter((item) => item.quality_type === form.quality_type && (!selectedInstrument || item.instrument_type === selectedInstrument.instrument_type));
+  const { createRunInline, setCreateRunInline, isEdit } = inline;
   return [
-    <FormSection key="measurement-basic" title="采集上下文" description="先确认生产事件、质量类型、测量编组和测量点，避免录错对象。">
+    <FormSection key="measurement-basic" title="采集上下文" description="先确认生产事件、质量类型、测量编组和测量点。找不到生产事件时可在本表单内新建，或改用批量导入向导。">
       <div className="modal-section-grid">
         {inputField("数据编号", "data_no", form, setForm, "text", true)}
-        {selectField("生产事件", "production_run_id", form, setForm, refs.runs.map((item) => [item.id, `${item.run_no} / ${item.body_no ?? "无车身号"}`]), true)}
-        <label className="form-field form-field-wide"><span>录入提示</span><div className="master-empty">测量编组会按当前生产事件车型与质量类型过滤；若命中单一编组，表单会自动收口到该编组，并同步过滤可选测量点。</div></label>
+        {!isEdit ? (
+          <label className="form-field form-field-wide">
+            <span>生产事件来源</span>
+            <span className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={createRunInline}
+                onChange={(event) => {
+                  setCreateRunInline(event.target.checked);
+                  if (event.target.checked) {
+                    setForm({ ...form, production_run_id: "" });
+                  }
+                }}
+              />
+              同时新建生产事件（车号 / 工厂 / 车型 / 颜色）
+            </span>
+          </label>
+        ) : null}
+        {createRunInline && !isEdit ? (
+          <>
+            {inputField("生产事件编号", "new_run_no", form, setForm, "text", true)}
+            {inputField("车身号", "new_body_no", form, setForm)}
+            {selectField("工厂", "new_factory_id", form, setForm, options(refs.factories), true)}
+            {selectField("车型", "new_vehicle_model_id", form, setForm, options(refs.vehicleModels), true)}
+            {selectField("颜色", "new_color_id", form, setForm, options(refs.colors), true)}
+            {inputField("班次", "new_shift", form, setForm)}
+            {inputField("生产开始时间", "new_started_at", form, setForm, "datetime-local", true)}
+          </>
+        ) : (
+          selectField("生产事件", "production_run_id", form, setForm, refs.runs.map((item) => [item.id, `${item.run_no} / ${item.body_no ?? "无车身号"}`]), true)
+        )}
+        <label className="form-field form-field-wide"><span>录入提示</span><div className="panel-note">测量编组会按当前生产事件车型与质量类型过滤；若命中单一编组，表单会自动收口到该编组，并同步过滤可选测量点。批量上数请用导入向导。</div></label>
         {selectField("测量编组", "measurement_group_id", form, setForm, options(groups, true))}
         {selectField("测量点", "measurement_point_id", form, setForm, options(points), true)}
         {selectField("质量类型", "quality_type", form, (next) => {
@@ -940,7 +1022,7 @@ function renderMeasurementForm(
       <div className="modal-section-grid">
         <div className="metric-editor form-field-wide" key="metrics">
       <div className="program-subheading"><div><span className="eyebrow">测量指标</span><h3>质量指标值</h3></div><button type="button" className="button button-secondary" onClick={() => setMetricRows([...metricRows, { metric_code: metricOptions[0]?.code ?? "", raw_value: "", corrected_value: "" }])}><Plus />新增指标</button></div>
-      <div className="master-empty">指标值属于当前表单内容调整，至少保留 1 条有效指标后才能保存。</div>
+      <div className="panel-note">指标值属于当前表单内容调整，至少保留 1 条有效指标后才能保存。</div>
       {metricRows.map((row, index) => (
         <div className="metric-editor-row" key={`${index}-${row.metric_code}`}>
           <select aria-label={`指标 ${index + 1}`} required value={row.metric_code} onChange={(event) => setMetricRows(metricRows.map((item, rowIndex) => rowIndex === index ? { ...item, metric_code: event.target.value } : item))}>{metricOptions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code} ({item.unit})</option>)}</select>

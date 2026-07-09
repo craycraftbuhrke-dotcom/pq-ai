@@ -390,11 +390,22 @@ def render_template(
     *,
     db: Session | None = None,
     quality_type: str | None = None,
+    factory_code: str | None = None,
+    color_code: str | None = None,
+    vehicle_model_code: str | None = None,
+    shift: str | None = None,
 ) -> Response:
     resource = get_resource(resource_key)
     if resource.key == "quality.measurements":
         fields = _quality_measurement_bulk_fields(quality_type)
-        rows = _quality_measurement_template_rows(db, quality_type=quality_type)
+        rows = _quality_measurement_template_rows(
+            db,
+            quality_type=quality_type,
+            factory_code=factory_code,
+            color_code=color_code,
+            vehicle_model_code=vehicle_model_code,
+            shift=shift,
+        )
         return _file_response(
             resource,
             file_format,
@@ -1000,8 +1011,8 @@ def _quality_measurement_base_fields() -> tuple[BulkField, ...]:
     return (
         BulkField("id", "ID（可选，用于更新）", "string", False, "", "存在 id 时可直接更新对应质量测量。"),
         BulkField("data_no", "质量数据编号", "string", True, "QM-20260708-001", "质量测量业务编号，建议保持唯一。"),
-        BulkField("production_run_no", "生产事件编号", "string", True, "RT_RUN_001", "若该生产事件不存在，后端会结合同一行的车号与生产上下文自动补建。"),
-        BulkField("body_no", "车号", "string", False, "BODY-0001", "建议始终填写车号；当生产事件尚不存在时，车号会随生产事件一起创建。"),
+        BulkField("production_run_no", "生产事件编号", "string", False, "RT_RUN_001", "可留空；留空时按车号自动生成 RUN-车号。若该生产事件不存在，后端会结合同一行的车号与生产上下文自动补建。"),
+        BulkField("body_no", "车号", "string", False, "BODY-0001", "建议始终填写车号；生产事件编号留空或尚不存在时，车号用于自动创建生产事件。"),
         BulkField("factory_code", "工厂代码", "string", False, "F01", "当生产事件尚不存在时必填，用于自动创建生产事件。"),
         BulkField("measurement_group_code", "测量编组代码", "string", False, "RT_MG_OP", "模板会自动预填当前编组代码，导入时按车型+代码解析。"),
         BulkField("measurement_group_name", "测量编组名称", "string", False, "", "模板说明列，仅用于帮助识别编组，可保留原值。"),
@@ -1065,7 +1076,6 @@ def _resolve_or_create_quality_production_run(
     measured_at_value: Any,
 ) -> ProductionRun:
     run_no = str(row.get("production_run_no") or "").strip()
-    run = runs_by_no.get(run_no)
     body_no = _normalize_optional_text(row.get("body_no"))
     factory_code = _normalize_optional_text(row.get("factory_code"))
     vehicle_model_code = _normalize_optional_text(row.get("vehicle_model_code"))
@@ -1074,6 +1084,12 @@ def _resolve_or_create_quality_production_run(
     started_at_value = row.get("production_started_at")
     completed_at_value = row.get("production_completed_at")
 
+    if not run_no:
+        if not body_no:
+            raise ValueError("缺少生产事件编号时，必须填写车号以便自动生成生产事件编号")
+        run_no = f"RUN-{body_no}"
+
+    run = runs_by_no.get(run_no)
     if run:
         if body_no and run.body_no and run.body_no != body_no:
             raise ValueError(f"生产事件 {run_no} 的车号与导入内容不一致")
@@ -1137,6 +1153,10 @@ def _quality_measurement_template_rows(
     db: Session | None,
     *,
     quality_type: str | None = None,
+    factory_code: str | None = None,
+    color_code: str | None = None,
+    vehicle_model_code: str | None = None,
+    shift: str | None = None,
 ) -> list[dict[str, Any]]:
     if db is None:
         return []
@@ -1152,6 +1172,12 @@ def _quality_measurement_template_rows(
     if normalized:
         _quality_metric_catalog_for(normalized)
         query = query.where(MeasurementGroup.quality_type == normalized)
+    preferred_model = _normalize_optional_text(vehicle_model_code)
+    if preferred_model:
+        query = query.where(VehicleModel.code == preferred_model)
+    pref_factory = _normalize_optional_text(factory_code) or ""
+    pref_color = _normalize_optional_text(color_code) or ""
+    pref_shift = _normalize_optional_text(shift) or ""
     rows: list[dict[str, Any]] = []
     for _, group, point, model, part in db.execute(query):
         rows.append(
@@ -1159,7 +1185,7 @@ def _quality_measurement_template_rows(
                 "data_no": "",
                 "production_run_no": "",
                 "body_no": "",
-                "factory_code": "",
+                "factory_code": pref_factory,
                 "measurement_group_code": group.code,
                 "measurement_group_name": group.name,
                 "measurement_point_code": point.code,
@@ -1169,8 +1195,8 @@ def _quality_measurement_template_rows(
                 "part_code": part.code,
                 "part_name": part.name,
                 "quality_type": group.quality_type,
-                "color_code": "",
-                "shift": "",
+                "color_code": pref_color,
+                "shift": pref_shift,
                 "production_started_at": "",
                 "production_completed_at": "",
                 "measured_at": "",
@@ -1482,10 +1508,13 @@ def _import_quality_measurements(
         try:
             data_no = str(raw_row.get("data_no") or "").strip()
             run_no = str(raw_row.get("production_run_no") or "").strip()
+            body_no = str(raw_row.get("body_no") or "").strip()
             point_code = str(raw_row.get("measurement_point_code") or "").strip()
             measured_at_value = raw_row.get("measured_at")
-            if not data_no or not run_no or not point_code or _is_blank(measured_at_value):
-                raise ValueError("缺少必填字段：data_no, production_run_no, measurement_point_code, measured_at")
+            if not data_no or not point_code or _is_blank(measured_at_value):
+                raise ValueError("缺少必填字段：data_no, measurement_point_code, measured_at")
+            if not run_no and not body_no:
+                raise ValueError("请填写 production_run_no，或填写 body_no 以便自动生成生产事件编号")
 
             run = _resolve_or_create_quality_production_run(
                 db=db,
