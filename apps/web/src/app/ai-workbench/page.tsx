@@ -1,5 +1,4 @@
-import { AiWorkbench } from "@/components/ai-workbench";
-
-export default function AIWorkbenchPage() {
-  return <AiWorkbench />;
+import { redirect } from "next/navigation";
+export default function AiWorkbenchRedirectPage() {
+  redirect("/ai");
 }

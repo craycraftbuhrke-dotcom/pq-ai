@@ -343,8 +343,21 @@ async function readApiError(response: Response): Promise<string> {
   return payload.error ?? `请求失败（${response.status}）`;
 }
 
-export function MasterDataWorkspace() {
-  const [activeResource, setActiveResource] = useState<ResourceKey>("factories");
+type MasterMode = "full" | "entities" | "measurement";
+
+const entityResources: ResourceKey[] = ["factories", "vehicle-models", "colors", "parts"];
+const measurementResources: ResourceKey[] = ["measurement-groups", "measurement-points"];
+
+export function MasterDataWorkspace({ mode = "full" }: { mode?: MasterMode } = {}) {
+  const showChrome = mode === "full";
+  const visibleResources = mode === "measurement" ? measurementResources : mode === "entities" ? entityResources : resourceOrder;
+  const visibleRelations =
+    mode === "measurement"
+      ? (["measurement-group-points"] as RelationKey[])
+      : mode === "entities"
+        ? (["factory-vehicle-models", "vehicle-model-colors"] as RelationKey[])
+        : (Object.keys(relationConfigs) as RelationKey[]);
+  const [activeResource, setActiveResource] = useState<ResourceKey>(visibleResources[0] ?? "factories");
   const [data, setData] = useState(emptyData);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -355,7 +368,7 @@ export function MasterDataWorkspace() {
   const [editing, setEditing] = useState<MasterRecord | null>(null);
   const [form, setForm] = useState<FormState>({});
   const [relations, setRelations] = useState(emptyRelations);
-  const [activeRelation, setActiveRelation] = useState<RelationKey>("factory-vehicle-models");
+  const [activeRelation, setActiveRelation] = useState<RelationKey>(visibleRelations[0] ?? "factory-vehicle-models");
   const [relationLeftId, setRelationLeftId] = useState("");
   const [relationRightId, setRelationRightId] = useState("");
   const [relationSequence, setRelationSequence] = useState("0");
@@ -527,7 +540,8 @@ export function MasterDataWorkspace() {
   }
 
   return (
-    <div className="page-stack">
+    <div className={showChrome ? "page-stack" : "embedded-stack"}>
+      {showChrome ? (
       <header className="page-header">
         <div>
           <span className="page-kicker">工厂与测量点</span>
@@ -539,12 +553,23 @@ export function MasterDataWorkspace() {
           新建{config.singular}
         </button>
       </header>
+      ) : (
+        <div className="embedded-toolbar">
+          <button className="button button-primary" onClick={() => openModal("create")}>
+            <Plus aria-hidden="true" />
+            新建{config.singular}
+          </button>
+        </div>
+      )}
 
+      {showChrome ? (
       <div className="freshness">
         <span className="live-dot" />
         实时业务数据 · 所有操作直接写入后端
       </div>
+      ) : null}
 
+      {showChrome ? (
       <section className="module-stat-strip">
         {statOrder.map((resource) => (
           <article key={resource}>
@@ -554,10 +579,11 @@ export function MasterDataWorkspace() {
           </article>
         ))}
       </section>
+      ) : null}
 
       <section className="panel relation-workspace">
         <div className="master-tabs">
-          {(Object.keys(relationConfigs) as RelationKey[]).map((relation) => (
+          {visibleRelations.map((relation) => (
             <button
               className={activeRelation === relation ? "master-tab master-tab-active" : "master-tab"}
               key={relation}

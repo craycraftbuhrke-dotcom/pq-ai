@@ -1,5 +1,5 @@
-import { ProductionWorkspace } from "@/components/production-workspace";
+import { redirect } from "next/navigation";
 
-export default function ProductionPage() {
-  return <ProductionWorkspace />;
+export default function ProductionRedirectPage() {
+  redirect("/process?tab=runs");
 }

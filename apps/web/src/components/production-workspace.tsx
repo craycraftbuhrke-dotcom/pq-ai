@@ -79,10 +79,16 @@ function matchesContextId(recordId?: string | null, contextId?: string): boolean
   return recordId === contextId;
 }
 
-export function ProductionWorkspace() {
+type ProductionMode = "full" | "runs" | "materials" | "material-governance";
+
+export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }) {
   const { factoryId, modelId, colorId } = useWorkspaceContext();
   const contextFilterActive = Boolean(factoryId || modelId || colorId);
-  const [tab, setTab] = useState<"runs" | "materials" | "material-governance">("runs");
+  const initialTab =
+    mode === "materials" || mode === "material-governance" ? mode : "runs";
+  const [tab, setTab] = useState<"runs" | "materials" | "material-governance">(initialTab);
+  const showChrome = mode === "full";
+  const lockedTab = mode !== "full";
   const [runs, setRuns] = useState<ProductionRun[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [factories, setFactories] = useState<Resource[]>([]);
@@ -259,6 +265,49 @@ export function ProductionWorkspace() {
     setError(type === "error" ? message : "");
   }
 
+  const content = (
+    <>
+      {error ? <button className="message-banner message-error" onClick={() => setError("")}>{error}<X /></button> : null}
+      {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
+      {showChrome ? <div className="freshness">质量「批量上传」可自动创建生产事件；本页重点补录工序实绩与材料追溯。记录采用停用、替换或追加治理，不提供物理删除。</div> : null}
+      {showChrome ? <section className="module-stat-strip"><article><span>生产事件</span><strong>{runs.length}</strong><small>按车身/批次追溯</small></article><article><span>当前事件工序</span><strong>{stageRuns.length}/5</strong><small>五个喷涂执行阶段</small></article><article><span>实际参数</span><strong>{actualParameters.length}</strong><small>PLC / 机器人采样</small></article><article><span>材料批次</span><strong>{materials.length}</strong><small>粘度、固含与 COA</small></article></section> : null}
+      <section className={showChrome ? "panel production-workspace" : "production-workspace embedded-workspace"}>
+        {!lockedTab ? (
+          <div className="master-tabs">
+            <button className={tab === "runs" ? "active" : ""} onClick={() => setTab("runs")}>生产事件与工序</button>
+            <button className={tab === "materials" ? "active" : ""} onClick={() => setTab("materials")}>材料批次</button>
+            <button className={tab === "material-governance" ? "active" : ""} onClick={() => setTab("material-governance")}>材料特性治理</button>
+            {tab !== "material-governance" ? (
+              <>
+                <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索生产事件或材料" /></label>
+                {contextFilterActive && tab === "runs" ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}
+                <button className="button button-primary" onClick={() => openModal(tab === "runs" ? "run" : "material")}><Plus /> 新建{tab === "runs" ? "生产事件" : "材料批次"}</button>
+              </>
+            ) : null}
+          </div>
+        ) : tab !== "material-governance" ? (
+          <div className="master-tabs">
+            <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "runs" ? "搜索生产事件" : "搜索材料批次"} /></label>
+            {contextFilterActive && tab === "runs" ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}
+            <BulkDataActions
+              resourceKey={tab === "materials" ? "process.material-batches" : "process.production-runs"}
+              resourceLabel={tab === "materials" ? "材料批次" : "生产事件"}
+              disabled={loading || submitting}
+              onImported={reload}
+              onResult={bulkResult}
+            />
+            <button className="button button-primary" onClick={() => openModal(tab === "runs" ? "run" : "material")}><Plus /> 新建{tab === "runs" ? "生产事件" : "材料批次"}</button>
+            <button className="button button-secondary" onClick={() => void reload()}><RefreshCw className={loading ? "spin" : ""} /> 刷新</button>
+          </div>
+        ) : null}
+        {tab === "runs" ? <div className="production-grid"><div className="production-run-list">{filteredRuns.map((run) => <button key={run.id} className={`program-list-item ${run.id === selectedRunId ? "selected" : ""}`} onClick={() => setSelectedRunId(run.id)}><div><strong>{run.run_no}</strong><span>{run.body_no || "未维护车身号"} · {run.shift || "未维护班次"}</span><small>{new Date(run.started_at).toLocaleString("zh-CN")}</small></div><Activity /></button>)}{!filteredRuns.length ? <div className="master-empty"><Activity /> 暂无生产事件。日常请先到质量管理「批量上传」上传质量数据（可自动建档）；若只需补工序实绩，也可在此手工新建生产事件。</div> : null}</div><div className="production-detail">{selectedRun ? <><div className="production-run-summary"><div><span>生产事件</span><strong>{selectedRun.run_no}</strong></div><div><span>工厂</span><strong>{relationName(factories, selectedRun.factory_id)}</strong></div><div><span>车型 / 颜色</span><strong>{relationName(vehicleModels, selectedRun.vehicle_model_id)} · {relationName(colors, selectedRun.color_id)}</strong></div><div className="row-actions"><button className="icon-button" onClick={() => openModal("run", selectedRun)} aria-label="编辑生产事件"><Pencil aria-hidden="true" /></button></div></div><div className="production-stage-heading"><div><span className="eyebrow">五站工序</span><h3>工序实绩</h3></div><div className="row-actions"><BulkDataActions resourceKey="process.production-stage-runs" resourceLabel="工序实绩" disabled={loading || submitting} onImported={async () => { await reload(); await loadStages(selectedRunId); }} onResult={bulkResult} /><button className="button button-primary" onClick={() => openModal("stage")} disabled={stageRuns.length >= 5}><Plus /> 添加工序</button></div></div><div className="production-stage-list">{stageRuns.map((stage) => <button className={`production-stage-card ${stage.id === selectedStageId ? "selected" : ""}`} key={stage.id} onClick={() => setSelectedStageId(stage.id)}><span>{stageLabel(stage.process_stage)}</span><strong>{statusLabel(stage.status)}</strong><small>{programVersions.find((version) => version.id === stage.program_version_id)?.program_name ?? "程序版本"} · {programVersions.find((version) => version.id === stage.program_version_id)?.version}</small></button>)}{!stageRuns.length ? <div className="master-empty">当前生产事件还没有工序实绩，请按五个执行阶段逐步补录。</div> : null}</div>{selectedStage ? <><div className="production-stage-heading"><div><span className="eyebrow">实际参数</span><h3>实际参数</h3></div><div className="row-actions"><BulkDataActions resourceKey="process.actual-parameters" resourceLabel="实际参数" disabled={loading || submitting} onImported={async () => { await loadActuals(selectedStageId); }} onResult={bulkResult} /><button className="button button-secondary" onClick={() => openModal("stage", selectedStage)}><Pencil /> 编辑工序</button><button className="button button-primary" onClick={() => openModal("actual")}><Plus /> 添加实绩参数</button></div></div><div className="compact-table"><div className="production-actual-row compact-head"><span>参数</span><span>实际值</span><span>来源</span><span>采样时间</span><span>操作</span></div>{actualParameters.map((parameter) => <div className="production-actual-row" key={parameter.id}><span><strong>{definitions.find((item) => item.code === parameter.parameter_code)?.name ?? parameter.parameter_code}</strong><small>{parameter.parameter_code}</small></span><span>{parameter.actual_value} {parameter.unit}</span><span>{parameter.source_system || "—"}</span><span>{new Date(parameter.sampled_at).toLocaleString("zh-CN")}</span><span className="row-actions"><button className="icon-button" onClick={() => openModal("actual", parameter)} aria-label="编辑实际参数"><Pencil aria-hidden="true" /></button></span></div>)}{!actualParameters.length ? <div className="master-empty">当前工序还没有实绩参数，请继续补录 PLC / 机器人采样值。</div> : null}</div></> : null}</> : <div className="large-empty"><Activity /> 请选择生产事件</div>}</div></div> : tab === "materials" ? <div className="master-table-wrap"><table className="master-table production-material-table"><thead><tr><th>批次号</th><th>材料</th><th>类型</th><th>供应商</th><th>历史粘度字段</th><th>历史固含字段</th><th>操作</th></tr></thead><tbody>{filteredMaterials.map((material) => <tr key={material.id}><td>{material.batch_no}</td><td>{material.material_code} / {material.material_name}</td><td>{{ MIDCOAT: "中涂", BASECOAT: "色漆", CLEARCOAT: "清漆" }[material.material_type] ?? material.material_type}</td><td>{material.supplier ?? "—"}</td><td>{material.viscosity ?? "—"}</td><td>{material.solid_ratio ?? "—"}</td><td><div className="row-actions"><button className="icon-button" onClick={() => openModal("material", material)} aria-label="编辑材料批次"><Pencil aria-hidden="true" /></button></div></td></tr>)}</tbody></table>{!filteredMaterials.length ? <div className="master-empty"><Boxes /> 暂无材料批次，请先维护批次，再绑定到对应工艺阶段。</div> : null}</div> : <MaterialGovernancePanel />}
+      </section>
+      {modal ? <ProductionModal modal={modal} form={form} setForm={setForm} submit={submit} close={() => setModal(null)} submitting={submitting} factories={factories} vehicleModels={vehicleModels} colors={colors} materials={materials} versions={programVersions} definitions={definitions} selectedRun={selectedRun} /> : null}
+    </>
+  );
+
+  if (!showChrome) return <div className="embedded-stack">{content}</div>;
+
   return (
     <div className="page-stack">
       <header className="page-header">
@@ -266,12 +315,12 @@ export function ProductionWorkspace() {
           <span className="page-kicker">生产车身记录</span>
           <h1>生产实绩中心</h1>
           <p>
-            查看已导入的生产事件，并补录五段工序实绩、材料批次与实际参数。日常上数请走「批量导入测量」——上传质量数据时可自动创建生产事件。
+            查看已导入的生产事件，并补录五段工序实绩、材料批次与实际参数。日常上数请走质量管理「批量上传」——上传质量数据时可自动创建生产事件。
           </p>
         </div>
         <div className="page-actions">
-          <Link className="button button-secondary" href="/import-wizard">
-            <Upload /> 批量导入测量
+          <Link className="button button-secondary" href="/quality?tab=upload">
+            <Upload /> 批量上传质量
           </Link>
           <BulkDataActions
             resourceKey={tab === "materials" ? "process.material-batches" : "process.production-runs"}
@@ -285,15 +334,7 @@ export function ProductionWorkspace() {
           </button>
         </div>
       </header>
-      {error ? <button className="message-banner message-error" onClick={() => setError("")}>{error}<X /></button> : null}
-      {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
-      <div className="freshness">质量批量导入可自动创建生产事件；本页重点补录工序实绩与材料追溯。记录采用停用、替换或追加治理，不提供物理删除。</div>
-      <section className="module-stat-strip"><article><span>生产事件</span><strong>{runs.length}</strong><small>按车身/批次追溯</small></article><article><span>当前事件工序</span><strong>{stageRuns.length}/5</strong><small>五个喷涂执行阶段</small></article><article><span>实际参数</span><strong>{actualParameters.length}</strong><small>PLC / 机器人采样</small></article><article><span>材料批次</span><strong>{materials.length}</strong><small>粘度、固含与 COA</small></article></section>
-      <section className="panel production-workspace">
-        <div className="master-tabs"><button className={tab === "runs" ? "active" : ""} onClick={() => setTab("runs")}>生产事件与工序</button><button className={tab === "materials" ? "active" : ""} onClick={() => setTab("materials")}>材料批次</button><button className={tab === "material-governance" ? "active" : ""} onClick={() => setTab("material-governance")}>材料特性治理</button>{tab !== "material-governance" ? <><label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索生产事件或材料" /></label>{contextFilterActive && tab === "runs" ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}<button className="button button-primary" onClick={() => openModal(tab === "runs" ? "run" : "material")}><Plus /> 新建{tab === "runs" ? "生产事件" : "材料批次"}</button></> : null}</div>
-        {tab === "runs" ? <div className="production-grid"><div className="production-run-list">{filteredRuns.map((run) => <button key={run.id} className={`program-list-item ${run.id === selectedRunId ? "selected" : ""}`} onClick={() => setSelectedRunId(run.id)}><div><strong>{run.run_no}</strong><span>{run.body_no || "未维护车身号"} · {run.shift || "未维护班次"}</span><small>{new Date(run.started_at).toLocaleString("zh-CN")}</small></div><Activity /></button>)}{!filteredRuns.length ? <div className="master-empty"><Activity /> 暂无生产事件。日常请先到「批量导入测量」上传质量数据（可自动建档）；若只需补工序实绩，也可在此手工新建生产事件。</div> : null}</div><div className="production-detail">{selectedRun ? <><div className="production-run-summary"><div><span>生产事件</span><strong>{selectedRun.run_no}</strong></div><div><span>工厂</span><strong>{relationName(factories, selectedRun.factory_id)}</strong></div><div><span>车型 / 颜色</span><strong>{relationName(vehicleModels, selectedRun.vehicle_model_id)} · {relationName(colors, selectedRun.color_id)}</strong></div><div className="row-actions"><button className="icon-button" onClick={() => openModal("run", selectedRun)} aria-label="编辑生产事件"><Pencil aria-hidden="true" /></button></div></div><div className="production-stage-heading"><div><span className="eyebrow">五站工序</span><h3>工序实绩</h3></div><div className="row-actions"><BulkDataActions resourceKey="process.production-stage-runs" resourceLabel="工序实绩" disabled={loading || submitting} onImported={async () => { await reload(); await loadStages(selectedRunId); }} onResult={bulkResult} /><button className="button button-primary" onClick={() => openModal("stage")} disabled={stageRuns.length >= 5}><Plus /> 添加工序</button></div></div><div className="production-stage-list">{stageRuns.map((stage) => <button className={`production-stage-card ${stage.id === selectedStageId ? "selected" : ""}`} key={stage.id} onClick={() => setSelectedStageId(stage.id)}><span>{stageLabel(stage.process_stage)}</span><strong>{statusLabel(stage.status)}</strong><small>{programVersions.find((version) => version.id === stage.program_version_id)?.program_name ?? "程序版本"} · {programVersions.find((version) => version.id === stage.program_version_id)?.version}</small></button>)}{!stageRuns.length ? <div className="master-empty">当前生产事件还没有工序实绩，请按五个执行阶段逐步补录。</div> : null}</div>{selectedStage ? <><div className="production-stage-heading"><div><span className="eyebrow">实际参数</span><h3>实际参数</h3></div><div className="row-actions"><BulkDataActions resourceKey="process.actual-parameters" resourceLabel="实际参数" disabled={loading || submitting} onImported={async () => { await loadActuals(selectedStageId); }} onResult={bulkResult} /><button className="button button-secondary" onClick={() => openModal("stage", selectedStage)}><Pencil /> 编辑工序</button><button className="button button-primary" onClick={() => openModal("actual")}><Plus /> 添加实绩参数</button></div></div><div className="compact-table"><div className="production-actual-row compact-head"><span>参数</span><span>实际值</span><span>来源</span><span>采样时间</span><span>操作</span></div>{actualParameters.map((parameter) => <div className="production-actual-row" key={parameter.id}><span><strong>{definitions.find((item) => item.code === parameter.parameter_code)?.name ?? parameter.parameter_code}</strong><small>{parameter.parameter_code}</small></span><span>{parameter.actual_value} {parameter.unit}</span><span>{parameter.source_system || "—"}</span><span>{new Date(parameter.sampled_at).toLocaleString("zh-CN")}</span><span className="row-actions"><button className="icon-button" onClick={() => openModal("actual", parameter)} aria-label="编辑实际参数"><Pencil aria-hidden="true" /></button></span></div>)}{!actualParameters.length ? <div className="master-empty">当前工序还没有实绩参数，请继续补录 PLC / 机器人采样值。</div> : null}</div></> : null}</> : <div className="large-empty"><Activity /> 请选择生产事件</div>}</div></div> : tab === "materials" ? <div className="master-table-wrap"><table className="master-table production-material-table"><thead><tr><th>批次号</th><th>材料</th><th>类型</th><th>供应商</th><th>历史粘度字段</th><th>历史固含字段</th><th>操作</th></tr></thead><tbody>{filteredMaterials.map((material) => <tr key={material.id}><td>{material.batch_no}</td><td>{material.material_code} / {material.material_name}</td><td>{{ MIDCOAT: "中涂", BASECOAT: "色漆", CLEARCOAT: "清漆" }[material.material_type] ?? material.material_type}</td><td>{material.supplier ?? "—"}</td><td>{material.viscosity ?? "—"}</td><td>{material.solid_ratio ?? "—"}</td><td><div className="row-actions"><button className="icon-button" onClick={() => openModal("material", material)} aria-label="编辑材料批次"><Pencil aria-hidden="true" /></button></div></td></tr>)}</tbody></table>{!filteredMaterials.length ? <div className="master-empty"><Boxes /> 暂无材料批次，请先维护批次，再绑定到对应工艺阶段。</div> : null}</div> : <MaterialGovernancePanel />}
-      </section>
-      {modal ? <ProductionModal modal={modal} form={form} setForm={setForm} submit={submit} close={() => setModal(null)} submitting={submitting} factories={factories} vehicleModels={vehicleModels} colors={colors} materials={materials} versions={programVersions} definitions={definitions} selectedRun={selectedRun} /> : null}
+      {content}
     </div>
   );
 }

@@ -48,7 +48,7 @@ export function AppShell({ children }: AppShellProps) {
         collapsed[section.key] = !isAdmin;
         continue;
       }
-      if (section.key === "field" && isQualityFocused) {
+      if (section.key === "quality" && isQualityFocused) {
         collapsed[section.key] = false;
         continue;
       }
@@ -107,7 +107,7 @@ export function AppShell({ children }: AppShellProps) {
           <nav className="main-nav" aria-label="主导航">
             <span className="nav-section-label nav-root-label">工作空间</span>
             {visibleSections.map((section) => {
-              const containsActive = section.items.some((item) => item.href === pathname);
+              const containsActive = section.items.some((item) => item.href.split("?")[0] === pathname);
               const isCollapsed = containsActive
                 ? false
                 : (collapsedOverrides[section.key] ?? initialCollapsedSections[section.key] ?? false);
@@ -131,7 +131,7 @@ export function AppShell({ children }: AppShellProps) {
                   {!isCollapsed
                     ? section.items.map((item) => {
                         const Icon = navigationIcons[item.icon];
-                        const active = pathname === item.href;
+                        const active = item.href.split("?")[0] === pathname;
                         return (
                           <Link
                             key={item.href}

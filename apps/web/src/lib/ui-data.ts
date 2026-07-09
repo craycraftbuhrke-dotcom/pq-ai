@@ -41,72 +41,152 @@ export type NavSection = {
   items: readonly NavItem[];
 };
 
-/** 按现场任务组织，而不是按系统模块堆叠 */
+/** 按领域模块组织：概览入口墙 + 各域工作台 */
 export const navSections: readonly NavSection[] = [
   {
-    key: "today",
-    title: "今日工作",
-    items: [{ href: "/", label: "今日总览", icon: "dashboard" }],
+    key: "home",
+    title: "工作台",
+    items: [{ href: "/", label: "各域概览", icon: "dashboard" }],
   },
   {
-    key: "field",
-    title: "现场作业",
-    items: [
-      { href: "/import-wizard", label: "批量导入测量", icon: "import" },
-      { href: "/quality", label: "录入与查看质量", icon: "quality" },
-      { href: "/production", label: "生产车身记录", icon: "production" },
-      { href: "/programs", label: "喷涂配方", icon: "program" },
-    ],
+    key: "process",
+    title: "工艺管理",
+    items: [{ href: "/process", label: "工艺管理中心", icon: "program" }],
   },
   {
-    key: "improve",
-    title: "问题处理",
-    items: [
-      { href: "/quality-monitor", label: "数据是否可信", icon: "monitor" },
-      { href: "/engineering", label: "问题与调试", icon: "engineering" },
-      {
-        href: "/ai-workbench",
-        label: "智能分析与推荐",
-        icon: "ai",
-        roles: ["DATA_SCIENTIST", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "APPROVER", "ADMIN"],
-      },
-      { href: "/controlled-trials", label: "受控试验", icon: "trial" },
-    ],
+    key: "materials",
+    title: "油漆材料",
+    items: [{ href: "/materials", label: "材料管理中心", icon: "material" }],
   },
   {
-    key: "analysis",
-    title: "材料与趋势",
-    items: [{ href: "/material-trends", label: "材料批次趋势", icon: "material" }],
+    key: "quality",
+    title: "质量管理",
+    items: [{ href: "/quality", label: "质量管理中心", icon: "quality" }],
   },
   {
-    key: "settings",
-    title: "基础设置",
-    collapsible: true,
+    key: "master",
+    title: "主数据",
     items: [
       {
         href: "/master-data",
-        label: "工厂与测量点",
+        label: "主数据中心",
         icon: "master",
         roles: ["ADMIN", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "INTEGRATION_OPERATOR"],
       },
+    ],
+  },
+  {
+    key: "ai",
+    title: "AI 智能分析",
+    items: [
       {
-        href: "/integrations",
-        label: "系统对接",
-        icon: "integration",
-        roles: ["ADMIN", "INTEGRATION_OPERATOR"],
+        href: "/ai",
+        label: "AI 分析中心",
+        icon: "ai",
+        roles: ["DATA_SCIENTIST", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "APPROVER", "ADMIN"],
       },
+    ],
+  },
+  {
+    key: "settings",
+    title: "系统设置",
+    collapsible: true,
+    items: [
       {
-        href: "/integration-monitor",
-        label: "对接运行状态",
-        icon: "monitor",
+        href: "/settings",
+        label: "系统设置中心",
+        icon: "integration",
         roles: ["ADMIN", "INTEGRATION_OPERATOR", "AUDITOR"],
       },
-      {
-        href: "/audit",
-        label: "操作审计",
-        icon: "audit",
-        roles: ["ADMIN", "AUDITOR"],
-      },
+      { href: "/profile", label: "用户中心", icon: "audit" },
+    ],
+  },
+] as const;
+
+export type DomainPortalCard = {
+  key: string;
+  href: string;
+  title: string;
+  description: string;
+  icon: string;
+  roles?: readonly string[];
+  links: Array<{ href: string; label: string }>;
+};
+
+export const domainPortalCards: readonly DomainPortalCard[] = [
+  {
+    key: "process",
+    href: "/process",
+    title: "工艺管理",
+    description: "喷涂程序、刷子参数、贡献权重与生产实绩。",
+    icon: "program",
+    links: [
+      { href: "/process?tab=overview", label: "概览" },
+      { href: "/process?tab=recipes", label: "配方与刷子" },
+      { href: "/process?tab=runs", label: "生产实绩" },
+    ],
+  },
+  {
+    key: "materials",
+    href: "/materials",
+    title: "油漆材料",
+    description: "材料批次、特性治理与批次趋势 SPC。",
+    icon: "material",
+    links: [
+      { href: "/materials?tab=overview", label: "概览与 SPC" },
+      { href: "/materials?tab=batches", label: "材料批次" },
+      { href: "/materials?tab=governance", label: "特性治理" },
+    ],
+  },
+  {
+    key: "quality",
+    href: "/quality",
+    title: "质量管理",
+    description: "橘皮/色差/膜厚上传、判定、标准与仪器可靠性。",
+    icon: "quality",
+    links: [
+      { href: "/quality?tab=overview", label: "概览与 SPC" },
+      { href: "/quality?tab=upload", label: "批量上传" },
+      { href: "/quality?tab=measurements", label: "查看与判定" },
+    ],
+  },
+  {
+    key: "master",
+    href: "/master-data",
+    title: "主数据",
+    description: "工厂、车型、零件、颜色、测量点与机器人轨迹。",
+    icon: "master",
+    roles: ["ADMIN", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "INTEGRATION_OPERATOR"],
+    links: [
+      { href: "/master-data?tab=entities", label: "组织与产品" },
+      { href: "/master-data?tab=measurement", label: "测量体系" },
+      { href: "/master-data?tab=robots", label: "机器人与轨迹" },
+    ],
+  },
+  {
+    key: "ai",
+    href: "/ai",
+    title: "AI 智能分析",
+    description: "训练验收、预测诊断、推荐试验与工艺变更闭环。",
+    icon: "ai",
+    roles: ["DATA_SCIENTIST", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "APPROVER", "ADMIN"],
+    links: [
+      { href: "/ai?tab=predictions", label: "预测与诊断" },
+      { href: "/ai?tab=recommendations", label: "推荐与试验" },
+      { href: "/ai?tab=changes", label: "工艺变更" },
+    ],
+  },
+  {
+    key: "settings",
+    href: "/settings",
+    title: "系统设置",
+    description: "系统对接、运行监控、审计与账号权限。",
+    icon: "integration",
+    roles: ["ADMIN", "INTEGRATION_OPERATOR", "AUDITOR"],
+    links: [
+      { href: "/settings?tab=integrations", label: "系统对接" },
+      { href: "/settings?tab=monitor", label: "对接监控" },
+      { href: "/settings?tab=audit", label: "操作审计" },
     ],
   },
 ] as const;

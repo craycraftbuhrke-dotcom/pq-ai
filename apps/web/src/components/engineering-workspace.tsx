@@ -519,9 +519,17 @@ function payloadFromForm(fields: FieldDef[], form: FormState): Record<string, un
   return payload;
 }
 
-export function EngineeringWorkspace() {
+export function EngineeringWorkspace({
+  mode = "full",
+  lockedTab,
+}: {
+  mode?: "full" | "embed";
+  lockedTab?: TabKey;
+} = {}) {
   const { factoryId } = useWorkspaceContext();
-  const [active, setActive] = useState<TabKey>("issues");
+  const showChrome = mode === "full";
+  const [active, setActive] = useState<TabKey>(lockedTab ?? "issues");
+  const effectiveActive = lockedTab ?? active;
   const [summary, setSummary] = useState<Summary>({});
   const [data, setData] = useState<Record<TabKey, Resource[]>>(() => emptyTabData());
   const [refs, setRefs] = useState<RefLists>(() => emptyRefs());
@@ -545,7 +553,7 @@ export function EngineeringWorkspace() {
     setModalOpen(false);
   }, [submitting]);
 
-  const config = tabs[active];
+  const config = tabs[effectiveActive];
   const resolvedFields = useMemo(
     () => config.fields.map((field) => resolveField(field, refs)),
     [config.fields, refs],
@@ -777,7 +785,8 @@ export function EngineeringWorkspace() {
   }
 
   return (
-    <div className="page-stack engineering-workspace">
+    <div className={showChrome ? "page-stack engineering-workspace" : "embedded-stack engineering-workspace"}>
+      {showChrome ? (
       <header className="page-header">
         <div>
           <span className="page-kicker">问题与调试</span>
@@ -796,21 +805,37 @@ export function EngineeringWorkspace() {
           </button>
         </div>
       </header>
+      ) : (
+        <div className="embedded-toolbar">
+          <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
+            <RefreshCw className={loading ? "spin" : ""} />
+            刷新
+          </button>
+          <BulkDataActions resourceKey={config.bulkKey} resourceLabel={config.bulkLabel} disabled={loading || submitting} onImported={reload} onResult={bulkResult} />
+          <button className="button button-primary" onClick={() => openCreate()}>
+            <Plus />
+            新建{config.bulkLabel}
+          </button>
+        </div>
+      )}
 
       {message ? <button className={`message-banner message-${message.type}`} onClick={() => setMessage(null)}>{message.text}<X /></button> : null}
 
+      {showChrome ? (
       <section className="quality-analytics-stat-grid">
         <article><span>工艺路线 / 生效</span><strong>{summary.process_routes ?? 0} / {summary.active_routes ?? 0}</strong><small>工厂级工艺路线版本</small></article>
         <article><span>问题工单 / 打开</span><strong>{summary.issue_tasks ?? 0} / {summary.open_tasks ?? 0}</strong><small>异常、调试、供应商反馈</small></article>
         <article><span>导入任务</span><strong>{summary.file_import_jobs ?? 0}</strong><small>Dürr/BYK/Fischer/材料文件治理</small></article>
         <article><span>MSA / 贡献验证</span><strong>{summary.msa_studies ?? 0} / {summary.contribution_validations ?? 0}</strong><small>测量可靠性与点位贡献可信度</small></article>
       </section>
+      ) : null}
 
+      {showChrome ? (
       <div className="master-tabs engineering-tabs">
         {orderedTabs.map((key) => {
           const Icon = tabs[key].icon;
           return (
-            <button key={key} className={active === key ? "master-tab master-tab-active" : "master-tab"} onClick={() => setActive(key)}>
+            <button key={key} className={effectiveActive === key ? "master-tab master-tab-active" : "master-tab"} onClick={() => setActive(key)}>
               <Icon />
               {tabs[key].label}
               <span>{data[key].length}</span>
@@ -818,8 +843,9 @@ export function EngineeringWorkspace() {
           );
         })}
       </div>
+      ) : null}
 
-      <section className={active === "issues" || active === "imports" ? "engineering-grid" : ""}>
+      <section className={effectiveActive === "issues" || effectiveActive === "imports" ? "engineering-grid" : ""}>
         <div className="master-table-wrap">
           <table className="master-table">
             <thead>
@@ -829,7 +855,7 @@ export function EngineeringWorkspace() {
               </tr>
             </thead>
             <tbody>
-              {data[active].map((row) => (
+              {data[effectiveActive].map((row) => (
                 <tr
                   key={row.id}
                   className={
@@ -838,8 +864,8 @@ export function EngineeringWorkspace() {
                       : ""
                   }
                   onClick={() => {
-                    if (active === "issues") setSelectedTaskId(row.id);
-                    if (active === "imports") setSelectedImportJobId(row.id);
+                    if (effectiveActive === "issues") setSelectedTaskId(row.id);
+                    if (effectiveActive === "imports") setSelectedImportJobId(row.id);
                   }}
                 >
                   {config.table.map(([field]) => <td key={field}>{displayValue(row[field])}</td>)}
@@ -848,10 +874,10 @@ export function EngineeringWorkspace() {
               ))}
             </tbody>
           </table>
-          {!data[active].length ? <WorkspaceEmptyState icon={EmptyIcon} title={`暂无${config.bulkLabel}`} description="可直接新建，或先下载模板后批量导入数据。" compact /> : null}
+          {!data[effectiveActive].length ? <WorkspaceEmptyState icon={EmptyIcon} title={`暂无${config.bulkLabel}`} description="可直接新建，或先下载模板后批量导入数据。" compact /> : null}
         </div>
 
-        {active === "issues" ? (
+        {effectiveActive === "issues" ? (
           <aside className="engineering-detail-card">
             <SectionHeader
               eyebrow="问题证据"
@@ -882,7 +908,7 @@ export function EngineeringWorkspace() {
           </aside>
         ) : null}
 
-        {active === "imports" ? (
+        {effectiveActive === "imports" ? (
           <aside className="engineering-detail-card">
             <SectionHeader
               eyebrow="文件预览"

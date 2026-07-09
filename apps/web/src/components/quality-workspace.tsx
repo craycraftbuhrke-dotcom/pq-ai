@@ -11,12 +11,13 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CSSProperties, FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
 import { ModalShell } from "@/components/modal-shell";
 import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
+import { QualityImportPanel } from "@/components/quality-import-panel";
 import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
@@ -195,7 +196,14 @@ type Analytics = {
 type MetricRow = { metric_code: string; raw_value: string; corrected_value: string };
 type RepeatRow = { repeat_no: string; metric_code: string; raw_value: string; corrected_value: string };
 type FormState = Record<string, string | boolean>;
-type Tab = "measurements" | "standards" | "analytics" | "governance";
+type Tab = "upload" | "measurements" | "standards" | "analytics" | "governance";
+
+const TAB_VALUES: Tab[] = ["upload", "measurements", "standards", "analytics", "governance"];
+
+function parseTab(value: string | null): Tab {
+  if (value && TAB_VALUES.includes(value as Tab)) return value as Tab;
+  return "upload";
+}
 
 const qualityLabels: Record<string, string> = {
   ORANGE_PEEL: "橘皮",
@@ -301,10 +309,20 @@ function normalizeMeasurementForm(
   };
 }
 
-export function QualityWorkspace() {
+export function QualityWorkspace({
+  mode = "full",
+  lockedTab,
+}: {
+  mode?: "full" | "embed";
+  lockedTab?: Tab;
+} = {}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { factoryId, modelId, colorId } = useWorkspaceContext();
   const contextFilterActive = Boolean(factoryId || modelId || colorId);
-  const [tab, setTab] = useState<Tab>("measurements");
+  const showChrome = mode === "full";
+  const tab = lockedTab ?? parseTab(searchParams.get("tab"));
   const [summary, setSummary] = useState<Summary | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [analyticsMetric, setAnalyticsMetric] = useState("doi");
@@ -341,6 +359,23 @@ export function QualityWorkspace() {
     if (submitting) return;
     setModal(null);
   }, [submitting]);
+
+  const setTab = useCallback(
+    (next: Tab) => {
+      // DomainHub owns ?tab= when embedded; navigate to the hub tab instead of rewriting local state.
+      if (lockedTab) {
+        router.replace(`/quality?tab=${next}`, { scroll: false });
+        return;
+      }
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === "upload") params.delete("tab");
+      else params.set("tab", next);
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [lockedTab, pathname, router, searchParams],
+  );
+
   const reload = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -722,61 +757,100 @@ export function QualityWorkspace() {
     URL.revokeObjectURL(url);
   }
 
-  return (
-    <div className="page-stack">
+  const content = (
+    <>
+      {showChrome ? (
       <header className="page-header">
-        <div><span className="page-kicker">测量与判定</span><h1>质量数据中心</h1><p>维护橘皮、色差/效应和膜厚数据，依据多维质量标准自动判定。</p></div>
+        <div>
+          <span className="page-kicker">查看与判定</span>
+          <h1>质量数据中心</h1>
+          <p>
+            批量上传质量数据、查看判定结果、维护标准与仪器可靠性。日常上数请用「批量上传」；本页其余 Tab 负责查看、补录与治理。
+          </p>
+        </div>
         <div className="page-actions">
-          <button className="button button-secondary" onClick={() => { void reload(); if (tab === "analytics") void loadAnalytics(); }} disabled={loading || analyticsLoading}><RefreshCw className={loading || analyticsLoading ? "spin" : ""} />刷新</button>
-          {tab === "measurements" || tab === "standards" ? <button className="button button-primary" onClick={() => tab === "measurements" ? openMeasurement() : openStandard()}><Plus />新建{tab === "measurements" ? "质量测量" : "质量标准"}</button> : null}
+          {tab !== "upload" ? (
+            <button className="button button-secondary" onClick={() => { void reload(); if (tab === "analytics") void loadAnalytics(); }} disabled={loading || analyticsLoading}>
+              <RefreshCw className={loading || analyticsLoading ? "spin" : ""} />刷新
+            </button>
+          ) : null}
+          {tab === "upload" ? (
+            <button className="button button-secondary" onClick={() => setTab("measurements")}>
+              查看已导入质量
+            </button>
+          ) : null}
+          {tab === "measurements" || tab === "standards" ? (
+            <button className="button button-primary" onClick={() => (tab === "measurements" ? openMeasurement() : openStandard())}>
+              <Plus />新建{tab === "measurements" ? "质量测量" : "质量标准"}
+            </button>
+          ) : null}
         </div>
       </header>
-      <div className="freshness"><span className="live-dot" /> 实时质量数据</div>
-      <section className="module-stat-strip">
-        <article><span>质量测量</span><strong>{loading ? "…" : summary?.measurements ?? 0}</strong><small>{summary?.verified_measurements ?? 0} 条通过可靠性门禁</small></article>
-        <article><span>指标值</span><strong>{loading ? "…" : summary?.metric_values ?? 0}</strong><small>当前受治理目录 {definitions.length} 项</small></article>
-        <article><span>合格 / 超差</span><strong>{loading ? "…" : `${summary?.pass_measurements ?? 0} / ${summary?.fail_measurements ?? 0}`}</strong><small>按当前生效标准判定</small></article>
-        <article><span>可靠性待处理</span><strong>{loading ? "…" : `${summary?.unverified_measurements ?? 0} / ${summary?.failed_reliability_measurements ?? 0}`}</strong><small>未验证 / 失败</small></article>
-      </section>
+      ) : (
+        <div className="embedded-toolbar">
+          {tab !== "upload" ? (
+            <button className="button button-secondary" onClick={() => { void reload(); if (tab === "analytics") void loadAnalytics(); }} disabled={loading || analyticsLoading}>
+              <RefreshCw className={loading || analyticsLoading ? "spin" : ""} />刷新
+            </button>
+          ) : null}
+          {tab === "measurements" || tab === "standards" ? (
+            <button className="button button-primary" onClick={() => (tab === "measurements" ? openMeasurement() : openStandard())}>
+              <Plus />新建{tab === "measurements" ? "质量测量" : "质量标准"}
+            </button>
+          ) : null}
+        </div>
+      )}
+      {showChrome ? <div className="freshness"><span className="live-dot" /> 实时质量数据 · 批量上传可自动创建生产事件</div> : null}
+      {showChrome && tab !== "upload" ? (
+        <section className="module-stat-strip">
+          <article><span>质量测量</span><strong>{loading ? "…" : summary?.measurements ?? 0}</strong><small>{summary?.verified_measurements ?? 0} 条通过可靠性门禁</small></article>
+          <article><span>指标值</span><strong>{loading ? "…" : summary?.metric_values ?? 0}</strong><small>当前受治理目录 {definitions.length} 项</small></article>
+          <article><span>合格 / 超差</span><strong>{loading ? "…" : `${summary?.pass_measurements ?? 0} / ${summary?.fail_measurements ?? 0}`}</strong><small>按当前生效标准判定</small></article>
+          <article><span>可靠性待处理</span><strong>{loading ? "…" : `${summary?.unverified_measurements ?? 0} / ${summary?.failed_reliability_measurements ?? 0}`}</strong><small>未验证 / 失败</small></article>
+        </section>
+      ) : null}
       {error ? <div className="message-banner message-error">{error}</div> : null}
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
-      <div className="freshness">记录采用追加与版本修订，不支持直接删除。</div>
+      {showChrome && tab !== "upload" ? <div className="freshness">记录采用追加与版本修订，不支持直接删除。单条补录可在「查看与判定」中新建；批量请用「批量上传」。</div> : null}
 
-      <section className="panel quality-workspace">
+      <section className={showChrome ? "panel quality-workspace" : "quality-workspace embedded-workspace"}>
+        {showChrome ? (
         <div className="master-tabs">
-          <button className={tab === "measurements" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("measurements")}>质量测量 <span>{measurements.length}</span></button>
+          <button className={tab === "upload" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("upload")}>
+            <Upload aria-hidden="true" /> 批量上传
+          </button>
+          <button className={tab === "measurements" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("measurements")}>查看与判定 <span>{measurements.length}</span></button>
           <button className={tab === "standards" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("standards")}>质量标准 <span>{standards.length}</span></button>
           <button className={tab === "analytics" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("analytics")}>SPC 与趋势 <span>{filteredAnalytics?.series.length ?? analytics?.statistics.samples ?? 0}</span></button>
           <button className={tab === "governance" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("governance")}>仪器可靠性 <span>{instruments.length}</span></button>
         </div>
-        {tab !== "governance" ? <div className="quality-toolbar">
+        ) : null}
+        {tab === "upload" ? (
+          <QualityImportPanel embedded onImported={() => void reload()} />
+        ) : null}
+        {tab !== "upload" && tab !== "governance" ? <div className="quality-toolbar">
           {tab !== "analytics" ? <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`搜索质量${tab === "measurements" ? "测量" : "标准"}`} /></label> : <div className="quality-analytics-title"><Activity /><span>实时过程能力与点位风险</span></div>}
           {contextFilterActive ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}
           <select value={tab === "analytics" ? typeFilter || "ORANGE_PEEL" : typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>{tab !== "analytics" ? <option value="">全部质量类型</option> : null}{Object.entries(qualityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
           {tab === "analytics" ? <select value={resolvedAnalyticsMetric} onChange={(event) => setAnalyticsMetric(event.target.value)}>{analyticsDefinitions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code}</option>)}</select> : null}
-          {tab === "measurements" || tab === "standards" ? (
-            tab === "measurements" ? (
-              <Link className="button button-secondary" href="/import-wizard">
-                <Upload /> 打开导入向导
-              </Link>
-            ) : (
-              <BulkDataActions
-                resourceKey="quality.standards"
-                resourceLabel="质量标准"
-                disabled={loading || submitting}
-                onImported={reload}
-                onResult={bulkResult}
-              />
-            )
-          ) : (
+          {tab === "measurements" ? (
+            <button className="button button-secondary" type="button" onClick={() => setTab("upload")}>
+              <Upload /> 去批量上传
+            </button>
+          ) : null}
+          {tab === "standards" ? (
+            <BulkDataActions
+              resourceKey="quality.standards"
+              resourceLabel="质量标准"
+              disabled={loading || submitting}
+              onImported={reload}
+              onResult={bulkResult}
+            />
+          ) : null}
+          {tab === "analytics" ? (
             <button className="button button-secondary" onClick={exportCsv}><Download />导出 CSV</button>
-          )}
+          ) : null}
         </div> : null}
-        {tab === "measurements" ? (
-          <div className="quality-import-hint">
-            日常批量上数请用「批量导入测量」：同一份 CSV 可同时填写车号、工厂、车型、颜色与质量指标，生产事件不存在时会自动创建。本页「新建」适合单条补录。
-          </div>
-        ) : null}
         {tab === "measurements" ? (
           <div className="quality-card-list">
             {filteredMeasurements.map((measurement) => (
@@ -791,7 +865,7 @@ export function QualityWorkspace() {
               <WorkspaceEmptyState
                 icon={Activity}
                 title="暂无质量测量记录"
-                description="日常请打开「批量导入测量」一次上传车身上下文与质量数据；也可点新建做单条录入。"
+                description="日常请切到「批量上传」一次写入车身上下文与质量数据；也可点新建做单条补录。"
                 compact
               />
             ) : null}
@@ -804,11 +878,15 @@ export function QualityWorkspace() {
               ))}
             </tbody></table>
           </div>
-        ) : tab === "analytics" ? <QualityAnalyticsPanel analytics={filteredAnalytics} loading={analyticsLoading} /> : <MeasurementGovernancePanel />}
+        ) : tab === "analytics" ? (
+          <QualityAnalyticsPanel analytics={filteredAnalytics} loading={analyticsLoading} />
+        ) : tab === "governance" ? (
+          <MeasurementGovernancePanel />
+        ) : null}
       </section>
 
       {modal ? (
-        <ModalShell className="quality-modal" eyebrow={modal.record ? "编辑" : "新建"} title={`${modal.record ? "编辑" : "新建"}${modal.kind === "measurement" ? "质量测量" : "质量标准"}`} description={modal.kind === "measurement" ? "可选择已有生产事件，或在本表单内同时新建生产事件后再录入质量数据。批量场景请使用导入向导。" : "统一维护质量标准的适用范围、上下限和状态信息。"} onClose={() => { if (!submitting) { setCreateRunInline(false); closeModal(); } }} busy={submitting}>
+        <ModalShell className="quality-modal" eyebrow={modal.record ? "编辑" : "新建"} title={`${modal.record ? "编辑" : "新建"}${modal.kind === "measurement" ? "质量测量" : "质量标准"}`} description={modal.kind === "measurement" ? "可选择已有生产事件，或在本表单内同时新建生产事件后再录入质量数据。日常批量请用「批量上传」Tab。" : "统一维护质量标准的适用范围、上下限和状态信息。"} onClose={() => { if (!submitting) { setCreateRunInline(false); closeModal(); } }} busy={submitting}>
           <form onSubmit={(event) => void submit(event)}>
             <div className="form-grid">
               {modal.kind === "measurement"
@@ -819,8 +897,11 @@ export function QualityWorkspace() {
           </form>
         </ModalShell>
       ) : null}
-    </div>
+    </>
   );
+
+  if (!showChrome) return <div className="embedded-stack">{content}</div>;
+  return <div className="page-stack">{content}</div>;
 }
 
 function analyticsNumber(value?: number | null, digits = 3): string {
@@ -957,7 +1038,7 @@ function renderMeasurementForm(
   const profiles = refs.importProfiles.filter((item) => item.quality_type === form.quality_type && (!selectedInstrument || item.instrument_type === selectedInstrument.instrument_type));
   const { createRunInline, setCreateRunInline, isEdit } = inline;
   return [
-    <FormSection key="measurement-basic" title="采集上下文" description="先确认生产事件、质量类型、测量编组和测量点。找不到生产事件时可在本表单内新建，或改用批量导入向导。">
+    <FormSection key="measurement-basic" title="采集上下文" description="先确认生产事件、质量类型、测量编组和测量点。找不到生产事件时可在本表单内新建；日常批量请用「批量上传」Tab。">
       <div className="modal-section-grid">
         {inputField("数据编号", "data_no", form, setForm, "text", true)}
         {!isEdit ? (
@@ -991,7 +1072,7 @@ function renderMeasurementForm(
         ) : (
           selectField("生产事件", "production_run_id", form, setForm, refs.runs.map((item) => [item.id, `${item.run_no} / ${item.body_no ?? "无车身号"}`]), true)
         )}
-        <label className="form-field form-field-wide"><span>录入提示</span><div className="panel-note">测量编组会按当前生产事件车型与质量类型过滤；若命中单一编组，表单会自动收口到该编组，并同步过滤可选测量点。批量上数请用导入向导。</div></label>
+        <label className="form-field form-field-wide"><span>录入提示</span><div className="panel-note">测量编组会按当前生产事件车型与质量类型过滤；若命中单一编组，表单会自动收口到该编组，并同步过滤可选测量点。批量上数请切到「批量上传」。</div></label>
         {selectField("测量编组", "measurement_group_id", form, setForm, options(groups, true))}
         {selectField("测量点", "measurement_point_id", form, setForm, options(points), true)}
         {selectField("质量类型", "quality_type", form, (next) => {

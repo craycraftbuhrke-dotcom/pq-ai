@@ -66,9 +66,13 @@ export function Dashboard({ snapshot }: DashboardProps) {
         </div>
       ) : null}
       <section className="dashboard-quick-links" aria-label="常用入口">
+        <Link className="dashboard-quick-link" href="/quality?tab=upload">
+          <strong>上传质量数据</strong>
+          <span>批量写入膜厚、色差、橘皮测量</span>
+        </Link>
         <Link className="dashboard-quick-link" href="/quality">
-          <strong>录入质量</strong>
-          <span>登记膜厚、色差、橘皮测量</span>
+          <strong>查看与判定</strong>
+          <span>浏览质量结果并维护标准</span>
         </Link>
         <Link className="dashboard-quick-link" href="/production">
           <strong>查看生产车身</strong>

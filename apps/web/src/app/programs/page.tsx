@@ -1,5 +1,5 @@
-import { ProgramWorkspace } from "@/components/program-workspace";
+import { redirect } from "next/navigation";
 
-export default function ProgramsPage() {
-  return <ProgramWorkspace />;
+export default function ProgramsRedirectPage() {
+  redirect("/process?tab=recipes");
 }

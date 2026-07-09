@@ -1,22 +1,4 @@
-import { ModulePage } from "@/components/module-page";
-import { getAuditPageData } from "@/lib/business-data";
-
-// 禁用构建时静态化：审计中心在 SSR 中读取 process.env.API_URL 拉取实时数据，
-// 若被 next build 阶段预渲染，构建容器里没有 API_URL，会把"未配置"错误消息固化进 HTML。
-export const dynamic = "force-dynamic";
-
-export default async function AuditPage() {
-  const data = await getAuditPageData();
-  return (
-    <ModulePage
-      kicker="身份、权限与操作追溯"
-      title="审计中心"
-      description="追踪关键写操作、授权拒绝、请求身份、资源对象与执行结果。"
-      primaryAction="导出审计记录"
-      stats={data.stats}
-      columns={["请求 ID", "操作人", "权限动作", "接口路径", "状态码", "发生时间"]}
-      rows={data.rows}
-      source={data.source}
-    />
-  );
+import { redirect } from "next/navigation";
+export default function AuditRedirectPage() {
+  redirect("/settings?tab=audit");
 }

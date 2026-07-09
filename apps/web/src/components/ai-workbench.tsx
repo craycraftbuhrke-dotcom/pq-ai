@@ -484,7 +484,15 @@ function shortHash(value?: string | null): string {
   return value.length <= 20 ? value : `${value.slice(0, 12)}...${value.slice(-8)}`;
 }
 
-export function AiWorkbench() {
+export function AiWorkbench({
+  mode = "full",
+  lockedTab,
+  allowedTabs,
+}: {
+  mode?: "full" | "embed";
+  lockedTab?: Tab;
+  allowedTabs?: Tab[];
+} = {}) {
   const { actor } = useAuth();
   const actorName = actor.isAuthenticated ? actor.displayName : "";
   const canManageModels =
@@ -492,12 +500,16 @@ export function AiWorkbench() {
     actor.roles.includes("ADMIN") ||
     actor.permissions.includes("*") ||
     actor.roles.includes("SYSTEM");
-  const [tab, setTab] = useState<Tab>("predictions");
+  const showChrome = mode === "full";
+  const [tab, setTab] = useState<Tab>(lockedTab ?? allowedTabs?.[0] ?? "predictions");
   const [showAdvancedTraining, setShowAdvancedTraining] = useState(false);
-  const activeTab =
-    !canManageModels && (tab === "models" || tab === "governance" || tab === "comparison")
-      ? "predictions"
-      : tab;
+  const activeTab = lockedTab
+    ? lockedTab
+    : allowedTabs
+      ? (allowedTabs.includes(tab) ? tab : allowedTabs[0])
+      : !canManageModels && (tab === "models" || tab === "governance" || tab === "comparison")
+        ? "predictions"
+        : tab;
   const [models, setModels] = useState<ModelVersion[]>([]);
   const [datasets, setDatasets] = useState<DatasetSnapshot[]>([]);
   const [acceptanceDecisions, setAcceptanceDecisions] = useState<AcceptanceDecision[]>([]);
@@ -1264,7 +1276,8 @@ export function AiWorkbench() {
   }
 
   return (
-    <div className="page-stack">
+    <div className={showChrome ? "page-stack" : "embedded-stack"}>
+      {showChrome ? (
       <header className="page-header">
         <div>
           <span className="page-kicker">智能分析与推荐</span>
@@ -1279,18 +1292,28 @@ export function AiWorkbench() {
           <RefreshCw className={loading ? "spin" : ""} /> 刷新
         </button>
       </header>
+      ) : (
+        <div className="embedded-toolbar">
+          <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
+            <RefreshCw className={loading ? "spin" : ""} /> 刷新
+          </button>
+        </div>
+      )}
 
       {error ? <button className="message-banner message-error" onClick={() => setError("")}>{error}<X /></button> : null}
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
 
+      {showChrome ? (
       <section className="module-stat-strip">
         <article><span>可用模型</span><strong>{models.filter((model) => model.status === "ACTIVE").length}</strong><small>共 {models.length} 个版本</small></article>
         <article><span>预测 / 诊断</span><strong>{predictions.length} / {diagnoses.length}</strong><small>结果已保存</small></article>
         <article><span>参数推荐</span><strong>{recommendations.length}</strong><small>{recommendations.filter((item) => item.status === "VERIFIED").length} 条已复测</small></article>
-        <article><span>受控试验</span><strong>{controlledTrials.length}</strong><small>可在「受控试验」菜单继续跟进</small></article>
+        <article><span>受控试验</span><strong>{controlledTrials.length}</strong><small>推荐与试验同页闭环</small></article>
       </section>
+      ) : null}
 
-      <section className="panel ai-workspace">
+      <section className={showChrome ? "panel ai-workspace" : "ai-workspace embedded-workspace"}>
+        {(showChrome || (mode === "embed" && allowedTabs)) ? (
         <div className="master-tabs">
           {(
             (
@@ -1306,12 +1329,17 @@ export function AiWorkbench() {
                     ["predictions", "预测与诊断"],
                     ["recommendations", "推荐与试验"],
                   ] as [Tab, string][])
-            )
+            ).filter(([key]) => !allowedTabs || allowedTabs.includes(key))
           ).map(([key, label]) => (
             <button key={key} className={activeTab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
           ))}
           <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索当前列表" /></label>
         </div>
+        ) : (
+        <div className="master-tabs">
+          <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索当前列表" /></label>
+        </div>
+        )}
 
         {activeTab === "models" && canManageModels ? (
           <div className="ai-split">

@@ -28,7 +28,7 @@ function timeSince(d: string | null): string {
   const hours = Math.floor(mins / 60); if (hours < 24) return `${hours} 小时前`; return `${Math.floor(hours / 24)} 天前`;
 }
 
-export default function IntegrationMonitorPage() {
+export default function IntegrationMonitorPage({ embedded = false }: { embedded?: boolean }) {
   const { actor } = useAuth();
   const [health, setHealth] = useState<IntegrationHealth | null>(null);
   const [loading, setLoading] = useState(true); const [error, setError] = useState("");
@@ -67,7 +67,7 @@ export default function IntegrationMonitorPage() {
   }, [reload]);
   if (!actor.isAuthenticated) {
     return (
-      <div className="page-stack">
+      <div className={embedded ? "embedded-stack" : "page-stack"}>
         <WorkspaceEmptyState
           icon={PlugZap}
           title="请先登录后查看集成监控"
@@ -79,8 +79,14 @@ export default function IntegrationMonitorPage() {
   }
 
   return (
-    <div className="page-stack">
+    <div className={embedded ? "embedded-stack" : "page-stack"}>
+      {!embedded ? (
       <header className="page-header"><div><span className="page-kicker">对接监控</span><h1>集成监控</h1><p>实时监控 MES、QMS、机器人、材料系统集成端点的连接状态与事件处理情况。</p></div><button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> 刷新</button></header>
+      ) : (
+        <div className="embedded-toolbar">
+          <button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> 刷新</button>
+        </div>
+      )}
       {error ? <button className="message-banner message-error" onClick={() => setError("")}>{error}<X /></button> : null}
       {loading ? <div className="master-empty"><LoaderCircle className="spin" /> 正在加载集成监控数据...</div> : health ? <>
         <section className="module-stat-strip">

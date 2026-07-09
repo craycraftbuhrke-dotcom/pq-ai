@@ -1,5 +1,4 @@
-import { IntegrationWorkspace } from "@/components/integration-workspace";
-
-export default function IntegrationsPage() {
-  return <IntegrationWorkspace />;
+import { redirect } from "next/navigation";
+export default function IntegrationsRedirectPage() {
+  redirect("/settings?tab=integrations");
 }

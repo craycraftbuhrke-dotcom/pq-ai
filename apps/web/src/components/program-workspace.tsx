@@ -147,12 +147,20 @@ function matchesContextIdList(recordIds?: string[] | null, contextId?: string): 
   return recordIds.includes(contextId);
 }
 
-export function ProgramWorkspace() {
+export function ProgramWorkspace({
+  mode = "full",
+}: {
+  mode?: "full" | "recipes" | "durr";
+}) {
   const { actor } = useAuth();
   const { factoryId, modelId, colorId, stage } = useWorkspaceContext();
   const contextFilterActive = Boolean(factoryId || modelId || colorId || stage);
   const actorName = actor.isAuthenticated ? actor.displayName : "";
-  const [workspaceTab, setWorkspaceTab] = useState<"programs" | "durr" | "diff">("programs");
+  const [workspaceTab, setWorkspaceTab] = useState<"programs" | "durr" | "diff">(
+    mode === "durr" ? "durr" : "programs",
+  );
+  const showChrome = mode === "full";
+  const hideOuterTabs = mode !== "full";
   const [programs, setPrograms] = useState<Program[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
   const [brushes, setBrushes] = useState<Brush[]>([]);
@@ -438,7 +446,8 @@ export function ProgramWorkspace() {
   }
 
   return (
-    <div className="page-stack">
+    <div className={showChrome ? "page-stack" : "embedded-stack"}>
+      {showChrome ? (
       <header className="page-header">
         <div>
           <span className="page-kicker">程序与刷子</span>
@@ -465,6 +474,7 @@ export function ProgramWorkspace() {
           </button> : null}
         </div>
       </header>
+      ) : null}
       <div className="freshness"><span className="live-dot" /> 实时程序配置 · 版本状态受控</div>
       <section className="module-stat-strip">
         {stats.map(([label, value, note]) => (
@@ -476,12 +486,21 @@ export function ProgramWorkspace() {
       <div className="freshness">程序、版本、刷子采用版本化与替换治理；当前页面不提供物理删除。</div>
       <div className="freshness">建议顺序：先程序 → 再版本 → 再一次填完刷子身份、本工序参数与测量点贡献。参数列表会按当前程序工序自动过滤（如中涂只显示中涂参数）。</div>
 
+      {!hideOuterTabs ? (
       <div className="master-tabs program-workspace-tabs">
         <button className={workspaceTab === "programs" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("programs")}>程序、刷子与参数</button>
         <button className={workspaceTab === "durr" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("durr")}>机器人设备与轨迹</button>
         <button className={workspaceTab === "diff" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("diff")}>版本对比</button>
         {contextFilterActive && workspaceTab === "programs" ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}
       </div>
+      ) : workspaceTab === "programs" ? (
+        <div className="master-tabs program-workspace-tabs">
+          <BulkDataActions resourceKey="process.spray-programs" resourceLabel="喷涂程序" disabled={loading || submitting} onImported={reload} onResult={bulkResult} />
+          <button className="button button-primary" onClick={() => openModal("program")}><Plus aria-hidden="true" />新建喷涂程序</button>
+          <button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} aria-hidden="true" />刷新</button>
+          {contextFilterActive ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}
+        </div>
+      ) : null}
 
       {workspaceTab === "programs" ? <section className="program-config-grid">
         <article className="panel program-column">

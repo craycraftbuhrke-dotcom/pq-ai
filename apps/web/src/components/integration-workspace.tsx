@@ -196,7 +196,7 @@ function statusClass(status: string): string {
   return "integration-pending";
 }
 
-export function IntegrationWorkspace() {
+export function IntegrationWorkspace({ embedded = false }: { embedded?: boolean } = {}) {
   const [tab, setTab] = useState<Tab>("events");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
@@ -395,7 +395,8 @@ export function IntegrationWorkspace() {
   }
 
   return (
-    <div className="page-stack">
+    <div className={embedded ? "embedded-stack" : "page-stack"}>
+      {!embedded ? (
       <header className="page-header">
         <div>
           <span className="page-kicker">系统对接</span>
@@ -415,6 +416,7 @@ export function IntegrationWorkspace() {
           </button>
         </div>
       </header>
+      ) : null}
 
       {error ? <button className="message-banner message-error" onClick={() => setError("")}>{error}<X /></button> : null}
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}

@@ -117,7 +117,7 @@ function GaugeArc({ value, label, size = 80 }: { value: number; label: string; s
   );
 }
 
-export default function QualityMonitorPage() {
+export default function QualityMonitorPage({ embedded = false }: { embedded?: boolean }) {
   const { actor } = useAuth();
   const [data, setData] = useState<QualityHealth | null>(null);
   const [loading, setLoading] = useState(true);
@@ -149,7 +149,7 @@ export default function QualityMonitorPage() {
 
   if (!actor.isAuthenticated) {
     return (
-      <div className="page-stack">
+      <div className={embedded ? "embedded-stack" : "page-stack"}>
         <WorkspaceEmptyState
           icon={ShieldCheck}
           title="请先登录后查看质量监控"
@@ -164,7 +164,8 @@ export default function QualityMonitorPage() {
   const healthLabel = (data?.health_score ?? 0) >= 90 ? "健康" : (data?.health_score ?? 0) >= 70 ? "需要注意" : "需关注";
 
   return (
-    <div className="page-stack">
+    <div className={embedded ? "embedded-stack" : "page-stack"}>
+      {!embedded ? (
       <header className="page-header">
         <div>
           <span className="page-kicker">数据是否可信</span>
@@ -175,6 +176,13 @@ export default function QualityMonitorPage() {
           <RefreshCw className={loading ? "spin" : ""} /> 刷新
         </button>
       </header>
+      ) : (
+        <div className="embedded-toolbar">
+          <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
+            <RefreshCw className={loading ? "spin" : ""} /> 刷新
+          </button>
+        </div>
+      )}
       {error ? <button className="message-banner message-error" onClick={() => setError("")}>{error}<X /></button> : null}
 
       {loading ? (

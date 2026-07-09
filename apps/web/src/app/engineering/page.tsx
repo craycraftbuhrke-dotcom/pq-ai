@@ -1,5 +1,4 @@
-import { EngineeringWorkspace } from "@/components/engineering-workspace";
-
-export default function EngineeringPage() {
-  return <EngineeringWorkspace />;
+import { redirect } from "next/navigation";
+export default function EngineeringRedirectPage() {
+  redirect("/ai?tab=changes");
 }

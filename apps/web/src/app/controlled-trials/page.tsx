@@ -102,7 +102,7 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return payload;
 }
 
-export default function ControlledTrialsPage() {
+export default function ControlledTrialsPage({ embedded = false }: { embedded?: boolean }) {
   const { actor } = useAuth();
   const [trials, setTrials] = useState<ControlledTrial[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -186,7 +186,7 @@ export default function ControlledTrialsPage() {
 
   if (!actor.isAuthenticated) {
     return (
-      <div className="page-stack">
+      <div className={embedded ? "embedded-stack" : "page-stack"}>
         <WorkspaceEmptyState
           icon={ShieldCheck}
           title="请先登录后查看受控试验"
@@ -198,7 +198,8 @@ export default function ControlledTrialsPage() {
   }
 
   return (
-    <div className="page-stack">
+    <div className={embedded ? "embedded-stack" : "page-stack"}>
+      {!embedded ? (
       <header className="page-header">
         <div>
           <span className="page-kicker">受控试验</span>
@@ -209,6 +210,13 @@ export default function ControlledTrialsPage() {
           <RefreshCw className={loading ? "spin" : ""} /> 刷新
         </button>
       </header>
+      ) : (
+        <div className="embedded-toolbar">
+          <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
+            <RefreshCw className={loading ? "spin" : ""} /> 刷新
+          </button>
+        </div>
+      )}
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
       {error ? <button className="message-banner message-error" onClick={() => setError("")}>{error}<X /></button> : null}
       <section className="module-stat-strip">
