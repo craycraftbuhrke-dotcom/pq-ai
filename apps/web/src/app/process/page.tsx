@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense } from "react";
+import { ArrowRight, Bot, GitCompareArrows, Activity } from "lucide-react";
 
 import { DomainHub } from "@/components/domain-hub";
 import { ProductionWorkspace } from "@/components/production-workspace";
@@ -12,25 +14,61 @@ const TABS = [
   { key: "runs", label: "生产实绩" },
 ];
 
+const OVERVIEW_CARDS = [
+  {
+    key: "recipes",
+    href: "/process?tab=recipes",
+    icon: GitCompareArrows,
+    title: "配方与刷子",
+    description: "维护喷涂程序、受控版本、刷子身份、本工序参数与测量点贡献权重。",
+    action: "进入配方",
+  },
+  {
+    key: "runs",
+    href: "/process?tab=runs",
+    icon: Activity,
+    title: "生产实绩",
+    description: "查看生产事件，补录五段工序实绩与实际参数。质量上传可自动创建生产事件。",
+    action: "进入实绩",
+  },
+  {
+    key: "ai",
+    href: "/ai?tab=recommendations",
+    icon: Bot,
+    title: "工艺变更与试验",
+    description: "工程师参数变更、推荐执行与受控试验已统一到 AI 分析中心闭环。",
+    action: "去 AI 闭环",
+  },
+] as const;
+
 function ProcessOverview() {
   return (
     <div className="domain-overview">
+      <div className="domain-overview-intro">
+        <strong>从这里进入工艺工作台</strong>
+        <span>配方配置与生产实绩在本中心完成；推荐试验与工艺变更请到 AI 分析中心。</span>
+      </div>
       <div className="domain-overview-grid">
-        <article>
-          <h3>配方与刷子</h3>
-          <p>维护喷涂程序、受控版本、刷子身份、本工序参数与测量点贡献权重。</p>
-          <a className="button button-secondary" href="/process?tab=recipes">进入配方</a>
-        </article>
-        <article>
-          <h3>生产实绩</h3>
-          <p>查看生产事件，补录五段工序实绩与实际参数。质量上传可自动创建生产事件。</p>
-          <a className="button button-secondary" href="/process?tab=runs">进入实绩</a>
-        </article>
-        <article>
-          <h3>工艺变更与试验</h3>
-          <p>工程师参数变更、推荐执行与受控试验已统一到 AI 分析中心的「推荐与试验 / 工艺变更」。</p>
-          <a className="button button-secondary" href="/ai?tab=recommendations">去 AI 闭环</a>
-        </article>
+        {OVERVIEW_CARDS.map((card) => {
+          const Icon = card.icon;
+          return (
+            <article className="domain-overview-card" key={card.key}>
+              <div className="domain-overview-card-head">
+                <span className="domain-overview-icon" aria-hidden="true">
+                  <Icon />
+                </span>
+                <div>
+                  <h3>{card.title}</h3>
+                  <p>{card.description}</p>
+                </div>
+              </div>
+              <Link className="button button-secondary domain-overview-action" href={card.href}>
+                {card.action}
+                <ArrowRight aria-hidden="true" />
+              </Link>
+            </article>
+          );
+        })}
       </div>
     </div>
   );
