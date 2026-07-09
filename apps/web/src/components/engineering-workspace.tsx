@@ -24,6 +24,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { SectionHeader } from "@/components/section-header";
 import { JsonObjectEditor, JsonStringListEditor } from "@/components/structured-json-editor";
 import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
+import { statusLabel } from "@/lib/display-labels";
 
 type TabKey =
   | "issues"
@@ -96,11 +97,11 @@ const tabs: Record<TabKey, TabConfig> = {
       { name: "task_type", label: "任务类型", type: "select", options: [["QUALITY_ISSUE", "质量问题"], ["PROCESS_DEBUG", "工艺调试"], ["SUPPLIER_FEEDBACK", "供应商反馈"], ["CONTROLLED_TRIAL", "受控试验"]] },
       { name: "status", label: "状态", type: "select", options: statusOptions.task },
       { name: "severity", label: "严重度", type: "select", options: statusOptions.severity },
-      { name: "factory_id", label: "工厂 ID" },
-      { name: "production_run_id", label: "生产事件 ID" },
-      { name: "measurement_point_id", label: "测量点 ID" },
-      { name: "quality_measurement_id", label: "质量数据 ID" },
-      { name: "material_batch_id", label: "材料批次 ID" },
+      { name: "factory_id", label: "工厂编号", placeholder: "请选择或粘贴业务编号，不是系统内部乱码" },
+      { name: "production_run_id", label: "生产事件编号", placeholder: "请选择或粘贴业务编号，不是系统内部乱码" },
+      { name: "measurement_point_id", label: "测量点编号", placeholder: "请选择或粘贴业务编号，不是系统内部乱码" },
+      { name: "quality_measurement_id", label: "质量数据编号", placeholder: "请选择或粘贴业务编号，不是系统内部乱码" },
+      { name: "material_batch_id", label: "材料批次编号", placeholder: "请选择或粘贴业务编号，不是系统内部乱码" },
       { name: "process_stage", label: "工序", type: "select", options: [["", "不指定"], ...processStages] },
       { name: "target_quality_type", label: "质量族", type: "select", options: [["", "不指定"], ...qualityTypes] },
       { name: "target_metric", label: "目标指标" },
@@ -119,7 +120,7 @@ const tabs: Record<TabKey, TabConfig> = {
     bulkLabel: "3C3B 工艺路线",
     icon: Route,
     fields: [
-      { name: "factory_id", label: "工厂 ID", required: true },
+      { name: "factory_id", label: "工厂编号", required: true, placeholder: "请选择或粘贴业务编号，不是系统内部乱码" },
       { name: "route_code", label: "路线代码", required: true, placeholder: "3C3B-F01" },
       { name: "name", label: "路线名称", required: true },
       { name: "version", label: "版本", required: true, placeholder: "V1.0" },
@@ -141,7 +142,7 @@ const tabs: Record<TabKey, TabConfig> = {
     icon: FileCheck2,
     fields: [
       { name: "import_no", label: "导入任务号", required: true, placeholder: "IMP-DXQ-001" },
-      { name: "profile_id", label: "Profile ID", required: true },
+      { name: "profile_id", label: "导入配置", required: true, type: "select", options: [] },
       { name: "domain_type", label: "文件域", type: "select", options: [["DURR_DXQ", "Dürr DXQ"], ["DURR_PLC", "Dürr PLC"], ["BYK_COLOR", "BYK 色差"], ["BYK_ORANGE_PEEL", "BYK 橘皮"], ["FISCHER_THICKNESS", "Fischer 膜厚"], ["MATERIAL_COA", "材料 COA"], ["MATERIAL_TDS", "材料 TDS"]] },
       { name: "source_filename", label: "文件名", required: true },
       { name: "source_uri", label: "文件 URI" },
@@ -164,9 +165,9 @@ const tabs: Record<TabKey, TabConfig> = {
     icon: ShieldCheck,
     fields: [
       { name: "study_no", label: "研究编号", required: true, placeholder: "MSA-2026-001" },
-      { name: "instrument_id", label: "仪器 ID", required: true },
-      { name: "probe_id", label: "探头 ID" },
-      { name: "method_id", label: "方法 ID" },
+      { name: "instrument_id", label: "仪器编号", required: true, placeholder: "请选择或粘贴业务编号，不是系统内部乱码" },
+      { name: "probe_id", label: "探头编号", placeholder: "请选择或粘贴业务编号，不是系统内部乱码" },
+      { name: "method_id", label: "方法编号", placeholder: "请选择或粘贴业务编号，不是系统内部乱码" },
       { name: "quality_type", label: "质量族", type: "select", options: qualityTypes },
       { name: "metric_code", label: "指标代码", required: true, placeholder: "doi" },
       { name: "study_type", label: "研究类型", placeholder: "GRR" },
@@ -196,7 +197,7 @@ const tabs: Record<TabKey, TabConfig> = {
       { name: "material_name", label: "材料名称" },
       { name: "document_type", label: "文件类型", type: "select", options: [["COA", "COA"], ["TDS", "TDS"], ["MSDS", "MSDS"], ["DOE", "DOE"]] },
       { name: "source_uri", label: "文件 URI" },
-      { name: "profile_id", label: "导入 Profile ID" },
+      { name: "profile_id", label: "导入配置编号", placeholder: "请选择或粘贴业务编号，不是系统内部乱码" },
       { name: "status", label: "状态", type: "select", options: statusOptions.supplier },
       { name: "submitted_by", label: "提交人", required: true },
       { name: "reviewed_by", label: "审核人" },
@@ -258,7 +259,7 @@ const tabs: Record<TabKey, TabConfig> = {
     bulkLabel: "模型解释/SHAP",
     icon: Sparkles,
     fields: [
-      { name: "model_version_id", label: "模型版本 ID", required: true },
+      { name: "model_version_id", label: "模型版本编号", required: true, placeholder: "请选择或粘贴业务编号，不是系统内部乱码" },
       { name: "prediction_result_id", label: "预测结果 ID" },
       { name: "explanation_type", label: "解释类型", type: "select", options: [["SHAP", "SHAP"], ["SENSITIVITY", "敏感性"], ["UNCERTAINTY", "不确定度"], ["FEATURE_IMPORTANCE", "特征重要性"]] },
       { name: "target_metric", label: "目标指标", required: true },
@@ -311,12 +312,12 @@ function localDateTime(value?: unknown): string {
 
 function displayValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
-  if (Array.isArray(value)) return value.join(", ");
+  if (Array.isArray(value)) return value.map((item) => displayValue(item)).join(", ");
   if (typeof value === "object") return JSON.stringify(value);
   if (String(value).includes("T") && !Number.isNaN(new Date(String(value)).getTime())) {
     return new Date(String(value)).toLocaleString("zh-CN");
   }
-  return String(value);
+  return statusLabel(String(value));
 }
 
 function isSystemGeneratedJsonField(fieldName: string): boolean {
@@ -585,7 +586,7 @@ export function EngineeringWorkspace() {
     <div className="page-stack engineering-workspace">
       <header className="page-header">
         <div>
-          <span className="page-kicker">ENGINEERING CLOSED LOOP</span>
+          <span className="page-kicker">问题与调试</span>
           <h1>工程问题处理与 3C3B 闭环中心</h1>
           <p>把异常复核、Dürr 执行、材料批次、测量可靠性、AI 推荐、受控试验与经验沉淀连接成可审计任务流。</p>
         </div>
@@ -659,7 +660,7 @@ export function EngineeringWorkspace() {
         {active === "issues" ? (
           <aside className="engineering-detail-card">
             <SectionHeader
-              eyebrow="TASK EVIDENCE"
+              eyebrow="问题证据"
               title={selectedTask ? displayValue(selectedTask.title) : "选择左侧工单"}
               description={selectedTask ? displayValue(selectedTask.problem_statement) : "选择工单后，可追加测量复核、Dürr 执行、材料批次、AI 诊断或人工判断证据。"}
               titleAs="h3"
@@ -690,7 +691,7 @@ export function EngineeringWorkspace() {
         {active === "imports" ? (
           <aside className="engineering-detail-card">
             <SectionHeader
-              eyebrow="FILE PREVIEW"
+              eyebrow="文件预览"
               title="设备/材料文件预览校验"
               description="选择已审批的导入 profile 后上传 CSV/XLSX。系统只生成预览、字段映射和错误报告，不会自动写入目标表。"
               titleAs="h3"
@@ -700,7 +701,7 @@ export function EngineeringWorkspace() {
               <select value={importProfileId} onChange={(event) => setImportProfileId(event.target.value)}>
                 {importProfiles.map((profile) => (
                   <option key={profile.id} value={profile.id}>
-                    {displayValue(profile.code)} / {displayValue(profile.version)} · {displayValue(profile.domain_type)}
+                    {displayValue(profile.code)} / {displayValue(profile.version)} · {statusLabel(String(profile.domain_type ?? ""))}
                   </option>
                 ))}
               </select>
@@ -758,7 +759,7 @@ export function EngineeringWorkspace() {
       {modalOpen ? (
         <ModalShell
           className="quality-modal"
-          eyebrow="ENGINEERING WORKFLOW"
+          eyebrow="工程流程"
           title={`新建${config.bulkLabel}`}
           description={`统一维护${config.bulkLabel}表单结构、关闭交互和保存动作。`}
           onClose={closeModal}
@@ -772,7 +773,19 @@ export function EngineeringWorkspace() {
                     className={field.type === "textarea" || field.type === "json" ? "form-field form-field-wide" : "form-field"}
                   >
                     <span>{field.label}{field.required ? " *" : ""}</span>
-                    {renderField(field, form, setForm)}
+                    {renderField(
+                      field.name === "profile_id" && field.type === "select"
+                        ? {
+                            ...field,
+                            options: importProfiles.map((profile) => [
+                              profile.id,
+                              `${String(profile.code ?? profile.id)} / ${String(profile.version ?? "")} · ${statusLabel(String(profile.domain_type ?? ""))}`,
+                            ]),
+                          }
+                        : field,
+                      form,
+                      setForm,
+                    )}
                   </label>
                 ))}
                 {config.fields.some((field) => isSystemGeneratedJsonField(field.name)) ? (
@@ -785,7 +798,7 @@ export function EngineeringWorkspace() {
               <button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button>
               <button className="button button-primary" disabled={submitting}>
                 {submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}
-                {submitting ? "正在保存" : "保存到 MySQL"}
+                {submitting ? "正在保存" : "保存"}
               </button>
             </div>
           </form>

@@ -79,7 +79,7 @@ export default function IntegrationMonitorPage() {
 
   return (
     <div className="page-stack">
-      <header className="page-header"><div><span className="page-kicker">PHASE 7 · INTEGRATION MONITOR</span><h1>集成监控</h1><p>实时监控 MES、QMS、机器人、材料系统集成端点的连接状态与事件处理情况。</p></div><button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> 刷新</button></header>
+      <header className="page-header"><div><span className="page-kicker">对接监控</span><h1>集成监控</h1><p>实时监控 MES、QMS、机器人、材料系统集成端点的连接状态与事件处理情况。</p></div><button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> 刷新</button></header>
       {error ? <button className="message-banner message-error" onClick={() => setError("")}>{error}<X /></button> : null}
       {loading ? <div className="master-empty"><LoaderCircle className="spin" /> 正在加载集成监控数据...</div> : health ? <>
         <section className="module-stat-strip">
@@ -90,12 +90,12 @@ export default function IntegrationMonitorPage() {
         </section>
         <div className="integration-monitor-grid">
           <section className="panel">
-            <SectionHeader eyebrow="ENDPOINTS" title="端点状态" className="panel-heading" compact />
+            <SectionHeader eyebrow="对接端点" title="端点状态" className="panel-heading" compact />
             <div className="master-table-wrap"><table className="master-table"><thead><tr><th>端点</th><th>类型</th><th>事件数</th><th>成功</th><th>失败</th><th>待处理</th><th>最近成功</th><th>状态</th></tr></thead><tbody>{health.endpoints.map((ep) => <tr key={ep.id}><td><strong>{ep.code}</strong><small>{ep.name}</small></td><td>{SYSTEM_ICONS[ep.system_type] ?? "🔌"} {ep.system_type}</td><td>{ep.event_count}</td><td className="cell-good">{ep.success_count}</td><td className={ep.failed_count > 0 ? "cell-warn" : ""}>{ep.failed_count}</td><td className={ep.pending_count > 0 ? "cell-warn" : ""}>{ep.pending_count}</td><td><small>{timeSince(ep.last_success_at)}</small></td><td><span className={`record-status ${ep.is_active ? "status-on" : "status-off"}`}>{ep.is_active ? "在线" : "离线"}</span></td></tr>)}</tbody></table>{!health.endpoints.length ? <WorkspaceEmptyState icon={PlugZap} title="暂无集成端点" description="先在集成与任务中心维护端点后，这里才会展示健康度与事件统计。" compact /> : null}</div>
           </section>
           <section className="panel">
             <SectionHeader
-              eyebrow="RECENT FAILURES"
+              eyebrow="最近失败"
               title="近期失败事件"
               className="panel-heading"
               compact

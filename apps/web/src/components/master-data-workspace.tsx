@@ -60,6 +60,7 @@ type FieldConfig = {
   type?: "text" | "textarea" | "json" | "select" | "checkbox" | "number";
   options?: Array<{ label: string; value: string }>;
   relation?: ResourceKey;
+  placeholder?: string;
 };
 
 type ResourceConfig = {
@@ -259,7 +260,7 @@ const resourceConfigs: Record<ResourceKey, ResourceConfig> = {
       { key: "part_id", label: "零件", required: true, type: "select", relation: "parts" },
       { key: "point_type", label: "点位类型", required: true },
       { key: "region", label: "点位区域" },
-      { key: "quality_types", label: "质量指标代码（逗号分隔）", required: true },
+      { key: "quality_types", label: "质量类型代码（高级）", required: true, placeholder: "例如：ORANGE_PEEL,COLOR_DIFFERENCE,THICKNESS（橘皮/色差/膜厚）" },
       { key: "is_match_point", label: "匹配点", type: "checkbox" },
     ],
     columns: [
@@ -523,9 +524,9 @@ export function MasterDataWorkspace() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <span className="page-kicker">MYSQL MASTER DATA</span>
+          <span className="page-kicker">工厂与测量点</span>
           <h1>主数据中心</h1>
-          <p>维护贯穿工艺、质量、AI 建模和闭环执行的统一业务编码。</p>
+          <p>维护工厂、车型、颜色、零件和测量点等基础资料，供生产与质量录入选用。</p>
         </div>
         <button className="button button-primary" onClick={() => openModal("create")}>
           <Plus aria-hidden="true" />
@@ -535,7 +536,7 @@ export function MasterDataWorkspace() {
 
       <div className="freshness">
         <span className="live-dot" />
-        MySQL 实时数据 · 所有操作直接写入后端
+        实时业务数据 · 所有操作直接写入后端
       </div>
 
       <section className="module-stat-strip">
@@ -543,7 +544,7 @@ export function MasterDataWorkspace() {
           <article key={resource}>
             <span>{resourceConfigs[resource].label}</span>
             <strong>{loading ? "…" : data[resource].length}</strong>
-            <small>{resource === activeResource ? "当前正在维护" : "已连接真实数据库"}</small>
+            <small>{resource === activeResource ? "当前正在维护" : "实时业务数据"}</small>
           </article>
         ))}
       </section>
@@ -564,9 +565,9 @@ export function MasterDataWorkspace() {
         <div className="relation-grid">
           <form className="relation-form" onSubmit={bindRelation}>
             <SectionHeader
-              eyebrow="RELATION MAINTENANCE"
+              eyebrow="关系维护"
               title={`建立${relationConfigs[activeRelation].label}关系`}
-              description="关系写入 MySQL，并用于程序适用范围、生产事件和测量编组校验。"
+              description="关系写入业务数据，并用于程序适用范围、生产事件和测量编组校验。"
             />
             {!data[activeRelationConfig.left].length || !data[activeRelationConfig.right].length ? (
               <WorkspaceEmptyState
@@ -645,7 +646,7 @@ export function MasterDataWorkspace() {
         </div>
 
         <FilterToolbar
-          eyebrow="CRUD WORKSPACE"
+          eyebrow="基础资料维护"
           title={`${config.label}清单`}
           description={config.description}
           className="master-toolbar"
@@ -716,7 +717,7 @@ export function MasterDataWorkspace() {
           {loading ? (
             <div className="master-empty">
               <LoaderCircle className="spin" aria-hidden="true" />
-              正在从 MySQL 加载主数据
+              正在加载基础资料
             </div>
           ) : null}
           {!loading && filteredRecords.length === 0 ? (
@@ -783,13 +784,19 @@ export function MasterDataWorkspace() {
                         {field.key === "is_active" ? "当前工厂可用于业务数据关联" : "该点位用于匹配质量数据"}
                       </span>
                     ) : (
-                      <input
-                        type={field.type === "number" ? "number" : "text"}
-                        value={String(form[field.key] ?? "")}
-                        onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))}
-                        required={field.required}
-                        maxLength={field.key === "name" ? 120 : 80}
-                      />
+                      <>
+                        <input
+                          type={field.type === "number" ? "number" : "text"}
+                          value={String(form[field.key] ?? "")}
+                          onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))}
+                          required={field.required}
+                          maxLength={field.key === "name" ? 120 : 80}
+                          placeholder={field.placeholder}
+                        />
+                        {field.key === "quality_types" ? (
+                          <small className="field-hint">橘皮=ORANGE_PEEL，色差=COLOR_DIFFERENCE，膜厚=THICKNESS；多个用英文逗号分隔</small>
+                        ) : null}
+                      </>
                     )}
                   </label>
                 ))}
@@ -800,7 +807,7 @@ export function MasterDataWorkspace() {
               </button>
               <button className="button button-primary" type="submit" disabled={submitting}>
                 {submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}
-                {submitting ? "正在保存" : "保存到 MySQL"}
+                {submitting ? "正在保存" : "保存"}
               </button>
             </div>
           </form>

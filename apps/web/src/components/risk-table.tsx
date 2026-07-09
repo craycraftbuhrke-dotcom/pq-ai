@@ -17,7 +17,7 @@ export function RiskTable({ riskPoints, onSelect }: RiskTableProps) {
     <section className="panel risk-panel">
       <div className="panel-heading">
         <div>
-          <span className="eyebrow">POINT RISK</span>
+          <span className="eyebrow">风险点位</span>
           <h2>点位质量风险</h2>
         </div>
         <button className="text-button">查看全部点位</button>

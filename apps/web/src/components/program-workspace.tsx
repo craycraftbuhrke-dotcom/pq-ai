@@ -19,6 +19,7 @@ import { DurrTrajectoryPanel } from "@/components/durr-trajectory-panel";
 import { ModalShell } from "@/components/modal-shell";
 import { VersionDiffPanel } from "@/components/version-diff-panel";
 import { useAuth } from "@/lib/auth-context";
+import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type Resource = { id: string; code: string; name: string };
 type Factory = Resource;
@@ -129,8 +130,23 @@ function relationName(resources: Resource[], id?: string | null): string {
   return resource ? `${resource.code} / ${resource.name}` : "未关联";
 }
 
+/** Soft context match: missing record ids stay visible; conflicting ids are hidden. */
+function matchesContextId(recordId?: string | null, contextId?: string): boolean {
+  if (!contextId) return true;
+  if (!recordId) return true;
+  return recordId === contextId;
+}
+
+function matchesContextIdList(recordIds?: string[] | null, contextId?: string): boolean {
+  if (!contextId) return true;
+  if (!recordIds?.length) return true;
+  return recordIds.includes(contextId);
+}
+
 export function ProgramWorkspace() {
   const { actor } = useAuth();
+  const { factoryId, modelId, colorId, stage } = useWorkspaceContext();
+  const contextFilterActive = Boolean(factoryId || modelId || colorId || stage);
   const actorName = actor.isAuthenticated ? actor.displayName : "";
   const [workspaceTab, setWorkspaceTab] = useState<"programs" | "durr" | "diff">("programs");
   const [programs, setPrograms] = useState<Program[]>([]);
@@ -161,6 +177,23 @@ export function ProgramWorkspace() {
   const selectedProgram = programs.find((item) => item.id === selectedProgramId);
   const selectedVersion = versions.find((item) => item.id === selectedVersionId);
   const selectedBrush = brushes.find((item) => item.id === selectedBrushId);
+  const filteredPrograms = useMemo(
+    () =>
+      programs.filter(
+        (program) =>
+          matchesContextId(program.factory_id, factoryId) && matchesContextId(program.process_stage, stage),
+      ),
+    [factoryId, programs, stage],
+  );
+  const filteredVersions = useMemo(
+    () =>
+      versions.filter(
+        (version) =>
+          matchesContextIdList(version.vehicle_model_ids, modelId) &&
+          matchesContextIdList(version.color_ids, colorId),
+      ),
+    [colorId, modelId, versions],
+  );
   const versionImportQuery = selectedProgramId
     ? { default_values: JSON.stringify({ spray_program_id: selectedProgramId }) }
     : undefined;
@@ -275,12 +308,12 @@ export function ProgramWorkspace() {
 
   const stats = useMemo(() => {
     return [
-      ["喷涂程序", programs.length, "覆盖五个工艺阶段"],
-      ["当前程序版本", versions.length, selectedProgram?.program_code ?? "请选择程序"],
+      ["喷涂程序", filteredPrograms.length, "覆盖五个工艺阶段"],
+      ["当前程序版本", filteredVersions.length, selectedProgram?.program_code ?? "请选择程序"],
       ["刷子号", brushes.length, selectedVersion?.version ?? "请选择版本"],
       ["参数 / 贡献", parameters.length + contributions.length, `${parameters.length} 参数 · ${contributions.length} 贡献`],
     ] as const;
-  }, [brushes.length, contributions.length, parameters.length, programs.length, selectedProgram, selectedVersion, versions]);
+  }, [brushes.length, contributions.length, filteredPrograms.length, filteredVersions.length, parameters.length, selectedProgram, selectedVersion]);
 
   function openModal(kind: ModalKind, record?: ModalState["record"]) {
     setError("");
@@ -480,9 +513,9 @@ export function ProgramWorkspace() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <span className="page-kicker">PROGRAM · BRUSH · CONTRIBUTION</span>
+          <span className="page-kicker">程序与刷子</span>
           <h1>喷涂程序中心</h1>
-          <p>按程序版本管理五段工艺、刷子参数和测量点贡献权重，所有变更写入 MySQL 并进入审计。</p>
+          <p>按程序版本管理五段工艺、刷子参数和测量点贡献权重，所有变更写入业务数据并进入审计。</p>
         </div>
         <div className="page-actions">
           <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
@@ -504,7 +537,7 @@ export function ProgramWorkspace() {
           </button> : null}
         </div>
       </header>
-      <div className="freshness"><span className="live-dot" /> MySQL 实时程序配置 · 版本状态受控</div>
+      <div className="freshness"><span className="live-dot" /> 实时程序配置 · 版本状态受控</div>
       <section className="module-stat-strip">
         {stats.map(([label, value, note]) => (
           <article key={label}><span>{label}</span><strong>{loading ? "…" : value}</strong><small>{note}</small></article>
@@ -519,13 +552,14 @@ export function ProgramWorkspace() {
         <button className={workspaceTab === "programs" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("programs")}>程序、刷子与参数</button>
         <button className={workspaceTab === "durr" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("durr")}>Dürr 设备、轨迹与贡献治理</button>
         <button className={workspaceTab === "diff" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("diff")}>版本对比</button>
+        {contextFilterActive && workspaceTab === "programs" ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}
       </div>
 
       {workspaceTab === "programs" ? <section className="program-config-grid">
         <article className="panel program-column">
-          <div className="program-column-heading"><div><span className="eyebrow">01 PROGRAM</span><h2>喷涂程序</h2></div><span>{programs.length}</span></div>
+          <div className="program-column-heading"><div><span className="eyebrow">01 PROGRAM</span><h2>喷涂程序</h2></div><span>{filteredPrograms.length}</span></div>
           <div className="program-list">
-            {programs.map((program) => (
+            {filteredPrograms.map((program) => (
               <button
                 className={program.id === selectedProgramId ? "program-list-item selected" : "program-list-item"}
                 key={program.id}
@@ -535,13 +569,13 @@ export function ProgramWorkspace() {
                 <ChevronRight />
               </button>
             ))}
-            {!programs.length ? <div className="program-empty large-empty"><Settings2 />暂无喷涂程序，请先创建程序主档，再继续维护版本与刷子。</div> : null}
+            {!filteredPrograms.length ? <div className="program-empty large-empty"><Settings2 />暂无喷涂程序，请先创建程序主档，再继续维护版本与刷子。</div> : null}
           </div>
           {selectedProgram ? (
             <div className="program-column-actions">
               <button className="button button-secondary" onClick={() => openModal("program", selectedProgram)}><Pencil />编辑</button>
             </div>
-          ) : programs.length ? <div className="program-empty">请先从左侧明确选择一个喷涂程序，再进入版本维护。</div> : null}
+          ) : filteredPrograms.length ? <div className="program-empty">请先从左侧明确选择一个喷涂程序，再进入版本维护。</div> : null}
         </article>
 
         <article className="panel program-column">
@@ -564,7 +598,7 @@ export function ProgramWorkspace() {
             </div>
           </div>
           <div className="program-list">
-            {versions.map((version) => (
+            {filteredVersions.map((version) => (
               <button
                 className={version.id === selectedVersionId ? "program-list-item selected" : "program-list-item"}
                 key={version.id}
@@ -574,7 +608,7 @@ export function ProgramWorkspace() {
                 <span className={`version-dot version-${version.status.toLowerCase()}`} />
               </button>
             ))}
-            {!versions.length ? <div className="program-empty">当前程序暂无版本，请先新建受控版本并补齐适用范围。</div> : null}
+            {!filteredVersions.length ? <div className="program-empty">当前程序暂无版本，请先新建受控版本并补齐适用范围。</div> : null}
           </div>
           {selectedVersion ? (
             <div className="program-column-actions stacked-actions">
@@ -628,7 +662,7 @@ export function ProgramWorkspace() {
                 </div>
               </div>
               <div className="program-subsection">
-                <div className="program-subheading"><div><span className="eyebrow">PARAMETER MATRIX</span><h3>配置参数</h3><small>{selectedBrush ? `当前归属刷子 ${selectedBrush.brush_no}` : "先选择刷子后，才能导入或新增参数"}</small></div><div className="row-actions program-heading-actions"><BulkDataActions resourceKey="process.brush-parameters" resourceLabel="刷子参数" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={brushParameterImportQuery} className="program-version-bulk-actions" /><button className="button button-secondary" onClick={() => openModal("parameter")}><Plus />新增参数</button></div></div>
+                <div className="program-subheading"><div><span className="eyebrow">参数矩阵</span><h3>配置参数</h3><small>{selectedBrush ? `当前归属刷子 ${selectedBrush.brush_no}` : "先选择刷子后，才能导入或新增参数"}</small></div><div className="row-actions program-heading-actions"><BulkDataActions resourceKey="process.brush-parameters" resourceLabel="刷子参数" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={brushParameterImportQuery} className="program-version-bulk-actions" /><button className="button button-secondary" onClick={() => openModal("parameter")}><Plus />新增参数</button></div></div>
                 <div className="compact-table">
                   <div className="compact-row compact-head"><span>参数</span><span>配置值</span><span>软边界</span><span>可推荐</span><span /></div>
                   {parameters.map((parameter) => (
@@ -644,7 +678,7 @@ export function ProgramWorkspace() {
                 </div>
               </div>
               <div className="program-subsection">
-                <div className="program-subheading"><div><span className="eyebrow">POINT CONTRIBUTION</span><h3>测量点贡献权重</h3><small>{selectedBrush ? `当前归属刷子 ${selectedBrush.brush_no}` : "先选择刷子后，才能导入或配置贡献"}</small></div><div className="row-actions program-heading-actions"><BulkDataActions resourceKey="process.brush-contributions" resourceLabel="点位贡献" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={contributionImportQuery} className="program-version-bulk-actions" /><button className="button button-secondary" onClick={() => openModal("contribution")}><Plus />配置贡献</button></div></div>
+                <div className="program-subheading"><div><span className="eyebrow">点位贡献</span><h3>测量点贡献权重</h3><small>{selectedBrush ? `当前归属刷子 ${selectedBrush.brush_no}` : "先选择刷子后，才能导入或配置贡献"}</small></div><div className="row-actions program-heading-actions"><BulkDataActions resourceKey="process.brush-contributions" resourceLabel="点位贡献" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={contributionImportQuery} className="program-version-bulk-actions" /><button className="button button-secondary" onClick={() => openModal("contribution")}><Plus />配置贡献</button></div></div>
                 {!selectableContributionPoints.length ? <div className="program-empty">当前刷子下暂无可用质量测量点。请检查版本适用车型、刷子负责零件和测量点主数据是否已补齐。</div> : null}
                 <div className="compact-table">
                   <div className="compact-row contribution-row compact-head"><span>测量点</span><span>重叠率</span><span>贡献权重</span><span>审批</span><span /></div>
@@ -669,7 +703,7 @@ export function ProgramWorkspace() {
         <ModalShell eyebrow={modal.record ? "EDIT" : "CREATE"} title={`${modal.record ? "编辑" : "新建"}${modalTitle(modal.kind)}`} description="统一维护程序、版本、刷子、参数和点位贡献弹窗的结构与关闭交互。" onClose={closeModal} busy={submitting}>
           <form onSubmit={(event) => void submitModal(event)}>
             <div className="form-grid">{renderFields(modal.kind, form, setForm, { factories, vehicleModels, colors, parts, points: selectableContributionPoints, definitions, selectedProgram, selectedVersion, selectedBrush })}</div>
-            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div>
+            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存"}</button></div>
           </form>
         </ModalShell>
       ) : null}

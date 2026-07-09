@@ -18,7 +18,6 @@ export function WorkspaceEmptyState({
   compact = false,
   action,
 }: WorkspaceEmptyStateProps) {
-  void description;
   return (
     <div className={`workspace-empty-state${compact ? " compact" : ""}`}>
       <div className="workspace-empty-icon">
@@ -26,6 +25,7 @@ export function WorkspaceEmptyState({
       </div>
       <div className="workspace-empty-copy">
         <strong>{title}</strong>
+        {description ? <p>{description}</p> : null}
       </div>
       {action ? <div className="workspace-empty-action">{action}</div> : null}
     </div>

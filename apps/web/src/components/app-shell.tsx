@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, LogOut, Menu, Search, ShieldCheck, X } from "lucide-react";
+import { ChevronDown, LogOut, Menu, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
@@ -8,7 +8,9 @@ import { useMemo, useState, type ReactNode } from "react";
 import { navigationIcons } from "@/components/icons";
 import { ContextSelector } from "@/components/context-selector";
 import { useAuth } from "@/lib/auth-context";
-import { navSections, roleQuickAccess, type NavItem } from "@/lib/ui-data";
+import { primaryRoleLabel } from "@/lib/display-labels";
+import { navSections, type NavItem } from "@/lib/ui-data";
+import { WorkspaceContextProvider } from "@/lib/workspace-context";
 
 type AppShellProps = {
   children: ReactNode;
@@ -22,13 +24,6 @@ export function AppShell({ children }: AppShellProps) {
   const isAdmin = actor.roles.includes("ADMIN") || actor.permissions.includes("*");
   const isQualityFocused =
     actor.roles.includes("QUALITY_ENGINEER") && !actor.roles.includes("PROCESS_ENGINEER") && !isAdmin;
-
-  const allNavItems = useMemo(() => {
-    const items: NavItem[] = navSections.flatMap((section) => [...section.items]);
-    return isAdmin
-      ? [...items, { href: "/security-admin", label: "权限与安全", icon: "audit" } satisfies NavItem]
-      : items;
-  }, [isAdmin]);
 
   const visibleSections = useMemo(() => {
     if (isAdmin) return navSections;
@@ -46,32 +41,15 @@ export function AppShell({ children }: AppShellProps) {
       .filter((section) => section.items.length > 0);
   }, [actor.roles, isAdmin, pathname]);
 
-  const quickAccessItems = useMemo(() => {
-    const preferredPaths = actor.roles.flatMap((role) => roleQuickAccess[role] ?? []);
-    const candidatePaths = preferredPaths.length
-      ? preferredPaths
-      : ["/", "/production", "/quality", "/engineering", "/master-data"];
-    const uniquePaths = [...new Set(candidatePaths)];
-    return uniquePaths
-      .map((href) => allNavItems.find((item) => item.href === href))
-      .filter((item): item is NavItem => Boolean(item))
-      .filter((item) =>
-        isAdmin
-          ? true
-          : visibleSections.some((section) => section.items.some((sectionItem) => sectionItem.href === item.href)),
-      )
-      .slice(0, 5);
-  }, [actor.roles, allNavItems, isAdmin, visibleSections]);
-
   const initialCollapsedSections = useMemo(() => {
     const collapsed: Record<string, boolean> = {};
     for (const section of visibleSections) {
-      if (section.key === "governance") {
+      if (section.key === "settings") {
         collapsed[section.key] = !isAdmin;
         continue;
       }
-      if (section.key === "execution") {
-        collapsed[section.key] = isQualityFocused;
+      if (section.key === "field" && isQualityFocused) {
+        collapsed[section.key] = false;
         continue;
       }
       collapsed[section.key] = false;
@@ -91,6 +69,12 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   const isAuthPage = pathname === "/login" || pathname === "/register";
+  const todayLabel = new Date().toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  });
 
   if (isAuthPage) {
     return (
@@ -101,169 +85,145 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className="app-shell">
-      <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
-        <div className="brand-block">
-          <div className="brand-mark" aria-hidden="true">
-            PQ
-          </div>
-          <div>
-            <strong>PQ-AI</strong>
-            <span>Paint Intelligence</span>
-          </div>
-          <button
-            className="icon-button mobile-only"
-            aria-label="关闭菜单"
-            onClick={() => setMobileOpen(false)}
-          >
-            <X />
-          </button>
-        </div>
-        <nav className="main-nav" aria-label="主导航">
-          <span className="nav-section-label nav-root-label">工作空间</span>
-          {quickAccessItems.length ? (
-            <div className="nav-group nav-quick-group">
-              <div className="nav-group-header">
-                <div className="nav-section-copy">
-                  <span className="nav-section-label">常用入口</span>
-                </div>
-              </div>
-              {quickAccessItems.map((item) => {
-                const Icon = navigationIcons[item.icon];
-                const active = pathname === item.href;
-                return (
-                  <Link
-                    key={item.href}
-                    className={`nav-item nav-item-quick ${active ? "nav-item-active" : ""}`}
-                    href={item.href}
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    <Icon aria-hidden="true" />
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              })}
+    <WorkspaceContextProvider>
+      <div className="app-shell">
+        <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
+          <div className="brand-block">
+            <div className="brand-mark" aria-hidden="true">
+              PQ
             </div>
-          ) : null}
-          {visibleSections.map((section) => {
-            const containsActive = section.items.some((item) => item.href === pathname);
-            const isCollapsed = containsActive
-              ? false
-              : (collapsedOverrides[section.key] ?? initialCollapsedSections[section.key] ?? false);
-            return (
-              <div className={`nav-group${isCollapsed ? " nav-group-collapsed" : ""}`} key={section.key}>
-                <button
-                  className={`nav-group-header${section.collapsible ? " nav-group-toggle" : ""}`}
-                  type="button"
-                  onClick={section.collapsible ? () => toggleSection(section.key) : undefined}
-                  aria-expanded={!isCollapsed}
-                >
-                  <div className="nav-section-copy">
-                    <span className="nav-section-label">{section.title}</span>
-                  </div>
-                  {section.collapsible ? (
-                    <span className={`nav-section-toggle${isCollapsed ? " collapsed" : ""}`}>
-                      <ChevronDown aria-hidden="true" />
-                    </span>
-                  ) : null}
-                </button>
-                {!isCollapsed
-                  ? section.items.map((item) => {
-                      const Icon = navigationIcons[item.icon];
-                      const active = pathname === item.href;
-                      return (
-                        <Link
-                          key={item.href}
-                          className={`nav-item ${active ? "nav-item-active" : ""}`}
-                          href={item.href}
-                          onClick={() => setMobileOpen(false)}
-                        >
-                          <Icon aria-hidden="true" />
-                          <span>{item.label}</span>
-                        </Link>
-                      );
-                    })
-                  : null}
-              </div>
-            );
-          })}
-          {actor.isAuthenticated && isAdmin ? (
-            <div className="nav-group">
-              <div className="nav-group-header">
-                <div className="nav-section-copy">
-                  <span className="nav-section-label">权限治理</span>
-                </div>
-              </div>
-              <Link
-                className={`nav-item ${pathname === "/security-admin" ? "nav-item-active" : ""}`}
-                href="/security-admin"
-                onClick={() => setMobileOpen(false)}
-              >
-                <ShieldCheck aria-hidden="true" />
-                <span>权限与安全</span>
-              </Link>
-            </div>
-          ) : null}
-        </nav>
-        <div className="sidebar-foot">
-          <div className="system-state">
-            <span className="live-dot" />
             <div>
-              <strong>数据链路正常</strong>
-              <span>最后同步 08:42:16</span>
+              <strong>PQ-AI</strong>
+              <span>喷涂质量智能闭环</span>
             </div>
+            <button
+              className="icon-button mobile-only"
+              aria-label="关闭菜单"
+              onClick={() => setMobileOpen(false)}
+            >
+              <X />
+            </button>
           </div>
-          {actor.isAuthenticated ? (
-            <div className="identity">
-              <Link href="/profile" className="avatar-link">
-                <div className="avatar">{actor.displayName.slice(0, 1)}</div>
-              </Link>
-              <div>
-                <strong>{actor.displayName}</strong>
-                <span>{actor.roles[0] ?? "已认证用户"}</span>
+          <nav className="main-nav" aria-label="主导航">
+            <span className="nav-section-label nav-root-label">工作空间</span>
+            {visibleSections.map((section) => {
+              const containsActive = section.items.some((item) => item.href === pathname);
+              const isCollapsed = containsActive
+                ? false
+                : (collapsedOverrides[section.key] ?? initialCollapsedSections[section.key] ?? false);
+              return (
+                <div className={`nav-group${isCollapsed ? " nav-group-collapsed" : ""}`} key={section.key}>
+                  <button
+                    className={`nav-group-header${section.collapsible ? " nav-group-toggle" : ""}`}
+                    type="button"
+                    onClick={section.collapsible ? () => toggleSection(section.key) : undefined}
+                    aria-expanded={!isCollapsed}
+                  >
+                    <div className="nav-section-copy">
+                      <span className="nav-section-label">{section.title}</span>
+                    </div>
+                    {section.collapsible ? (
+                      <span className={`nav-section-toggle${isCollapsed ? " collapsed" : ""}`}>
+                        <ChevronDown aria-hidden="true" />
+                      </span>
+                    ) : null}
+                  </button>
+                  {!isCollapsed
+                    ? section.items.map((item) => {
+                        const Icon = navigationIcons[item.icon];
+                        const active = pathname === item.href;
+                        return (
+                          <Link
+                            key={item.href}
+                            className={`nav-item ${active ? "nav-item-active" : ""}`}
+                            href={item.href}
+                            onClick={() => setMobileOpen(false)}
+                          >
+                            <Icon aria-hidden="true" />
+                            <span>{item.label}</span>
+                          </Link>
+                        );
+                      })
+                    : null}
+                </div>
+              );
+            })}
+            {actor.isAuthenticated && isAdmin ? (
+              <div className="nav-group">
+                <div className="nav-group-header">
+                  <div className="nav-section-copy">
+                    <span className="nav-section-label">账号权限</span>
+                  </div>
+                </div>
+                <Link
+                  className={`nav-item ${pathname === "/security-admin" ? "nav-item-active" : ""}`}
+                  href="/security-admin"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <ShieldCheck aria-hidden="true" />
+                  <span>用户与角色</span>
+                </Link>
               </div>
-              <button
-                className="icon-button"
-                aria-label="退出登录"
-                onClick={() => void logout()}
-                title="退出登录"
-              >
-                <LogOut />
-              </button>
-            </div>
-          ) : (
-            <div className="identity">
-              <div className="avatar">?</div>
+            ) : null}
+          </nav>
+          <div className="sidebar-foot">
+            <div className="system-state">
+              <span className="live-dot" />
               <div>
-                <strong>未登录</strong>
-                <Link href="/login" className="text-link">点击登录</Link>
+                <strong>系统可用</strong>
+                <span>请以页面内实时数据为准</span>
               </div>
             </div>
-          )}
+            {actor.isAuthenticated ? (
+              <div className="identity">
+                <Link href="/profile" className="avatar-link">
+                  <div className="avatar">{actor.displayName.slice(0, 1)}</div>
+                </Link>
+                <div>
+                  <strong>{actor.displayName}</strong>
+                  <span>{primaryRoleLabel(actor.roles)}</span>
+                </div>
+                <button
+                  className="icon-button"
+                  aria-label="退出登录"
+                  onClick={() => void logout()}
+                  title="退出登录"
+                >
+                  <LogOut />
+                </button>
+              </div>
+            ) : (
+              <div className="identity">
+                <div className="avatar">?</div>
+                <div>
+                  <strong>未登录</strong>
+                  <Link href="/login" className="text-link">
+                    点击登录
+                  </Link>
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
+        <div className="workspace">
+          <header className="topbar">
+            <button
+              className="icon-button mobile-only"
+              aria-label="打开菜单"
+              onClick={() => setMobileOpen(true)}
+            >
+              <Menu />
+            </button>
+            <div className="topbar-context">
+              <span>今天</span>
+              <strong>{todayLabel}</strong>
+            </div>
+            <p className="topbar-hint">先选好工厂、车型、颜色和工位，再进入下方页面操作</p>
+          </header>
+          <ContextSelector />
+          <main>{children}</main>
         </div>
-      </aside>
-      <div className="workspace">
-        <header className="topbar">
-          <button
-            className="icon-button mobile-only"
-            aria-label="打开菜单"
-            onClick={() => setMobileOpen(true)}
-          >
-            <Menu />
-          </button>
-          <div className="search-control">
-            <Search aria-hidden="true" />
-            <input aria-label="全局搜索" placeholder="搜索车型、点位、程序或任务..." />
-            <kbd>⌘ K</kbd>
-          </div>
-          <div className="topbar-context">
-            <span>生产日</span>
-            <strong>2026-06-10 · 白班</strong>
-          </div>
-        </header>
-        <ContextSelector />
-        <main>{children}</main>
       </div>
-    </div>
+    </WorkspaceContextProvider>
   );
 }

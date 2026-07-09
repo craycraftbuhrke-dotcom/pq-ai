@@ -424,7 +424,7 @@ export default function MaterialTrendsPage() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <span className="page-kicker">MATERIAL GOVERNANCE</span>
+          <span className="page-kicker">材料批次趋势</span>
           <h1>材料批次质量趋势</h1>
           <p>追踪材料批次检测结果的可靠性与趋势变化。</p>
         </div>
@@ -485,7 +485,7 @@ export default function MaterialTrendsPage() {
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">BATCH LIST</span>
+                <span className="eyebrow">批次列表</span>
                 <h2>批次检测汇总</h2>
               </div>
               <span className="mono material-trend-meta">
@@ -555,7 +555,7 @@ export default function MaterialTrendsPage() {
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">TREND CHART</span>
+                <span className="eyebrow">趋势图</span>
                 <h2>检测值趋势</h2>
               </div>
             </div>
@@ -571,7 +571,7 @@ export default function MaterialTrendsPage() {
             <section className="panel">
               <div className="panel-heading">
                 <div>
-                  <span className="eyebrow">BATCH DETAIL</span>
+                  <span className="eyebrow">批次详情</span>
                   <h2>
                     批次 {selectedBatch} · {batchResults[0]?.material_name ?? "—"}
                   </h2>
@@ -644,7 +644,7 @@ export default function MaterialTrendsPage() {
             <section className="panel">
               <div className="panel-heading">
                 <div>
-                  <span className="eyebrow">BATCH DETAIL</span>
+                  <span className="eyebrow">批次详情</span>
                   <h2>批次 {selectedBatch}</h2>
                 </div>
                 <button

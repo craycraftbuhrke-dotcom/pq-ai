@@ -105,7 +105,7 @@ export default function ProfilePage() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <span className="page-kicker">PROFILE</span>
+          <span className="page-kicker">个人中心</span>
           <h1>个人中心</h1>
           <p>管理您的个人信息与安全设置。</p>
         </div>
@@ -124,7 +124,7 @@ export default function ProfilePage() {
         <section className="panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">ACCOUNT</span>
+              <span className="eyebrow">账号信息</span>
               <h2>账号信息</h2>
             </div>
           </div>
@@ -175,7 +175,7 @@ export default function ProfilePage() {
         <section className="panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">SECURITY</span>
+              <span className="eyebrow">登录安全</span>
               <h2>修改密码</h2>
             </div>
           </div>

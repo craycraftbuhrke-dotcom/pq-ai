@@ -19,8 +19,8 @@ export function DiagnosisPanel({
     <section className="panel diagnosis-panel">
       <div className="panel-heading">
         <div>
-          <span className="eyebrow">AI DIAGNOSIS</span>
-          <h2>AI 诊断</h2>
+          <span className="eyebrow">智能诊断</span>
+          <h2>智能诊断</h2>
         </div>
         <span className="confidence">置信度 {Math.round(confidence * 100)}%</span>
       </div>

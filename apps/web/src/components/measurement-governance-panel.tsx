@@ -205,7 +205,7 @@ export function MeasurementGovernancePanel() {
         </table>
         {!rows.length ? <div className="large-empty"><ShieldCheck />暂无{kindLabels[kind]}，可靠性门禁会将相关测量标记为未验证</div> : null}
       </div>
-      {modal ? <ModalShell className="quality-modal" eyebrow="MEASUREMENT GOVERNANCE" title={`${modal === "new" ? "新建" : "编辑"}${kindLabels[kind]}`} description="统一维护仪器、方法、参考件、校准和导入模板的治理弹窗结构。" onClose={closeModal} busy={submitting}><form onSubmit={submit}><div className="form-grid">{renderFields(kind, form, setForm, resources)}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div></form></ModalShell> : null}
+      {modal ? <ModalShell className="quality-modal" eyebrow="仪器与校准" title={`${modal === "new" ? "新建" : "编辑"}${kindLabels[kind]}`} description="统一维护仪器、方法、参考件、校准和导入模板的治理弹窗结构。" onClose={closeModal} busy={submitting}><form onSubmit={submit}><div className="form-grid">{renderFields(kind, form, setForm, resources)}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存"}</button></div></form></ModalShell> : null}
     </div>
   );
 }

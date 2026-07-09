@@ -169,7 +169,7 @@ export default function ImportWizardPage() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <span className="page-kicker">PHASE 4 · DATA IMPORT</span>
+          <span className="page-kicker">批量导入测量</span>
           <h1>数据导入向导</h1>
           <p>通过 CSV 文件一次性导入质量测量与对应生产事件基础信息，支持预览、校验与错误反馈。</p>
         </div>
@@ -181,7 +181,7 @@ export default function ImportWizardPage() {
         <section className="panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">FILE UPLOAD</span>
+              <span className="eyebrow">上传文件</span>
               <h2>选择 CSV 文件</h2>
             </div>
             <div className="page-actions">
@@ -258,7 +258,7 @@ export default function ImportWizardPage() {
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">DATA PREVIEW</span>
+                <span className="eyebrow">数据预览</span>
                 <h2>数据预览 ({preview.length} / {file ? "..." : 0} 行)</h2>
               </div>
               <button className="button button-primary" onClick={upload} disabled={importing || !file}>

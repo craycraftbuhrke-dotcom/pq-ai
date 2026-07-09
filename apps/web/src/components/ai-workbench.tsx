@@ -20,6 +20,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ValidationChart } from "@/components/validation-chart";
 import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 import { useAuth } from "@/lib/auth-context";
+import { qualityTypeLabel } from "@/lib/display-labels";
 
 const DEFAULT_FEATURE_SET_VERSION = "point-features-v4-material-governed";
 
@@ -485,7 +486,17 @@ function shortHash(value?: string | null): string {
 export function AiWorkbench() {
   const { actor } = useAuth();
   const actorName = actor.isAuthenticated ? actor.displayName : "";
-  const [tab, setTab] = useState<Tab>("models");
+  const canManageModels =
+    actor.roles.includes("DATA_SCIENTIST") ||
+    actor.roles.includes("ADMIN") ||
+    actor.permissions.includes("*") ||
+    actor.roles.includes("SYSTEM");
+  const [tab, setTab] = useState<Tab>("predictions");
+  const [showAdvancedTraining, setShowAdvancedTraining] = useState(false);
+  const activeTab =
+    !canManageModels && (tab === "models" || tab === "governance" || tab === "comparison")
+      ? "predictions"
+      : tab;
   const [models, setModels] = useState<ModelVersion[]>([]);
   const [datasets, setDatasets] = useState<DatasetSnapshot[]>([]);
   const [acceptanceDecisions, setAcceptanceDecisions] = useState<AcceptanceDecision[]>([]);
@@ -626,7 +637,7 @@ export function AiWorkbench() {
       }));
     } catch (loadError) {
       setGovernanceCheck(null);
-      setError(loadError instanceof Error ? loadError.message : "模型适用范围与 OOD 检查失败");
+      setError(loadError instanceof Error ? loadError.message : "模型适用范围检查失败");
     } finally {
       setGovernanceLoading(false);
     }
@@ -963,7 +974,7 @@ export function AiWorkbench() {
           remark: "由模型治理工作台更新，需重新人工验收后生效。",
         }),
       });
-      showSuccess("OOD 策略已更新为待验收，已生效模型会自动退役");
+      showSuccess("异常输入拦截规则已更新为待验收，已生效模型会自动退役");
       await reload();
     } catch (operationError) {
       showError(operationError);
@@ -1255,12 +1266,16 @@ export function AiWorkbench() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <span className="page-kicker">Prediction · Diagnosis · Recommendation · Verification</span>
-          <h1>AI 闭环工作台</h1>
-          <p>基于真实点位特征快照训练模型，并完成预测、诊断、约束推荐、审批、执行与复测评价。</p>
+          <span className="page-kicker">智能分析与推荐</span>
+          <h1>智能分析与推荐</h1>
+          <p>
+            {canManageModels
+              ? "现场可直接查看预测、诊断与参数推荐；模型训练与验收仅对数据分析人员开放。"
+              : "根据当前车身与测量点，查看质量预测、原因提示，并按目标质量获取工艺参数推荐。"}
+          </p>
         </div>
         <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
-          <RefreshCw className={loading ? "spin" : ""} /> 刷新实时数据
+          <RefreshCw className={loading ? "spin" : ""} /> 刷新
         </button>
       </header>
 
@@ -1268,28 +1283,43 @@ export function AiWorkbench() {
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
 
       <section className="module-stat-strip">
-        <article><span>模型版本</span><strong>{models.length}</strong><small>{models.filter((model) => model.status === "ACTIVE").length} 个生效</small></article>
-        <article><span>数据集 / 点位快照</span><strong>{datasets.length} / {snapshots.length}</strong><small>{datasets.filter((item) => item.leakage_check.passed).length} 个数据集通过泄漏检查</small></article>
-        <article><span>预测 / 诊断</span><strong>{predictions.length} / {diagnoses.length}</strong><small>全部结果保存至 MySQL</small></article>
-        <article><span>闭环推荐</span><strong>{recommendations.length}</strong><small>{recommendations.filter((item) => item.status === "VERIFIED").length} 条已完成复测</small></article>
+        <article><span>可用模型</span><strong>{models.filter((model) => model.status === "ACTIVE").length}</strong><small>共 {models.length} 个版本</small></article>
+        <article><span>预测 / 诊断</span><strong>{predictions.length} / {diagnoses.length}</strong><small>结果已保存</small></article>
+        <article><span>参数推荐</span><strong>{recommendations.length}</strong><small>{recommendations.filter((item) => item.status === "VERIFIED").length} 条已复测</small></article>
+        <article><span>受控试验</span><strong>{controlledTrials.length}</strong><small>可在「受控试验」菜单继续跟进</small></article>
       </section>
 
       <section className="panel ai-workspace">
         <div className="master-tabs">
-          {([["models", "模型训练"], ["governance", "模型治理"], ["comparison", "模型对比"], ["predictions", "预测与诊断"], ["recommendations", "推荐与闭环"]] as [Tab, string][]).map(([key, label]) => (
-            <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
+          {(
+            (
+              canManageModels
+                ? ([
+                    ["predictions", "预测与诊断"],
+                    ["recommendations", "推荐与试验"],
+                    ["models", "准备训练数据"],
+                    ["governance", "模型验收"],
+                    ["comparison", "模型对比"],
+                  ] as [Tab, string][])
+                : ([
+                    ["predictions", "预测与诊断"],
+                    ["recommendations", "推荐与试验"],
+                  ] as [Tab, string][])
+            )
+          ).map(([key, label]) => (
+            <button key={key} className={activeTab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
           ))}
-          <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索当前工作区" /></label>
+          <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索当前列表" /></label>
         </div>
 
-        {tab === "models" ? (
+        {activeTab === "models" && canManageModels ? (
           <div className="ai-split">
             <div className="ai-control-panel ai-governed-training">
               <form onSubmit={buildPointFeatureSnapshot}>
-                <div className="program-subheading"><div><span className="eyebrow">Point Feature Matrix</span><h3>生成点位特征快照</h3></div><Activity /></div>
+                <div className="program-subheading"><div><span className="eyebrow">第 1 步</span><h3>从质量记录生成训练样本</h3></div><Activity /></div>
                 <div className="ai-form-stack">
                   <label className="form-field">
-                    <span>质量测量记录</span>
+                    <span>选择一条已验证的质量测量</span>
                     <select
                       value={selectedBuildMeasurement?.id ?? ""}
                       onChange={(event) => setSelectedBuildMeasurementId(event.target.value)}
@@ -1297,42 +1327,58 @@ export function AiWorkbench() {
                     >
                       {featureBuildMeasurements.map((measurement) => (
                         <option key={measurement.id} value={measurement.id}>
-                          {measurement.data_no} · {measurement.measurement_point_code} · {measurement.quality_type}
+                          {measurement.data_no} · {measurement.measurement_point_code} · {qualityTypeLabel(measurement.quality_type)}
                         </option>
                       ))}
                     </select>
                   </label>
-                  <label className="form-field"><span>特征集版本</span><select name="feature_set_version">{featureSetVersions.map((value) => <option key={value}>{value}</option>)}</select></label>
-                  <div className="ai-context-box"><span>生产事件</span><strong>{selectedBuildMeasurement?.production_run_id.slice(0, 8) ?? "—"}</strong><span>测量点</span><strong>{selectedBuildMeasurement ? `${selectedBuildMeasurement.measurement_point_code} / ${selectedBuildMeasurement.measurement_point_name}` : "—"}</strong><span>质量类型</span><strong>{selectedBuildMeasurement?.quality_type ?? "—"}</strong><span>可靠性</span><strong>{selectedBuildMeasurement ? statusLabel(selectedBuildMeasurement.reliability_status) : "—"}</strong></div>
-                  <p className="ai-hint">该操作会按生产事件和测量点聚合五工段刷子贡献、程序参数、实际参数、材料特性和质量标签，形成后续训练矩阵样本。</p>
-                  <button className="button button-secondary" disabled={!selectedBuildMeasurement || submitting === "feature-snapshot"}>{submitting === "feature-snapshot" ? <LoaderCircle className="spin" /> : <Activity />} 生成/刷新点位快照</button>
+                  <input type="hidden" name="feature_set_version" value={featureSetVersions[0] ?? DEFAULT_FEATURE_SET_VERSION} />
+                  <div className="ai-context-box"><span>车身/事件</span><strong>{selectedBuildMeasurement?.production_run_id.slice(0, 8) ?? "—"}</strong><span>测量点</span><strong>{selectedBuildMeasurement ? `${selectedBuildMeasurement.measurement_point_code} / ${selectedBuildMeasurement.measurement_point_name}` : "—"}</strong><span>质量类型</span><strong>{selectedBuildMeasurement ? qualityTypeLabel(selectedBuildMeasurement.quality_type) : "—"}</strong><span>数据可信度</span><strong>{selectedBuildMeasurement ? statusLabel(selectedBuildMeasurement.reliability_status) : "—"}</strong></div>
+                  <p className="ai-hint">系统会把该车该点的五站喷涂参数、材料结果与质量结果汇总成一条训练样本。</p>
+                  <button className="button button-secondary" disabled={!selectedBuildMeasurement || submitting === "feature-snapshot"}>{submitting === "feature-snapshot" ? <LoaderCircle className="spin" /> : <Activity />} 生成训练样本</button>
                 </div>
               </form>
               <form onSubmit={buildDataset}>
-                <div className="program-subheading"><div><span className="eyebrow">Dataset Governance</span><h3>构建无泄漏数据集</h3></div><ShieldCheck /></div>
+                <div className="program-subheading"><div><span className="eyebrow">第 2 步</span><h3>汇总历史样本并划分训练/验证</h3></div><ShieldCheck /></div>
                 <div className="ai-form-stack">
-                  <label className="form-field"><span>数据集代码 <b>*</b></span><input name="dataset_code" required defaultValue={defaultDatasetCode} /></label>
-                  <div className="ai-two-fields"><label className="form-field"><span>版本</span><input name="version" required defaultValue="1.0" /></label><label className="form-field"><span>时间留出比例</span><input name="holdout_ratio" type="number" min="0.1" max="0.5" step="0.05" defaultValue="0.25" /></label></div>
-                  <label className="form-field"><span>目标质量指标</span><select name="target_metric" required>{metrics.filter((item) => item.is_primary).map((item) => <option key={`${item.quality_type}-${item.code}`} value={item.code}>{item.name} / {item.code}</option>)}</select></label>
-                  <label className="form-field"><span>特征集版本</span><select name="feature_set_version">{featureSetVersions.map((value) => <option key={value}>{value}</option>)}</select></label>
-                  <div className="ai-two-fields"><label className="form-field"><span>最少训练分组</span><input name="min_train_groups" type="number" min="2" defaultValue="3" /></label><label className="form-field"><span>最少验证分组</span><input name="min_validation_groups" type="number" min="1" defaultValue="2" /></label></div>
-                  <button className="button button-secondary" disabled={submitting === "dataset"}>{submitting === "dataset" ? <LoaderCircle className="spin" /> : <ShieldCheck />} 固化数据集快照</button>
+                  <label className="form-field"><span>数据集名称 <b>*</b></span><input name="dataset_code" required defaultValue={defaultDatasetCode} /></label>
+                  <div className="ai-two-fields"><label className="form-field"><span>版本</span><input name="version" required defaultValue="1.0" /></label><label className="form-field"><span>留给验证的比例</span><input name="holdout_ratio" type="number" min="0.1" max="0.5" step="0.05" defaultValue="0.25" title="用最近一部分车身做验证，避免把同一台车既拿来训练又拿来考试" /></label></div>
+                  <label className="form-field"><span>要预测的质量指标</span><select name="target_metric" required>{metrics.filter((item) => item.is_primary).map((item) => <option key={`${item.quality_type}-${item.code}`} value={item.code}>{item.name}</option>)}</select></label>
+                  <input type="hidden" name="feature_set_version" value={featureSetVersions[0] ?? DEFAULT_FEATURE_SET_VERSION} />
+                  <details className="ai-advanced-details">
+                    <summary>高级选项（一般不用改）</summary>
+                    <div className="ai-two-fields"><label className="form-field"><span>最少训练车身组数</span><input name="min_train_groups" type="number" min="2" defaultValue="3" /></label><label className="form-field"><span>最少验证车身组数</span><input name="min_validation_groups" type="number" min="1" defaultValue="2" /></label></div>
+                  </details>
+                  <button className="button button-secondary" disabled={submitting === "dataset"}>{submitting === "dataset" ? <LoaderCircle className="spin" /> : <ShieldCheck />} 生成训练集</button>
                 </div>
               </form>
               <form onSubmit={trainModel}>
-                <div className="program-subheading"><div><span className="eyebrow">Training</span><h3>训练候选模型</h3></div><FlaskConical /></div>
+                <div className="program-subheading"><div><span className="eyebrow">第 3 步</span><h3>训练模型</h3></div><FlaskConical /></div>
                 <div className="ai-form-stack">
-                  <label className="form-field"><span>受治理数据集</span><select name="dataset_snapshot_id" required value={selectedDatasetId} onChange={(event) => setSelectedDatasetId(event.target.value)}>{datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.dataset_code}:{dataset.version} · {dataset.train_group_count}/{dataset.validation_group_count} 组</option>)}</select></label>
+                  <label className="form-field"><span>选择训练集</span><select name="dataset_snapshot_id" required value={selectedDatasetId} onChange={(event) => setSelectedDatasetId(event.target.value)}>{datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.dataset_code}:{dataset.version} · 训练{dataset.train_group_count}/验证{dataset.validation_group_count} 组</option>)}</select></label>
                   <input type="hidden" name="target_metric" value={selectedDataset?.target_metric ?? ""} />
                   <input type="hidden" name="feature_set_version" value={selectedDataset?.feature_set_version ?? ""} />
-                  <label className="form-field"><span>模型代码 <b>*</b></span><input name="model_code" required defaultValue={defaultModelCode} /></label>
+                  <label className="form-field"><span>模型名称 <b>*</b></span><input name="model_code" required defaultValue={defaultModelCode} /></label>
                   <label className="form-field"><span>版本 <b>*</b></span><input name="version" required defaultValue="1.0" /></label>
-                  <div className="ai-context-box"><span>训练 / 验证样本</span><strong>{selectedDataset ? `${selectedDataset.train_sample_count} / ${selectedDataset.validation_sample_count}` : "—"}</strong><span>独立分组</span><strong>{selectedDataset ? `${selectedDataset.train_group_count} / ${selectedDataset.validation_group_count}` : "—"}</strong><span>泄漏检查</span><strong>{selectedDataset?.leakage_check.passed ? "通过" : "—"}</strong></div>
-                  <div className="ai-two-fields"><label className="form-field"><span>最小训练样本</span><input name="min_samples" type="number" min="3" defaultValue="5" /></label><label className="form-field"><span>岭惩罚系数</span><input name="ridge_lambda" type="number" min="0" step="0.01" defaultValue="0.1" /></label></div>
-                  <div className="ai-two-fields"><label className="form-field"><span>最大标准化偏移</span><input name="max_abs_standardized_shift" type="number" min="0.1" step="0.1" defaultValue="4" /></label><label className="form-field"><span>最大异常特征比例</span><input name="max_outlier_feature_ratio" type="number" min="0" max="1" step="0.05" defaultValue="0.2" /></label></div>
-                  <label className="form-field"><span>最低特征完整率</span><input name="min_feature_completeness" type="number" min="0.1" max="1" step="0.05" defaultValue="1" /></label>
-                  <p className="ai-hint">以上为统计 OOD 阻断策略，不替代设备、材料或工艺安全边界；训练后须随模型人工验收。</p>
-                  <button className="button button-primary" disabled={!selectedDataset || submitting === "train"}>{submitting === "train" ? <LoaderCircle className="spin" /> : <BrainCircuit />} 训练候选版本</button>
+                  <div className="ai-context-box"><span>训练 / 验证样本</span><strong>{selectedDataset ? `${selectedDataset.train_sample_count} / ${selectedDataset.validation_sample_count}` : "—"}</strong><span>车身分组</span><strong>{selectedDataset ? `${selectedDataset.train_group_count} / ${selectedDataset.validation_group_count}` : "—"}</strong><span>数据检查</span><strong>{selectedDataset?.leakage_check.passed ? "通过" : "—"}</strong></div>
+                  <button type="button" className="button button-secondary" onClick={() => setShowAdvancedTraining((value) => !value)}>{showAdvancedTraining ? "收起高级参数" : "显示高级参数"}</button>
+                  {showAdvancedTraining ? (
+                    <>
+                      <div className="ai-two-fields"><label className="form-field"><span>最少样本数</span><input name="min_samples" type="number" min="3" defaultValue="5" /></label><label className="form-field"><span>模型平滑强度</span><input name="ridge_lambda" type="number" min="0" step="0.01" defaultValue="0.1" title="数值越大，模型越保守" /></label></div>
+                      <div className="ai-two-fields"><label className="form-field"><span>允许偏离训练均值的最大倍数</span><input name="max_abs_standardized_shift" type="number" min="0.1" step="0.1" defaultValue="4" /></label><label className="form-field"><span>允许异常参数占比</span><input name="max_outlier_feature_ratio" type="number" min="0" max="1" step="0.05" defaultValue="0.2" /></label></div>
+                      <label className="form-field"><span>参数完整率下限</span><input name="min_feature_completeness" type="number" min="0.1" max="1" step="0.05" defaultValue="1" /></label>
+                      <p className="ai-hint">这些阈值只控制“输入是否太离谱就拒绝预测”，不能替代设备、材料或工艺安全边界。训练后仍需人工验收。</p>
+                    </>
+                  ) : (
+                    <>
+                      <input type="hidden" name="min_samples" value="5" />
+                      <input type="hidden" name="ridge_lambda" value="0.1" />
+                      <input type="hidden" name="max_abs_standardized_shift" value="4" />
+                      <input type="hidden" name="max_outlier_feature_ratio" value="0.2" />
+                      <input type="hidden" name="min_feature_completeness" value="1" />
+                    </>
+                  )}
+                  <button className="button button-primary" disabled={!selectedDataset || submitting === "train"}>{submitting === "train" ? <LoaderCircle className="spin" /> : <BrainCircuit />} 开始训练</button>
                 </div>
               </form>
             </div>
@@ -1373,14 +1419,14 @@ export function AiWorkbench() {
           </div>
         ) : null}
 
-        {tab === "governance" ? (
+        {activeTab === "governance" && canManageModels ? (
           <div className="ai-split">
             <div className="ai-control-panel">
-              <div className="program-subheading"><div><span className="eyebrow">Model Registry</span><h3>版本状态治理</h3></div><ShieldCheck /></div>
+              <div className="program-subheading"><div><span className="eyebrow">模型状态</span><h3>版本状态治理</h3></div><ShieldCheck /></div>
               <div className="ai-form-stack">
                 <label className="form-field"><span>模型版本</span><select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {statusLabel(model.status)}</option>)}</select></label>
-                <div className="ai-context-box"><span>目标指标</span><strong>{selectedModel?.target_metric ?? "—"}</strong><span>当前状态</span><strong>{statusLabel(selectedModel?.status ?? "—")}</strong><span>数据集</span><strong>{modelDataset ? `${modelDataset.dataset_code}:${modelDataset.version}` : "旧模型未绑定"}</strong><span>分组切分</span><strong>{modelDataset ? `${modelDataset.train_group_count} 训练 / ${modelDataset.validation_group_count} 验证` : "—"}</strong><span>验证 R² / RMSE</span><strong>{selectedModel ? `${formatNumber(selectedModel.evaluation_metrics.validation_r2)} / ${formatNumber(selectedModel.evaluation_metrics.validation_rmse)}` : "—"}</strong><span>多维验证</span><strong>{selectedMultiAxis ? `${selectedMultiAxis.evaluated_axis_count}/${selectedAxisEntries.length} 轴` : "未生成"}</strong><span>工件哈希</span><strong>{shortHash(selectedArtifact?.payload_hash)}</strong><span>验收结论</span><strong>{selectedAcceptance ? statusLabel(selectedAcceptance.decision) : "待验收"}</strong><span>适用范围</span><strong>{selectedScopes.filter((item) => item.status === "ACTIVE").length} 生效 / {selectedScopes.length} 条</strong><span>OOD 策略</span><strong>{selectedOodPolicy ? statusLabel(selectedOodPolicy.status) : "未配置"}</strong><span>工厂验收策略</span><strong>{factoryPolicyCoverage ? "全部覆盖" : "覆盖不完整"}</strong></div>
-                <p className="ai-hint">模型必须通过无泄漏独立验证，并同时验收工厂/车型/颜色适用范围与统计 OOD 阻断策略，才允许激活。</p>
+                <div className="ai-context-box"><span>目标指标</span><strong>{selectedModel?.target_metric ?? "—"}</strong><span>当前状态</span><strong>{statusLabel(selectedModel?.status ?? "—")}</strong><span>数据集</span><strong>{modelDataset ? `${modelDataset.dataset_code}:${modelDataset.version}` : "旧模型未绑定"}</strong><span>分组切分</span><strong>{modelDataset ? `${modelDataset.train_group_count} 训练 / ${modelDataset.validation_group_count} 验证` : "—"}</strong><span>验证拟合度 / 误差</span><strong>{selectedModel ? `${formatNumber(selectedModel.evaluation_metrics.validation_r2)} / ${formatNumber(selectedModel.evaluation_metrics.validation_rmse)}` : "—"}</strong><span>多维验证</span><strong>{selectedMultiAxis ? `${selectedMultiAxis.evaluated_axis_count}/${selectedAxisEntries.length} 轴` : "未生成"}</strong><span>模型校验码</span><strong>{shortHash(selectedArtifact?.payload_hash)}</strong><span>验收结论</span><strong>{selectedAcceptance ? statusLabel(selectedAcceptance.decision) : "待验收"}</strong><span>适用范围</span><strong>{selectedScopes.filter((item) => item.status === "ACTIVE").length} 生效 / {selectedScopes.length} 条</strong><span>异常输入拦截</span><strong>{selectedOodPolicy ? statusLabel(selectedOodPolicy.status) : "未配置"}</strong><span>工厂验收策略</span><strong>{factoryPolicyCoverage ? "全部覆盖" : "覆盖不完整"}</strong></div>
+                <p className="ai-hint">模型必须通过独立验证，并确认工厂/车型/颜色适用范围与异常输入拦截规则后，才允许激活给现场使用。</p>
                 <div className="ai-governance-block">
                   <strong>多维验证与模型工件</strong>
                   {selectedAxisEntries.length ? <div className="ai-validation-grid">
@@ -1422,7 +1468,7 @@ export function AiWorkbench() {
                   <button type="button" className="button button-secondary" disabled={!selectedModel || !selectedSnapshot || submitting === "scope-add"} onClick={() => void addScopeFromSelectedSnapshot()}>{submitting === "scope-add" ? <LoaderCircle className="spin" /> : <Target />} 加入待验收范围</button>
                 </div>
                 <form className="ai-governance-block" onSubmit={updateOodPolicy}>
-                  <strong>统计 OOD 阻断策略</strong>
+                  <strong>异常输入拦截规则</strong>
                   <div className="ai-two-fields"><label className="form-field"><span>最大标准化偏移</span><input name="max_abs_standardized_shift" type="number" min="0.1" step="0.1" key={`shift-${selectedOodPolicy?.id}-${selectedOodPolicy?.updated_at}`} defaultValue={selectedOodPolicy?.max_abs_standardized_shift ?? 4} /></label><label className="form-field"><span>最大异常特征比例</span><input name="max_outlier_feature_ratio" type="number" min="0" max="1" step="0.05" key={`ratio-${selectedOodPolicy?.id}-${selectedOodPolicy?.updated_at}`} defaultValue={selectedOodPolicy?.max_outlier_feature_ratio ?? 0.2} /></label></div>
                   <label className="form-field"><span>最低特征完整率</span><input name="min_feature_completeness" type="number" min="0.1" max="1" step="0.05" key={`complete-${selectedOodPolicy?.id}-${selectedOodPolicy?.updated_at}`} defaultValue={selectedOodPolicy?.min_feature_completeness ?? 1} /></label>
                   <button className="button button-secondary" disabled={!selectedModel || submitting === "ood-policy"}>{submitting === "ood-policy" ? <LoaderCircle className="spin" /> : <ShieldCheck />} 保存并重新验收</button>
@@ -1489,15 +1535,15 @@ export function AiWorkbench() {
           </div>
         ) : null}
 
-        {tab === "predictions" ? (
+        {activeTab === "predictions" ? (
           <div className="ai-split">
             <div className="ai-control-panel">
               <div className="program-subheading"><div><span className="eyebrow">Inference</span><h3>执行点位预测</h3></div><Target /></div>
               <div className="ai-form-stack">
                 <label className="form-field"><span>生效模型</span><select value={selectedModelId} onChange={(event) => { setSelectedModelId(event.target.value); setSelectedSnapshotId(""); }}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {model.target_metric}</option>)}</select></label>
-                <label className="form-field"><span>生产事件与测量点快照</span><select value={selectedSnapshot?.id ?? ""} onChange={(event) => setSelectedSnapshotId(event.target.value)}>{compatibleSnapshots.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{snapshot.production_run_no} · {snapshot.measurement_point_code} · {snapshot.factory_code}/{snapshot.vehicle_model_code}/{snapshot.color_code}</option>)}</select></label>
+                <label className="form-field"><span>选择车身与测量点</span><select value={selectedSnapshot?.id ?? ""} onChange={(event) => setSelectedSnapshotId(event.target.value)}>{compatibleSnapshots.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{snapshot.production_run_no} · {snapshot.measurement_point_code} · {snapshot.factory_code}/{snapshot.vehicle_model_code}/{snapshot.color_code}</option>)}</select></label>
                 <div className="ai-context-box"><span>生产上下文</span><strong>{selectedSnapshot ? `${selectedSnapshot.factory_code} / ${selectedSnapshot.vehicle_model_code} / ${selectedSnapshot.color_code}` : "—"}</strong><span>特征版本 / 数量</span><strong>{selectedSnapshot ? `${selectedSnapshot.feature_set_version} / ${selectedSnapshot.feature_count}` : "—"}</strong><span>适用范围</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.applicability_status ?? "—")}</strong><span>输入分布</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.ood_status ?? "—")}</strong><span>完整率 / 最大偏移</span><strong>{governanceCheck ? `${formatNumber(governanceCheck.evidence.feature_completeness * 100, 1)}% / ${formatNumber(governanceCheck.evidence.max_abs_standardized_shift)}` : "—"}</strong></div>
-                {governanceCheck && !governanceAllowed && !governanceLoading ? <p className="ai-governance-warning">当前输入未通过适用范围或 OOD 门禁，预测与推荐已阻断。</p> : null}
+                {governanceCheck && !governanceAllowed && !governanceLoading ? <p className="ai-governance-warning">当前车型/颜色不在模型适用范围内，或输入参数偏离训练数据过多，已暂停预测与推荐。</p> : null}
                 <button className="button button-primary" onClick={() => void runPrediction()} disabled={!selectedModel || selectedModel.status !== "ACTIVE" || !selectedSnapshot || governanceLoading || !governanceAllowed || submitting === "predict"}>{submitting === "predict" ? <LoaderCircle className="spin" /> : <Play />} 执行并保存预测</button>
               </div>
             </div>
@@ -1526,16 +1572,16 @@ export function AiWorkbench() {
           </div>
         ) : null}
 
-        {tab === "recommendations" ? (
+        {activeTab === "recommendations" ? (
           <div className="ai-split">
             <form className="ai-control-panel" onSubmit={generateRecommendation}>
               <div className="program-subheading"><div><span className="eyebrow">Constrained Optimization</span><h3>生成参数推荐</h3></div><ShieldCheck /></div>
               <div className="ai-form-stack">
                 <label className="form-field"><span>模型</span><select value={selectedModelId} onChange={(event) => { setSelectedModelId(event.target.value); setSelectedSnapshotId(""); }}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {model.target_metric}</option>)}</select></label>
-                <label className="form-field"><span>点位特征快照</span><select value={selectedSnapshot?.id ?? ""} onChange={(event) => setSelectedSnapshotId(event.target.value)}>{compatibleSnapshots.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{snapshot.production_run_no} · {snapshot.measurement_point_code}</option>)}</select></label>
+                <label className="form-field"><span>选择车身与测量点</span><select value={selectedSnapshot?.id ?? ""} onChange={(event) => setSelectedSnapshotId(event.target.value)}>{compatibleSnapshots.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{snapshot.production_run_no} · {snapshot.measurement_point_code}</option>)}</select></label>
                 <div className="ai-context-box"><span>生产上下文</span><strong>{selectedSnapshot ? `${selectedSnapshot.factory_code} / ${selectedSnapshot.vehicle_model_code} / ${selectedSnapshot.color_code}` : "—"}</strong><span>适用范围</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.applicability_status ?? "—")}</strong><span>输入分布</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.ood_status ?? "—")}</strong><span>异常特征比例</span><strong>{governanceCheck ? `${formatNumber(governanceCheck.evidence.outlier_feature_ratio * 100, 1)}%` : "—"}</strong></div>
                 <div className="ai-two-fields"><label className="form-field"><span>目标下限</span><input type="number" step="any" value={targetMin} onChange={(event) => setTargetMin(event.target.value)} /></label><label className="form-field"><span>目标上限</span><input type="number" step="any" value={targetMax} onChange={(event) => setTargetMax(event.target.value)} /></label></div>
-                <p className="ai-hint">至少填写一个目标边界。推荐只使用已启用参数，并强制校验适用范围、OOD 和工艺硬边界。</p>
+                <p className="ai-hint">至少填写一个目标上下限。系统会在安全边界内给出可执行的参数调整建议；确认后请到「受控试验」跟进。</p>
                 <button className="button button-primary" disabled={!selectedModel || selectedModel.status !== "ACTIVE" || !selectedSnapshot || governanceLoading || !governanceAllowed || (!targetMin && !targetMax) || submitting === "recommend"}>{submitting === "recommend" ? <LoaderCircle className="spin" /> : <Sparkles />} 生成约束推荐</button>
               </div>
             </form>
@@ -1544,7 +1590,7 @@ export function AiWorkbench() {
                 {filteredRecommendations.map((recommendation) => <button className={`ai-recommendation-card ${recommendation.id === selectedRecommendationId ? "selected" : ""}`} key={recommendation.id} onClick={() => selectRecommendation(recommendation.id)}><span className={`record-status ${["REJECTED"].includes(recommendation.status) ? "status-off" : "status-on"}`}>{statusLabel(recommendation.status)}</span><strong>{recommendation.recommendation_no}</strong><small>{recommendation.model_version} · {recommendation.target_metric}</small><b>{recommendation.predicted_improvement >= 0 ? "+" : ""}{formatNumber(recommendation.predicted_improvement)}</b></button>)}
               </div>
               {selectedRecommendation ? <div className="ai-evidence-panel">
-                <div className="program-subheading"><div><span className="eyebrow">Closed Loop</span><h3>{selectedRecommendation.recommendation_no}</h3></div><span className="record-status status-on">{statusLabel(selectedRecommendation.status)}</span></div>
+                <div className="program-subheading"><div><span className="eyebrow">推荐闭环</span><h3>{selectedRecommendation.recommendation_no}</h3></div><span className="record-status status-on">{statusLabel(selectedRecommendation.status)}</span></div>
                 <p className="ai-summary">{selectedRecommendation.diagnosis_summary}</p>
                 <div className="ai-trial-panel">
                   <div className="ai-trial-heading">
@@ -1569,17 +1615,17 @@ export function AiWorkbench() {
                 <WorkspaceEmptyState
                   icon={Sparkles}
                   title="暂无推荐记录"
-                  description="约束推荐会在模型、范围和 OOD 校验通过后生成，后续可从这里进入审批、执行与复测闭环。"
+                  description="推荐会在模型与安全校验通过后生成；确认后可到「受控试验」继续审批、执行与复测。"
                   compact
                 />
               )}
             </div>
           </div>
         ) : null}
-        {tab === "comparison" ? (
+        {activeTab === "comparison" && canManageModels ? (
           <div className="model-comparison">
             <div className="program-subheading">
-              <div><span className="eyebrow">MODEL COMPARISON</span><h3>模型版本对比</h3></div>
+              <div><span className="eyebrow">模型对比</span><h3>模型版本对比</h3></div>
               <span>{models.length} 个模型版本</span>
             </div>
             <div className="comparison-grid">

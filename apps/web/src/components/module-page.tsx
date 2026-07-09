@@ -95,7 +95,7 @@ export function ModulePage({
       <section className="panel module-table-panel">
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">LIVE DATA</span>
+            <span className="eyebrow">实时清单</span>
             <h2>{title}清单</h2>
           </div>
           <div className="inline-actions">
@@ -146,7 +146,7 @@ export function ModulePage({
       {selectedRow ? (
         <ModalShell
           className="module-detail-card"
-          eyebrow="RECORD DETAIL"
+          eyebrow="记录详情"
           title={selectedRow[0]}
           description="统一使用弹窗详情视图查看当前记录，支持 Esc 和遮罩关闭。"
           onClose={() => setSelectedRow(null)}

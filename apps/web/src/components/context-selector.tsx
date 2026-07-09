@@ -1,27 +1,19 @@
 "use client";
 
 import { Cog, Factory, Layers, PaintBucket } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useAuth } from "@/lib/auth-context";
+import { PROCESS_STAGE_LABELS } from "@/lib/display-labels";
+import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type Resource = { id: string; code: string; name: string };
-type CoatingSystem = { id: string; label: string; shortcut: string };
-type StageInfo = { code: string; label: string };
 
-const COATING_SYSTEMS: CoatingSystem[] = [
-  { id: "midcoat", label: "中涂系统", shortcut: "MC" },
-  { id: "basecoat", label: "色漆系统", shortcut: "BC" },
-  { id: "clearcoat", label: "清漆系统", shortcut: "CC" },
-];
-
-const STAGES: StageInfo[] = [
-  { code: "MIDCOAT_EXT", label: "中涂外喷" },
-  { code: "BASECOAT_1", label: "色漆一站" },
-  { code: "BASECOAT_2", label: "色漆二站" },
-  { code: "CLEARCOAT_1", label: "清漆一站" },
-  { code: "CLEARCOAT_2", label: "清漆二站" },
-];
+const COATING_SYSTEMS = [
+  { id: "midcoat", label: "中涂", stages: ["MIDCOAT_EXT"] },
+  { id: "basecoat", label: "色漆", stages: ["BASECOAT_1", "BASECOAT_2"] },
+  { id: "clearcoat", label: "清漆", stages: ["CLEARCOAT_1", "CLEARCOAT_2"] },
+] as const;
 
 function getApiKey(): string {
   const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
@@ -31,20 +23,30 @@ function getApiKey(): string {
 async function fetchList<T>(path: string): Promise<T[]> {
   try {
     const resp = await fetch(path, { headers: { "x-api-key": getApiKey() }, cache: "no-store" });
-    return resp.ok ? (resp.json() as Promise<T[]>) : [];
-  } catch { return []; }
+    return resp.ok ? ((await resp.json()) as T[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export function ContextSelector() {
   const { actor } = useAuth();
+  const {
+    factoryId,
+    modelId,
+    colorId,
+    coating,
+    stage,
+    setFactoryId,
+    setModelId,
+    setColorId,
+    setCoating,
+    setStage,
+  } = useWorkspaceContext();
   const [factories, setFactories] = useState<Resource[]>([]);
   const [vehicleModels, setVehicleModels] = useState<Resource[]>([]);
   const [colors, setColors] = useState<Resource[]>([]);
-  const [coating, setCoating] = useState("basecoat");
-  const [stage, setStage] = useState("BASECOAT_1");
-  const [factoryId, setFactoryId] = useState("");
-  const [modelId, setModelId] = useState("");
-  const [colorId, setColorId] = useState("");
+  const defaultsApplied = useRef(false);
 
   useEffect(() => {
     void (async () => {
@@ -56,66 +58,107 @@ export function ContextSelector() {
       setFactories(f);
       setVehicleModels(m);
       setColors(c);
-      setFactoryId((prev) => prev || f[0]?.id || "");
-      setModelId((prev) => prev || m[0]?.id || "");
-      setColorId((prev) => prev || c[0]?.id || "");
     })();
   }, []);
 
-  const currentCoating = COATING_SYSTEMS.find((c) => c.id === coating);
-  const currentStage = STAGES.find((s) => s.code === stage);
-  const currentFactory = factories.find((f) => f.id === factoryId);
-  const currentModel = vehicleModels.find((m) => m.id === modelId);
-  const currentColor = colors.find((c) => c.id === colorId);
+  useEffect(() => {
+    if (defaultsApplied.current) return;
+    if (!factories.length && !vehicleModels.length && !colors.length) return;
+    defaultsApplied.current = true;
+    if (!factoryId && factories[0]?.id) setFactoryId(factories[0].id);
+    if (!modelId && vehicleModels[0]?.id) setModelId(vehicleModels[0].id);
+    if (!colorId && colors[0]?.id) setColorId(colors[0].id);
+  }, [colorId, colors, factories, factoryId, modelId, setColorId, setFactoryId, setModelId, vehicleModels]);
 
   if (!actor.isAuthenticated) return null;
 
+  const currentCoating = COATING_SYSTEMS.find((item) => item.id === coating) ?? COATING_SYSTEMS[1];
+  const stageOptions = currentCoating.stages.map((code) => ({
+    code,
+    label: PROCESS_STAGE_LABELS[code] ?? code,
+  }));
+
   return (
-    <div className="context-selector">
+    <div className="context-selector" aria-label="当前作业范围">
       <div className="context-coating-stages">
         {COATING_SYSTEMS.map((cs) => (
           <button
             key={cs.id}
+            type="button"
             className={`context-chip ${coating === cs.id ? "active" : ""}`}
-            onClick={() => setCoating(cs.id)}
+            onClick={() => {
+              setCoating(cs.id);
+              if (!(cs.stages as readonly string[]).includes(stage)) {
+                setStage(cs.stages[0]);
+              }
+            }}
             title={cs.label}
           >
-            <span className="context-chip-shortcut">{cs.shortcut}</span>
             <span className="context-chip-label">{cs.label}</span>
           </button>
         ))}
       </div>
       <span className="context-separator" />
       <div className="context-stage-selector">
-        <Cog className="context-icon" />
-        <select value={stage} onChange={(e) => setStage(e.target.value)} className="context-select">
-          {STAGES.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
+        <Cog className="context-icon" aria-hidden="true" />
+        <select
+          value={stageOptions.some((item) => item.code === stage) ? stage : stageOptions[0]?.code}
+          onChange={(event) => setStage(event.target.value)}
+          className="context-select"
+          aria-label="喷涂工位"
+        >
+          {stageOptions.map((item) => (
+            <option key={item.code} value={item.code}>
+              {item.label}
+            </option>
+          ))}
         </select>
       </div>
       <span className="context-separator" />
       <div className="context-factory">
-        <Factory className="context-icon" />
-        <select value={factoryId} onChange={(e) => setFactoryId(e.target.value)} className="context-select">
-          {factories.map((f) => <option key={f.id} value={f.id}>{f.code}</option>)}
+        <Factory className="context-icon" aria-hidden="true" />
+        <select
+          value={factoryId}
+          onChange={(event) => setFactoryId(event.target.value)}
+          className="context-select"
+          aria-label="工厂"
+        >
+          {factories.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name || item.code}
+            </option>
+          ))}
         </select>
       </div>
       <span className="context-separator" />
       <div className="context-model-color">
-        <Layers className="context-icon" />
-        <select value={modelId} onChange={(e) => setModelId(e.target.value)} className="context-select">
-          {vehicleModels.map((m) => <option key={m.id} value={m.id}>{m.code}</option>)}
+        <Layers className="context-icon" aria-hidden="true" />
+        <select
+          value={modelId}
+          onChange={(event) => setModelId(event.target.value)}
+          className="context-select"
+          aria-label="车型"
+        >
+          {vehicleModels.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name || item.code}
+            </option>
+          ))}
         </select>
         <span className="context-dot">·</span>
-        <PaintBucket className="context-icon" />
-        <select value={colorId} onChange={(e) => setColorId(e.target.value)} className="context-select">
-          {colors.map((c) => <option key={c.id} value={c.id}>{c.code}</option>)}
+        <PaintBucket className="context-icon" aria-hidden="true" />
+        <select
+          value={colorId}
+          onChange={(event) => setColorId(event.target.value)}
+          className="context-select"
+          aria-label="颜色"
+        >
+          {colors.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name || item.code}
+            </option>
+          ))}
         </select>
-      </div>
-      <span className="context-separator" />
-      <div className="context-summary">
-        <span className="context-summary-text">
-          {currentCoating?.label} · {currentStage?.label} · {currentFactory?.code ?? "—"} · {currentModel?.code ?? "—"} · {currentColor?.code ?? "—"}
-        </span>
       </div>
     </div>
   );

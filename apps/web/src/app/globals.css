@@ -158,11 +158,9 @@ textarea {
 .eyebrow,
 .page-kicker {
   color: var(--text-muted);
-  font-family: "Geist Mono", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .nav-root-label {
@@ -173,13 +171,6 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 5px;
-}
-
-.nav-quick-group {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, white 12%), transparent);
-  border: 1px solid color-mix(in srgb, var(--line) 86%, white 14%);
-  border-radius: 12px;
-  padding: 10px 8px 8px;
 }
 
 .nav-group-header {
@@ -271,10 +262,6 @@ textarea {
   padding: 10px 11px;
   text-decoration: none;
   transition: 160ms ease;
-}
-
-.nav-item-quick {
-  background: color-mix(in srgb, var(--surface) 82%, white 18%);
 }
 
 .nav-item svg,
@@ -401,12 +388,56 @@ textarea {
   background: rgb(255 255 255 / 88%);
   border-bottom: 1px solid var(--line);
   display: flex;
+  gap: 16px;
   height: 66px;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 0 28px;
   position: sticky;
   top: 0;
   z-index: 10;
+}
+
+.topbar-hint {
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+  margin-left: auto;
+  max-width: 420px;
+  text-align: right;
+}
+
+.modal-eyebrow,
+.section-eyebrow {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.section-description {
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 4px 0 0;
+}
+
+.ai-advanced-details {
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.ai-advanced-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ai-advanced-details .ai-two-fields,
+.ai-advanced-details .form-field {
+  margin-top: 10px;
 }
 
 .search-control {
@@ -2565,6 +2596,23 @@ button.message-banner {
 
 .quality-toolbar .master-search {
   margin-right: auto;
+}
+
+.context-filter-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-right: auto;
+  white-space: nowrap;
+}
+
+.quality-toolbar .context-filter-hint {
+  margin-right: 0;
+}
+
+.master-tabs .context-filter-hint {
+  align-self: center;
+  margin-left: auto;
+  margin-right: 8px;
 }
 
 .quality-toolbar > select {

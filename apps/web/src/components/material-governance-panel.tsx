@@ -216,7 +216,7 @@ export function MaterialGovernancePanel() {
         </table>
         {!resources[kind].length ? <div className="large-empty"><FlaskConical />暂无{kindName(kind)}，自由 COA 字段不会进入批准 AI 特征。</div> : null}
       </div>
-      {modal ? <ModalShell className="quality-modal" eyebrow="GOVERNED MATERIAL CHARACTERISTICS" title={`${modal === "new" ? "新建" : "编辑"}${kindName(kind)}`} description="统一维护材料特性、方法、规格、适用关系和结果的治理弹窗结构。" onClose={closeModal} busy={submitting}><form onSubmit={submit}><div className="form-grid">{renderFields(kind, form, setForm, resources, materials)}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div></form></ModalShell> : null}
+      {modal ? <ModalShell className="quality-modal" eyebrow="材料特性" title={`${modal === "new" ? "新建" : "编辑"}${kindName(kind)}`} description="统一维护材料特性、方法、规格、适用关系和结果的治理弹窗结构。" onClose={closeModal} busy={submitting}><form onSubmit={submit}><div className="form-grid">{renderFields(kind, form, setForm, resources, materials)}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存"}</button></div></form></ModalShell> : null}
     </div>
   );
 }

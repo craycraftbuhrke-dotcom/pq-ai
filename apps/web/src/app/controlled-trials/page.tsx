@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { InfoGrid } from "@/components/info-grid";
 import { useAuth } from "@/lib/auth-context";
+import { statusLabel } from "@/lib/display-labels";
 import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 
 type ControlledTrial = {
@@ -174,7 +175,7 @@ export default function ControlledTrialsPage() {
     setError("");
     try {
       await apiRequest(`/api/ai/controlled-trials/${trialId}/${action}`, { method: "POST" });
-      setNotice(`操作"${action}"已提交`);
+      setNotice(`「${statusLabel(action)}」已提交`);
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败");
@@ -200,7 +201,7 @@ export default function ControlledTrialsPage() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <span className="page-kicker">CLOSED LOOP · PHASE 6</span>
+          <span className="page-kicker">受控试验</span>
           <h1>受控试验中心</h1>
           <p>管理工艺参数调整的受控试验计划、审批、执行、复测评价与回滚的全流程闭环。</p>
         </div>
@@ -253,7 +254,7 @@ export default function ControlledTrialsPage() {
               <WorkspaceEmptyState
                 icon={FlaskConical}
                 title="暂无受控试验记录"
-                description="当前筛选条件下没有试验计划，可切换状态筛选或从 AI 推荐链路中创建新的受控试验。"
+                description="当前筛选条件下没有试验计划。可切换状态筛选，或先到「智能分析与推荐」生成参数建议后再创建试验。"
                 compact
               />
             ) : null}
@@ -262,7 +263,7 @@ export default function ControlledTrialsPage() {
             <div className="trial-detail">
               <div className="program-subheading">
                 <div>
-                  <span className="eyebrow">TRIAL DETAIL</span>
+                  <span className="eyebrow">试验详情</span>
                   <h3>{visibleSelectedTrial.trial_no}</h3>
                 </div>
                 <span className={`status-badge ${STATUS_TONES[visibleSelectedTrial.status] ?? "status-info"}`}>
@@ -317,7 +318,7 @@ export default function ControlledTrialsPage() {
               ) : null}
               {visibleSelectedTrial.rollback ? (
                 <div className="trial-section">
-                  <h4>回滚记录 <span className="status-badge status-risk">ROLLED_BACK</span></h4>
+                  <h4>回滚记录 <span className="status-badge status-risk">{statusLabel(visibleSelectedTrial.rollback.status || "ROLLED_BACK")}</span></h4>
                   <p>回滚编号: {visibleSelectedTrial.rollback.rollback_no}</p>
                   <p>执行时间: {visibleSelectedTrial.rollback.executed_at ? new Date(visibleSelectedTrial.rollback.executed_at).toLocaleString("zh-CN") : "—"}</p>
                 </div>

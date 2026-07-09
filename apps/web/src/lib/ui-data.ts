@@ -41,54 +41,72 @@ export type NavSection = {
   items: readonly NavItem[];
 };
 
+/** 按现场任务组织，而不是按系统模块堆叠 */
 export const navSections: readonly NavSection[] = [
   {
-    key: "overview",
-    title: "总览",
-    items: [{ href: "/", label: "工艺质量总览", icon: "dashboard" }],
+    key: "today",
+    title: "今日工作",
+    items: [{ href: "/", label: "今日总览", icon: "dashboard" }],
   },
   {
-    key: "execution",
-    title: "现场执行",
+    key: "field",
+    title: "现场作业",
     items: [
-      { href: "/programs", label: "工艺配方管理", icon: "program" },
-      { href: "/production", label: "生产执行记录", icon: "production" },
-      { href: "/material-trends", label: "材料批次分析", icon: "material" },
+      { href: "/quality", label: "录入与查看质量", icon: "quality" },
+      { href: "/import-wizard", label: "批量导入测量", icon: "import" },
+      { href: "/production", label: "生产车身记录", icon: "production" },
+      { href: "/programs", label: "喷涂配方", icon: "program" },
     ],
   },
   {
-    key: "improvement",
-    title: "质量改进",
+    key: "improve",
+    title: "问题处理",
     items: [
-      { href: "/quality", label: "质量测量与标准", icon: "quality" },
-      { href: "/quality-monitor", label: "质量数据监控", icon: "monitor" },
-      { href: "/engineering", label: "工程问题闭环", icon: "engineering" },
-      { href: "/ai-workbench", label: "AI 优化工作台", icon: "ai", roles: ["DATA_SCIENTIST", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "APPROVER"] },
-      { href: "/controlled-trials", label: "受控试验管理", icon: "trial" },
+      { href: "/quality-monitor", label: "数据是否可信", icon: "monitor" },
+      { href: "/engineering", label: "问题与调试", icon: "engineering" },
+      {
+        href: "/ai-workbench",
+        label: "智能分析与推荐",
+        icon: "ai",
+        roles: ["DATA_SCIENTIST", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "APPROVER", "ADMIN"],
+      },
+      { href: "/controlled-trials", label: "受控试验", icon: "trial" },
     ],
   },
   {
-    key: "governance",
-    title: "治理工具",
+    key: "analysis",
+    title: "材料与趋势",
+    items: [{ href: "/material-trends", label: "材料批次趋势", icon: "material" }],
+  },
+  {
+    key: "settings",
+    title: "基础设置",
     collapsible: true,
     items: [
-      { href: "/import-wizard", label: "批量数据导入", icon: "import" },
-      { href: "/master-data", label: "主数据治理", icon: "master", roles: ["ADMIN", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "INTEGRATION_OPERATOR"] },
-      { href: "/integrations", label: "系统集成任务", icon: "integration", roles: ["ADMIN", "INTEGRATION_OPERATOR"] },
-      { href: "/integration-monitor", label: "集成运行监控", icon: "monitor", roles: ["ADMIN", "INTEGRATION_OPERATOR", "AUDITOR"] },
-      { href: "/audit", label: "审计追溯", icon: "audit", roles: ["ADMIN", "AUDITOR"] },
+      {
+        href: "/master-data",
+        label: "工厂与测量点",
+        icon: "master",
+        roles: ["ADMIN", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "INTEGRATION_OPERATOR"],
+      },
+      {
+        href: "/integrations",
+        label: "系统对接",
+        icon: "integration",
+        roles: ["ADMIN", "INTEGRATION_OPERATOR"],
+      },
+      {
+        href: "/integration-monitor",
+        label: "对接运行状态",
+        icon: "monitor",
+        roles: ["ADMIN", "INTEGRATION_OPERATOR", "AUDITOR"],
+      },
+      {
+        href: "/audit",
+        label: "操作审计",
+        icon: "audit",
+        roles: ["ADMIN", "AUDITOR"],
+      },
     ],
   },
 ] as const;
-
-export const roleQuickAccess: Record<string, readonly string[]> = {
-  ADMIN: ["/", "/master-data", "/integrations", "/integration-monitor", "/security-admin"],
-  PROCESS_ENGINEER: ["/programs", "/production", "/engineering", "/controlled-trials", "/material-trends"],
-  QUALITY_ENGINEER: ["/quality", "/quality-monitor", "/engineering", "/controlled-trials", "/audit"],
-  DATA_SCIENTIST: ["/ai-workbench", "/quality", "/quality-monitor", "/controlled-trials", "/engineering"],
-  APPROVER: ["/controlled-trials", "/engineering", "/quality", "/quality-monitor", "/"],
-  INTEGRATION_OPERATOR: ["/integrations", "/integration-monitor", "/import-wizard", "/master-data", "/"],
-  AUDITOR: ["/audit", "/quality-monitor", "/integration-monitor", "/quality", "/"],
-  ROBOT_OPERATOR: ["/production", "/programs", "/quality", "/material-trends", "/"],
-  SYSTEM: ["/", "/programs", "/quality", "/master-data", "/integrations"],
-};

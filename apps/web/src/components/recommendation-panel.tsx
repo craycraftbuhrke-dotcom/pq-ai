@@ -54,7 +54,7 @@ export function RecommendationPanel({ recommendation }: RecommendationPanelProps
     <section className="panel recommendation-panel">
       <div className="panel-heading">
         <div>
-          <span className="eyebrow">CLOSED LOOP TASK</span>
+          <span className="eyebrow">参数推荐</span>
           <h2>参数推荐</h2>
         </div>
         <span className={`approval-state approval-${status}`}>
@@ -71,7 +71,7 @@ export function RecommendationPanel({ recommendation }: RecommendationPanelProps
       </div>
       <div className="recommendation-outcome">
         <div>
-          <span>当前 DOI 预测</span>
+          <span>当前质量预测</span>
           <strong>{formatPrediction(recommendation.currentPrediction)}</strong>
         </div>
         <span className="outcome-arrow">→</span>
@@ -109,7 +109,6 @@ export function RecommendationPanel({ recommendation }: RecommendationPanelProps
       <div className="recommendation-actions">
         {status === "pending" || status === "submitting" ? (
           <>
-            <button className="button button-secondary">查看模拟详情</button>
             <button
               className="button button-primary"
               disabled={status === "submitting"}

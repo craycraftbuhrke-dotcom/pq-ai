@@ -4,6 +4,7 @@ import { Key, LoaderCircle, Plus, RefreshCw, Shield, UserPlus, Users, X } from "
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { useAuth } from "@/lib/auth-context";
+import { ROLE_LABELS } from "@/lib/display-labels";
 
 type UserResource = {
   id: string;
@@ -90,7 +91,7 @@ export default function SecurityAdminPage() {
       <div className="page-stack">
         <header className="page-header">
           <div>
-            <span className="page-kicker">SECURITY</span>
+            <span className="page-kicker">账号安全</span>
             <h1>安全管理</h1>
             <p>需要管理员权限才能访问此页面。</p>
           </div>
@@ -172,7 +173,7 @@ export default function SecurityAdminPage() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <span className="page-kicker">SECURITY ADMIN</span>
+          <span className="page-kicker">用户与角色</span>
           <h1>安全管理</h1>
           <p>用户管理、角色分配与 API Key 签发。</p>
         </div>
@@ -195,7 +196,7 @@ export default function SecurityAdminPage() {
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">CREATE USER</span>
+                <span className="eyebrow">新建用户</span>
                 <h2>新建用户</h2>
               </div>
             </div>
@@ -211,7 +212,7 @@ export default function SecurityAdminPage() {
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">ASSIGN ROLE</span>
+                <span className="eyebrow">分配角色</span>
                 <h2>分配角色</h2>
               </div>
             </div>
@@ -224,7 +225,7 @@ export default function SecurityAdminPage() {
               </label>
               <label className="form-field"><span>角色</span>
                 <select value={roleAssignForm.role_code} onChange={(e) => setRoleAssignForm({ ...roleAssignForm, role_code: e.target.value })}>
-                  {ROLE_CATALOG_CODES.map((code) => <option key={code} value={code}>{code}</option>)}
+                  {ROLE_CATALOG_CODES.map((code) => <option key={code} value={code}>{ROLE_LABELS[code] ?? code}</option>)}
                 </select>
               </label>
               <button className="button button-primary" type="submit" disabled={submitting || !roleAssignForm.user_id}>{submitting ? <LoaderCircle className="spin" /> : <Plus />}分配</button>
@@ -233,7 +234,7 @@ export default function SecurityAdminPage() {
           <section className="panel security-full-span">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">USER LIST</span>
+                <span className="eyebrow">用户列表</span>
                 <h2>用户列表</h2>
               </div>
             </div>

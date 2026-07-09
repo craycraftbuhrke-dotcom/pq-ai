@@ -15,6 +15,7 @@ import { CSSProperties, FormEvent, ReactNode, useCallback, useEffect, useMemo, u
 import { BulkDataActions } from "@/components/bulk-data-actions";
 import { ModalShell } from "@/components/modal-shell";
 import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
+import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type Resource = {
   id: string;
@@ -33,6 +34,7 @@ type ProductionRun = {
   run_no: string;
   body_no?: string | null;
   started_at: string;
+  factory_id?: string;
   vehicle_model_id?: string;
   color_id?: string;
 };
@@ -229,6 +231,13 @@ function relationName(resources: Resource[], id?: string | null): string {
   return item ? `${item.code} / ${item.name}` : "全部";
 }
 
+/** Soft context match: missing record ids stay visible; conflicting ids are hidden. */
+function matchesContextId(recordId?: string | null, contextId?: string): boolean {
+  if (!contextId) return true;
+  if (!recordId) return true;
+  return recordId === contextId;
+}
+
 function filterMeasurementGroups(runs: ProductionRun[], groups: Resource[], form: FormState): Resource[] {
   const selectedRun = runs.find((item) => item.id === form.production_run_id);
   return groups.filter(
@@ -290,6 +299,8 @@ function normalizeMeasurementForm(
 }
 
 export function QualityWorkspace() {
+  const { factoryId, modelId, colorId } = useWorkspaceContext();
+  const contextFilterActive = Boolean(factoryId || modelId || colorId);
   const [tab, setTab] = useState<Tab>("measurements");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
@@ -414,27 +425,61 @@ export function QualityWorkspace() {
     return () => window.clearTimeout(timer);
   }, [loadAnalytics, tab]);
 
+  const runById = useMemo(() => new Map(runs.map((run) => [run.id, run])), [runs]);
+  const pointById = useMemo(() => new Map(points.map((point) => [point.id, point])), [points]);
+
   const filteredMeasurements = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return measurements.filter(
-      (item) =>
-        (!typeFilter || item.quality_type === typeFilter) &&
-        (!normalized ||
-          [item.data_no, item.measurement_point_code, item.measurement_point_name, item.measured_by, item.judgement]
-            .some((value) => String(value ?? "").toLowerCase().includes(normalized))),
-    );
-  }, [measurements, query, typeFilter]);
+    return measurements.filter((item) => {
+      if (typeFilter && item.quality_type !== typeFilter) return false;
+      if (
+        normalized &&
+        ![item.data_no, item.measurement_point_code, item.measurement_point_name, item.measured_by, item.judgement].some(
+          (value) => String(value ?? "").toLowerCase().includes(normalized),
+        )
+      ) {
+        return false;
+      }
+      const run = runById.get(item.production_run_id);
+      const point = pointById.get(item.measurement_point_id);
+      if (!matchesContextId(run?.factory_id, factoryId)) return false;
+      if (!matchesContextId(run?.vehicle_model_id ?? point?.vehicle_model_id, modelId)) return false;
+      if (!matchesContextId(run?.color_id, colorId)) return false;
+      return true;
+    });
+  }, [colorId, factoryId, measurements, modelId, pointById, query, runById, typeFilter]);
 
   const filteredStandards = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return standards.filter(
-      (item) =>
-        (!typeFilter || item.quality_type === typeFilter) &&
-        (!normalized ||
-          [item.standard_no, item.metric_code, item.version, item.standard_type]
-            .some((value) => String(value ?? "").toLowerCase().includes(normalized))),
-    );
-  }, [query, standards, typeFilter]);
+    return standards.filter((item) => {
+      if (typeFilter && item.quality_type !== typeFilter) return false;
+      if (
+        normalized &&
+        ![item.standard_no, item.metric_code, item.version, item.standard_type].some((value) =>
+          String(value ?? "").toLowerCase().includes(normalized),
+        )
+      ) {
+        return false;
+      }
+      if (!matchesContextId(item.vehicle_model_id, modelId)) return false;
+      if (!matchesContextId(item.color_id, colorId)) return false;
+      return true;
+    });
+  }, [colorId, modelId, query, standards, typeFilter]);
+
+  const filteredAnalytics = useMemo(() => {
+    if (!analytics) return null;
+    if (!contextFilterActive) return analytics;
+    const series = analytics.series.filter((item) => {
+      const point = pointById.get(item.measurement_point_id);
+      return matchesContextId(point?.vehicle_model_id, modelId);
+    });
+    const pointRisks = analytics.point_risks.filter((item) => {
+      const point = pointById.get(item.measurement_point_id);
+      return matchesContextId(point?.vehicle_model_id, modelId);
+    });
+    return { ...analytics, series, point_risks: pointRisks };
+  }, [analytics, contextFilterActive, modelId, pointById]);
 
   function definitionsFor(type: string): MetricDefinition[] {
     return definitions.filter((item) => item.quality_type === type);
@@ -608,10 +653,10 @@ export function QualityWorkspace() {
             String(item.min_value ?? ""),
             String(item.max_value ?? ""),
           ])
-        : (analytics?.series ?? []).map((item) => [
+        : (filteredAnalytics?.series ?? []).map((item) => [
             item.data_no,
             item.measurement_point_code,
-            analytics?.metric_code ?? "",
+            filteredAnalytics?.metric_code ?? "",
             String(item.value),
             item.judgement,
             String(item.standard_min ?? ""),
@@ -637,13 +682,13 @@ export function QualityWorkspace() {
   return (
     <div className="page-stack">
       <header className="page-header">
-        <div><span className="page-kicker">MEASUREMENT · STANDARD · JUDGEMENT</span><h1>质量数据中心</h1><p>维护橘皮、色差/效应和膜厚数据，依据多维质量标准自动判定。</p></div>
+        <div><span className="page-kicker">测量与判定</span><h1>质量数据中心</h1><p>维护橘皮、色差/效应和膜厚数据，依据多维质量标准自动判定。</p></div>
         <div className="page-actions">
           <button className="button button-secondary" onClick={() => { void reload(); if (tab === "analytics") void loadAnalytics(); }} disabled={loading || analyticsLoading}><RefreshCw className={loading || analyticsLoading ? "spin" : ""} />刷新</button>
           {tab === "measurements" || tab === "standards" ? <button className="button button-primary" onClick={() => tab === "measurements" ? openMeasurement() : openStandard()}><Plus />新建{tab === "measurements" ? "质量测量" : "质量标准"}</button> : null}
         </div>
       </header>
-      <div className="freshness"><span className="live-dot" /> MySQL 实时质量数据 · 自动匹配最具体标准</div>
+      <div className="freshness"><span className="live-dot" /> 实时质量数据 · 自动匹配最具体标准</div>
       <section className="module-stat-strip">
         <article><span>质量测量</span><strong>{loading ? "…" : summary?.measurements ?? 0}</strong><small>{summary?.verified_measurements ?? 0} 条通过可靠性门禁</small></article>
         <article><span>指标值</span><strong>{loading ? "…" : summary?.metric_values ?? 0}</strong><small>当前受治理目录 {definitions.length} 项</small></article>
@@ -658,11 +703,12 @@ export function QualityWorkspace() {
         <div className="master-tabs">
           <button className={tab === "measurements" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("measurements")}>质量测量 <span>{measurements.length}</span></button>
           <button className={tab === "standards" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("standards")}>质量标准 <span>{standards.length}</span></button>
-          <button className={tab === "analytics" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("analytics")}>SPC 与趋势 <span>{analytics?.statistics.samples ?? 0}</span></button>
+          <button className={tab === "analytics" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("analytics")}>SPC 与趋势 <span>{filteredAnalytics?.series.length ?? analytics?.statistics.samples ?? 0}</span></button>
           <button className={tab === "governance" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("governance")}>仪器可靠性 <span>{instruments.length}</span></button>
         </div>
         {tab !== "governance" ? <div className="quality-toolbar">
           {tab !== "analytics" ? <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`搜索质量${tab === "measurements" ? "测量" : "标准"}`} /></label> : <div className="quality-analytics-title"><Activity /><span>实时过程能力与点位风险</span></div>}
+          {contextFilterActive ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}
           <select value={tab === "analytics" ? typeFilter || "ORANGE_PEEL" : typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>{tab !== "analytics" ? <option value="">全部质量类型</option> : null}{Object.entries(qualityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
           {tab === "analytics" ? <select value={resolvedAnalyticsMetric} onChange={(event) => setAnalyticsMetric(event.target.value)}>{analyticsDefinitions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code}</option>)}</select> : null}
           {tab === "measurements" || tab === "standards" ? (
@@ -702,7 +748,7 @@ export function QualityWorkspace() {
               ))}
             </tbody></table>
           </div>
-        ) : tab === "analytics" ? <QualityAnalyticsPanel analytics={analytics} loading={analyticsLoading} /> : <MeasurementGovernancePanel />}
+        ) : tab === "analytics" ? <QualityAnalyticsPanel analytics={filteredAnalytics} loading={analyticsLoading} /> : <MeasurementGovernancePanel />}
       </section>
 
       {modal ? (
@@ -713,7 +759,7 @@ export function QualityWorkspace() {
                 ? renderMeasurementForm(form, setMeasurementForm, metricRows, setMetricRows, repeatRows, setRepeatRows, { runs, groups, groupPoints, points, definitions, instruments, methods, calibrations, references, importProfiles })
                 : renderStandardForm(form, setForm, { vehicleModels, colors, parts, points, definitions })}
             </div>
-            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div>
+            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存"}</button></div>
           </form>
         </ModalShell>
       ) : null}
@@ -746,12 +792,12 @@ function QualityAnalyticsPanel({ analytics, loading }: { analytics: Analytics | 
       </section>
       <div className="quality-analytics-grid">
         <section className="quality-analysis-card quality-trend-card">
-          <div className="program-subheading"><div><span className="eyebrow">SPC CONTROL CHART</span><h3>{analytics.metric_name} 趋势与控制图</h3></div><span className="record-status status-on">{qualityLabels[analytics.quality_type] ?? analytics.quality_type}</span></div>
+          <div className="program-subheading"><div><span className="eyebrow">控制图与趋势</span><h3>{analytics.metric_name} 趋势与控制图</h3></div><span className="record-status status-on">{qualityLabels[analytics.quality_type] ?? analytics.quality_type}</span></div>
           <SpcTrendChart analytics={analytics} />
           <div className="quality-chart-legend"><span className="legend-value">测量值</span><span className="legend-mean">均值</span><span className="legend-control">控制界限</span><span className="legend-standard">质量标准</span></div>
         </section>
         <section className="quality-analysis-card">
-          <div className="program-subheading"><div><span className="eyebrow">DATA QUALITY</span><h3>数据质量监控</h3></div><Activity /></div>
+          <div className="program-subheading"><div><span className="eyebrow">数据质量</span><h3>数据质量监控</h3></div><Activity /></div>
           <div className="quality-data-monitor">
             {dataQualityItems.map(([label, ratio, detail]) => <div key={label}><span><strong>{label}</strong><small>{detail}</small></span><b>{(ratio * 100).toFixed(1)}%</b><span className="quality-progress"><i style={{ width: `${Math.min(100, ratio * 100)}%` }} /></span></div>)}
           </div>
@@ -759,7 +805,7 @@ function QualityAnalyticsPanel({ analytics, loading }: { analytics: Analytics | 
         </section>
       </div>
       <section className="quality-analysis-card">
-        <div className="program-subheading"><div><span className="eyebrow">POINT RISK HEATMAP</span><h3>测量点风险热力图</h3></div><small>综合超差、失控与无标准风险</small></div>
+        <div className="program-subheading"><div><span className="eyebrow">点位风险</span><h3>测量点风险热力图</h3></div><small>综合超差、失控与无标准风险</small></div>
         <div className="quality-risk-heatmap">
           {analytics.point_risks.map((point) => <article key={point.measurement_point_id} style={{ "--risk": `${point.risk_score}%` } as CSSProperties}><span>{point.measurement_point_code}</span><strong>{point.measurement_point_name}</strong><b>{point.risk_score.toFixed(1)}</b><small>{point.samples} 样本 · {point.failures} 超差 · 最新 {analyticsNumber(point.latest_value)}</small></article>)}
         </div>
@@ -884,7 +930,7 @@ function renderMeasurementForm(
     <FormSection key="measurement-results" title="结果明细" description="按行录入质量指标值和逐次原始读数，不再挤在同一块平铺表单中。">
       <div className="modal-section-grid">
         <div className="metric-editor form-field-wide" key="metrics">
-      <div className="program-subheading"><div><span className="eyebrow">METRIC VALUES</span><h3>质量指标值</h3></div><button type="button" className="button button-secondary" onClick={() => setMetricRows([...metricRows, { metric_code: metricOptions[0]?.code ?? "", raw_value: "", corrected_value: "" }])}><Plus />新增指标</button></div>
+      <div className="program-subheading"><div><span className="eyebrow">测量指标</span><h3>质量指标值</h3></div><button type="button" className="button button-secondary" onClick={() => setMetricRows([...metricRows, { metric_code: metricOptions[0]?.code ?? "", raw_value: "", corrected_value: "" }])}><Plus />新增指标</button></div>
       <div className="master-empty">指标值属于当前表单内容调整，至少保留 1 条有效指标后才能保存。</div>
       {metricRows.map((row, index) => (
         <div className="metric-editor-row" key={`${index}-${row.metric_code}`}>
@@ -904,7 +950,7 @@ function renderMeasurementForm(
       ))}
     </div>
         <div className="metric-editor form-field-wide" key="repeat-readings">
-      <div className="program-subheading"><div><span className="eyebrow">REPEAT READINGS</span><h3>逐次原始读数</h3></div><button type="button" className="button button-secondary" onClick={() => setRepeatRows([...repeatRows, { repeat_no: String(repeatRows.length + 1), metric_code: metricOptions[0]?.code ?? "", raw_value: "", corrected_value: "" }])}><Plus />新增读数</button></div>
+      <div className="program-subheading"><div><span className="eyebrow">重复读数</span><h3>逐次原始读数</h3></div><button type="button" className="button button-secondary" onClick={() => setRepeatRows([...repeatRows, { repeat_no: String(repeatRows.length + 1), metric_code: metricOptions[0]?.code ?? "", raw_value: "", corrected_value: "" }])}><Plus />新增读数</button></div>
       <div className="master-empty">逐次读数可按需填写；如果当前没有重复测量，可留空或移除未填写的行。</div>
       {repeatRows.length === 0 ? <div className="master-empty">暂未填写逐次读数，可按需新增。</div> : null}
       {repeatRows.map((row, index) => (

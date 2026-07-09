@@ -254,7 +254,7 @@ export function DurrTrajectoryPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildBody(kind, form)),
       });
-      setMessage({ type: "success", text: `${kindName(kind)}已${editing ? "更新" : "创建"}并写入 MySQL` });
+      setMessage({ type: "success", text: `${kindName(kind)}已${editing ? "更新" : "创建"}并已保存` });
       setModal(null);
       await reload();
     } catch (error) {
@@ -312,7 +312,7 @@ export function DurrTrajectoryPanel() {
         </table>
         {!rows.length ? <div className="large-empty"><Cable />暂无{kindName(kind)}，请按设备、配置、轨迹、贡献版本顺序建立受控链路。</div> : null}
       </div>
-      {modal ? <ModalShell className="quality-modal" eyebrow="DURR ROBOT & TRAJECTORY GOVERNANCE" title={`${modal === "new" ? "新建" : "编辑"}${kindName(kind)}`} description="统一维护设备、轨迹、路径段和贡献版本的治理弹窗结构。" onClose={closeModal} busy={submitting}><form onSubmit={submit}><div className="form-grid">{renderFields(kind, form, setForm, { factories, versions, brushes, points, parts, resources })}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存到 MySQL"}</button></div></form></ModalShell> : null}
+      {modal ? <ModalShell className="quality-modal" eyebrow="机器人与轨迹" title={`${modal === "new" ? "新建" : "编辑"}${kindName(kind)}`} description="统一维护设备、轨迹、路径段和贡献版本的治理弹窗结构。" onClose={closeModal} busy={submitting}><form onSubmit={submit}><div className="form-grid">{renderFields(kind, form, setForm, { factories, versions, brushes, points, parts, resources })}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存"}</button></div></form></ModalShell> : null}
       {(summary?.checksum_mismatches ?? 0) > 0 ? <div className="governance-warning"><ShieldAlert />存在轨迹校验和异常的生产执行。相关工序不能进入 AI 训练、预测、诊断或推荐。</div> : null}
     </div>
   );

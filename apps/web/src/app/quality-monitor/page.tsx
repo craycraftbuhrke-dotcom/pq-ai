@@ -167,7 +167,7 @@ export default function QualityMonitorPage() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <span className="page-kicker">PHASE 4 · QUALITY MONITORING</span>
+          <span className="page-kicker">数据是否可信</span>
           <h1>数据质量监控</h1>
           <p>实时监控测量数据可靠性、仪器校准状态与质量标准覆盖度。</p>
         </div>
@@ -209,7 +209,7 @@ export default function QualityMonitorPage() {
             <section className="panel">
               <div className="panel-heading">
                 <div>
-                  <span className="eyebrow">RELIABILITY</span>
+                  <span className="eyebrow">可靠性</span>
                   <h2>按质量类型统计</h2>
                 </div>
               </div>
@@ -247,7 +247,7 @@ export default function QualityMonitorPage() {
             <section className="panel">
               <div className="panel-heading">
                 <div>
-                  <span className="eyebrow">CALIBRATION</span>
+                  <span className="eyebrow">校准状态</span>
                   <h2>仪器校准状态</h2>
                 </div>
                 <span className={`record-status ${data.instruments.needs_calibration.length === 0 ? "status-on" : "status-off"}`}>
@@ -281,7 +281,7 @@ export default function QualityMonitorPage() {
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">DATA QUALITY INDICATORS</span>
+                <span className="eyebrow">数据质量指标</span>
                 <h2>数据质量指标</h2>
               </div>
             </div>
