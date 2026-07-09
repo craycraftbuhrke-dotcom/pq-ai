@@ -680,7 +680,7 @@ export function QualityWorkspace() {
         </div> : null}
         {tab === "measurements" ? (
           <div className="master-empty">
-            批量模板会自动带出当前质量类型下的测量编组、编组内点位和对应质量指标列；用户直接填写生产事件、测量时间和指标值即可，无需再理解技术结构字段。
+            批量模板会自动带出当前质量类型下的测量编组、编组内点位和对应质量指标列；用户可在同一份文件中同时填写车号、生产事件基础信息、测量时间和指标值。
           </div>
         ) : null}
         {tab === "measurements" ? (

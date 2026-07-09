@@ -42,6 +42,8 @@ export function ModalShell({
   titleId,
   closeLabel = "关闭",
 }: ModalShellProps) {
+  void eyebrow;
+  void description;
   const generatedTitleId = useId().replace(/:/g, "");
   const headingId = titleId ?? `modal-title-${generatedTitleId}`;
 
@@ -58,9 +60,7 @@ export function ModalShell({
       >
         <div className="modal-heading">
           <div className="modal-heading-copy">
-            {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
             <h2 id={headingId}>{title}</h2>
-            {description ? <p className="modal-description">{description}</p> : null}
           </div>
           <button className="icon-button" onClick={onClose} disabled={busy} aria-label={closeLabel}>
             <X aria-hidden="true" />

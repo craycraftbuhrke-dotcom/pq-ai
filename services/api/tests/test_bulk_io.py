@@ -25,6 +25,7 @@ from app.models.domain import (
     BrushParameter,
     BrushPointContribution,
     Factory,
+    ProductionRun,
     QualityMeasurement,
     QualityMetricValue,
     SprayProgramVersion,
@@ -118,12 +119,15 @@ def build_quality_bulk_context(db: Session) -> dict[str, str]:
         db,
     )
     return {
+        "factory_code": factory.code,
         "group_id": group.id,
         "group_code": group.code,
+        "color_code": color.code,
         "point_id": point.id,
         "point_code": point.code,
         "run_id": run.id,
         "run_no": run.run_no,
+        "vehicle_code": vehicle.code,
     }
 
 
@@ -362,6 +366,9 @@ def test_quality_measurement_template_uses_flat_metric_columns() -> None:
 
     assert "measurement_group_code" in content
     assert "measurement_point_code" in content
+    assert "body_no" in content
+    assert "factory_code" in content
+    assert "color_code" in content
     assert "metric__doi" in content
     assert "metrics" not in content
     assert "repeat_readings" not in content
@@ -392,4 +399,29 @@ def test_quality_measurement_bulk_import_transforms_flat_metric_columns() -> Non
     assert measurement.measurement_group_id == context["group_id"]
     assert measurement.measurement_point_id == context["point_id"]
     assert metric.raw_value == 88.2
+    db.close()
+
+
+def test_quality_measurement_bulk_import_creates_production_run_with_body_no() -> None:
+    db = build_session()
+    context = build_quality_bulk_context(db)
+    csv_content = (
+        "data_no,production_run_no,body_no,factory_code,measurement_group_code,measurement_point_code,vehicle_model_code,quality_type,color_code,shift,production_started_at,measured_at,metric__doi\n"
+        f"QM-BULK-2,RUN-QUALITY-NEW,BODY-9001,{context['factory_code']},{context['group_code']},{context['point_code']},{context['vehicle_code']},ORANGE_PEEL,{context['color_code']},B,2026-07-08T07:30:00+00:00,2026-07-08T08:00:00+00:00,91.5\n"
+    )
+
+    result = import_resource(
+        "quality.measurements",
+        csv_content.encode("utf-8"),
+        filename="quality-measurements-with-run.csv",
+        mode="upsert",
+        db=db,
+    )
+
+    assert result["created"] == 1
+    run = db.query(ProductionRun).filter_by(run_no="RUN-QUALITY-NEW").one()
+    measurement = db.query(QualityMeasurement).filter_by(data_no="QM-BULK-2").one()
+    assert run.body_no == "BODY-9001"
+    assert run.shift == "B"
+    assert measurement.production_run_id == run.id
     db.close()

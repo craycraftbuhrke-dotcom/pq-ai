@@ -23,15 +23,15 @@ export function SectionHeader({
   compact = false,
   titleAs = "h2",
 }: SectionHeaderProps) {
+  void eyebrow;
+  void description;
   const TitleTag = titleAs;
   const rootClassName = `section-header${compact ? " compact" : ""}${className ? ` ${className}` : ""}`;
 
   return (
     <div className={rootClassName}>
       <div className="section-header-copy">
-        {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
         <TitleTag>{title}</TitleTag>
-        {description ? <p>{description}</p> : null}
       </div>
       {badge ? <div className="section-header-badge">{badge}</div> : null}
       {actions ? <div className="section-header-actions">{actions}</div> : null}

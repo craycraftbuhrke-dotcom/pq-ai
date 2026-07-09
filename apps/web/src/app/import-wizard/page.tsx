@@ -171,7 +171,7 @@ export default function ImportWizardPage() {
         <div>
           <span className="page-kicker">PHASE 4 · DATA IMPORT</span>
           <h1>数据导入向导</h1>
-          <p>通过 CSV 文件批量导入质量测量数据，支持预览、校验与错误反馈。</p>
+          <p>通过 CSV 文件一次性导入质量测量与对应生产事件基础信息，支持预览、校验与错误反馈。</p>
         </div>
       </header>
       {error ? <button className="message-banner message-error" onClick={() => setError("")}>{error}<X /></button> : null}
@@ -229,7 +229,7 @@ export default function ImportWizardPage() {
           <div className="import-field-guide">
             <p className="panel-note">
               当前模板会按所选质量类型自动带出测量编组、编组内点位和对应质量指标列。
-              用户只需要填写生产事件编号、测量时间和各项质量数值，无需再填写 `metrics` JSON。
+              用户可在同一份文件中同时填写车号和生产事件基础信息；若生产事件不存在，后端会先自动补建，再继续导入质量数据。
             </p>
           </div>
           <div className="import-field-guide">
@@ -238,11 +238,13 @@ export default function ImportWizardPage() {
               <thead><tr><th>列名</th><th>说明</th><th>填写要求</th></tr></thead>
               <tbody>
                 <tr><td className="mono">data_no</td><td>测量编号（唯一）</td><td>填写本次质量数据的业务编号</td></tr>
-                <tr><td className="mono">production_run_no</td><td>生产事件编号</td><td>填写系统中已有的生产事件编号</td></tr>
+                <tr><td className="mono">production_run_no</td><td>生产事件编号</td><td>填写生产事件编号；若系统中还没有该记录，可配合车号和生产上下文自动创建</td></tr>
+                <tr><td className="mono">body_no</td><td>车号</td><td>建议始终填写；新建生产事件时必带</td></tr>
+                <tr><td className="mono">factory_code / vehicle_model_code / color_code</td><td>生产上下文</td><td>当生产事件尚不存在时必填，用于自动创建生产事件</td></tr>
                 <tr><td className="mono">measurement_group_code</td><td>测量编组代码</td><td>模板已自动带出，通常无需改动</td></tr>
                 <tr><td className="mono">measurement_point_code</td><td>点位编号</td><td>模板已自动带出或填写系统中已有点位编号</td></tr>
                 <tr><td className="mono">quality_type</td><td>质量类型</td><td>模板已按当前下载类型预填</td></tr>
-                <tr><td className="mono">measured_at</td><td>测量时间（ISO格式）</td><td>填写实际测量时间</td></tr>
+                <tr><td className="mono">production_started_at / measured_at</td><td>生产与测量时间</td><td>测量时间必填；生产开始时间建议填写，留空时默认回落到测量时间</td></tr>
                 <tr><td className="mono">metric__*</td><td>质量指标列</td><td>直接填写实际质量数值，后端自动转换</td></tr>
               </tbody>
             </table>

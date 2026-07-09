@@ -1000,16 +1000,22 @@ def _quality_measurement_base_fields() -> tuple[BulkField, ...]:
     return (
         BulkField("id", "ID（可选，用于更新）", "string", False, "", "存在 id 时可直接更新对应质量测量。"),
         BulkField("data_no", "质量数据编号", "string", True, "QM-20260708-001", "质量测量业务编号，建议保持唯一。"),
-        BulkField("production_run_no", "生产事件编号", "string", True, "RT_RUN_001", "按生产事件编号关联，不要求用户手填 production_run_id。"),
+        BulkField("production_run_no", "生产事件编号", "string", True, "RT_RUN_001", "若该生产事件不存在，后端会结合同一行的车号与生产上下文自动补建。"),
+        BulkField("body_no", "车号", "string", False, "BODY-0001", "建议始终填写车号；当生产事件尚不存在时，车号会随生产事件一起创建。"),
+        BulkField("factory_code", "工厂代码", "string", False, "F01", "当生产事件尚不存在时必填，用于自动创建生产事件。"),
         BulkField("measurement_group_code", "测量编组代码", "string", False, "RT_MG_OP", "模板会自动预填当前编组代码，导入时按车型+代码解析。"),
         BulkField("measurement_group_name", "测量编组名称", "string", False, "", "模板说明列，仅用于帮助识别编组，可保留原值。"),
         BulkField("measurement_point_code", "测量点代码", "string", True, "RT_P01", "模板会自动预填当前编组内测量点代码，导入时按车型+代码解析。"),
         BulkField("measurement_point_name", "测量点名称", "string", False, "", "模板说明列，仅用于帮助识别测量点，可保留原值。"),
-        BulkField("vehicle_model_code", "车型代码", "string", False, "", "模板说明列，帮助用户确认当前测量点所属车型。"),
+        BulkField("vehicle_model_code", "车型代码", "string", False, "", "模板会自动预填当前测量点所属车型；当生产事件尚不存在时会参与自动创建。"),
         BulkField("vehicle_model_name", "车型名称", "string", False, "", "模板说明列，帮助用户确认当前测量点所属车型。"),
         BulkField("part_code", "零件代码", "string", False, "", "模板说明列，帮助用户确认当前测量点所属零件。"),
         BulkField("part_name", "零件名称", "string", False, "", "模板说明列，帮助用户确认当前测量点所属零件。"),
         BulkField("quality_type", "质量类型", "string", True, "ORANGE_PEEL", "模板会自动预填当前质量类型，导入时按批准质量类型校验。"),
+        BulkField("color_code", "颜色代码", "string", False, "C01", "当生产事件尚不存在时必填，用于自动创建生产事件。"),
+        BulkField("shift", "班次", "string", False, "A", "可选；自动创建生产事件时会一并写入。"),
+        BulkField("production_started_at", "生产开始时间", "datetime", False, "2026-07-08T07:30:00+08:00", "当生产事件尚不存在时建议填写；留空时默认回落到测量时间。"),
+        BulkField("production_completed_at", "生产结束时间", "datetime", False, "2026-07-08T08:10:00+08:00", "可选；自动创建生产事件时会一并写入。"),
         BulkField("measured_at", "测量时间", "datetime", True, "2026-07-08T08:00:00+08:00", "支持 Excel 日期单元格或 ISO 时间。"),
         BulkField("measured_by", "测量人", "string", False, "张三", "可选。"),
         BulkField("data_type", "数据类型", "string", False, "TEST", "默认 TEST；可填写 TEST / MASTER_SAMPLE / STANDARD。"),
@@ -1041,6 +1047,92 @@ def _quality_measurement_bulk_fields(quality_type: str | None = None) -> tuple[B
     return _quality_measurement_base_fields() + metric_fields
 
 
+def _normalize_optional_text(value: Any) -> str | None:
+    if _is_blank(value):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _resolve_or_create_quality_production_run(
+    *,
+    db: Session,
+    runs_by_no: dict[str, ProductionRun],
+    factories_by_code: dict[str, Factory],
+    vehicle_models_by_code: dict[str, VehicleModel],
+    colors_by_code: dict[str, Color],
+    row: dict[str, Any],
+    measured_at_value: Any,
+) -> ProductionRun:
+    run_no = str(row.get("production_run_no") or "").strip()
+    run = runs_by_no.get(run_no)
+    body_no = _normalize_optional_text(row.get("body_no"))
+    factory_code = _normalize_optional_text(row.get("factory_code"))
+    vehicle_model_code = _normalize_optional_text(row.get("vehicle_model_code"))
+    color_code = _normalize_optional_text(row.get("color_code"))
+    shift = _normalize_optional_text(row.get("shift"))
+    started_at_value = row.get("production_started_at")
+    completed_at_value = row.get("production_completed_at")
+
+    if run:
+        if body_no and run.body_no and run.body_no != body_no:
+            raise ValueError(f"生产事件 {run_no} 的车号与导入内容不一致")
+        if factory_code:
+            factory = factories_by_code.get(factory_code)
+            if not factory:
+                raise ValueError(f"工厂 {factory_code} 不存在")
+            if run.factory_id != factory.id:
+                raise ValueError(f"生产事件 {run_no} 的工厂与导入内容不一致")
+        if vehicle_model_code:
+            vehicle_model = vehicle_models_by_code.get(vehicle_model_code)
+            if not vehicle_model:
+                raise ValueError(f"车型 {vehicle_model_code} 不存在")
+            if run.vehicle_model_id != vehicle_model.id:
+                raise ValueError(f"生产事件 {run_no} 的车型与导入内容不一致")
+        if color_code:
+            color = colors_by_code.get(color_code)
+            if not color:
+                raise ValueError(f"颜色 {color_code} 不存在")
+            if run.color_id != color.id:
+                raise ValueError(f"生产事件 {run_no} 的颜色与导入内容不一致")
+        return run
+
+    if not body_no or not factory_code or not vehicle_model_code or not color_code:
+        raise ValueError(
+            "生产事件不存在时，必须同时填写车号、工厂代码、车型代码和颜色代码"
+        )
+
+    factory = factories_by_code.get(factory_code)
+    if not factory:
+        raise ValueError(f"工厂 {factory_code} 不存在")
+    vehicle_model = vehicle_models_by_code.get(vehicle_model_code)
+    if not vehicle_model:
+        raise ValueError(f"车型 {vehicle_model_code} 不存在")
+    color = colors_by_code.get(color_code)
+    if not color:
+        raise ValueError(f"颜色 {color_code} 不存在")
+
+    run = create_production_run(
+        ProductionRunCreate(
+            run_no=run_no,
+            body_no=body_no,
+            factory_id=factory.id,
+            vehicle_model_id=vehicle_model.id,
+            color_id=color.id,
+            shift=shift,
+            started_at=_coerce_datetime(started_at_value)
+            if not _is_blank(started_at_value)
+            else _coerce_datetime(measured_at_value),
+            completed_at=_coerce_datetime(completed_at_value)
+            if not _is_blank(completed_at_value)
+            else None,
+        ),
+        db,
+    )
+    runs_by_no[run_no] = run
+    return run
+
+
 def _quality_measurement_template_rows(
     db: Session | None,
     *,
@@ -1066,6 +1158,8 @@ def _quality_measurement_template_rows(
             {
                 "data_no": "",
                 "production_run_no": "",
+                "body_no": "",
+                "factory_code": "",
                 "measurement_group_code": group.code,
                 "measurement_group_name": group.name,
                 "measurement_point_code": point.code,
@@ -1075,6 +1169,10 @@ def _quality_measurement_template_rows(
                 "part_code": part.code,
                 "part_name": part.name,
                 "quality_type": group.quality_type,
+                "color_code": "",
+                "shift": "",
+                "production_started_at": "",
+                "production_completed_at": "",
                 "measured_at": "",
                 "measured_by": "",
                 "data_type": "TEST",
@@ -1202,6 +1300,24 @@ def _quality_measurement_export_rows(
             select(MeasurementImportProfile).where(MeasurementImportProfile.id.in_(profile_ids))
         )
     } if profile_ids else {}
+    factory_ids = {
+        run.factory_id
+        for run in run_map.values()
+        if run.factory_id
+    }
+    factory_map = {
+        item.id: item
+        for item in db.scalars(select(Factory).where(Factory.id.in_(factory_ids)))
+    } if factory_ids else {}
+    color_ids = {
+        run.color_id
+        for run in run_map.values()
+        if run.color_id
+    }
+    color_map = {
+        item.id: item
+        for item in db.scalars(select(Color).where(Color.id.in_(color_ids)))
+    } if color_ids else {}
     metric_rows: dict[str, dict[str, float]] = {}
     metric_query = select(QualityMetricValue).where(
         QualityMetricValue.measurement_id.in_({measurement.id for measurement in measurements})
@@ -1215,6 +1331,9 @@ def _quality_measurement_export_rows(
         group = group_map.get(measurement.measurement_group_id) if measurement.measurement_group_id else None
         model = model_map.get(point.vehicle_model_id) if point else None
         part = part_map.get(point.part_id) if point else None
+        run = run_map.get(measurement.production_run_id)
+        factory = factory_map.get(run.factory_id) if run else None
+        color = color_map.get(run.color_id) if run else None
         instrument = instrument_map.get(measurement.instrument_id) if measurement.instrument_id else None
         method = method_map.get(measurement.measurement_method_id) if measurement.measurement_method_id else None
         calibration = calibration_map.get(measurement.calibration_record_id) if measurement.calibration_record_id else None
@@ -1223,9 +1342,9 @@ def _quality_measurement_export_rows(
         row = {
             "id": measurement.id,
             "data_no": measurement.data_no,
-            "production_run_no": run_map.get(measurement.production_run_id).run_no
-            if run_map.get(measurement.production_run_id)
-            else "",
+            "production_run_no": run.run_no if run else "",
+            "body_no": run.body_no if run else "",
+            "factory_code": factory.code if factory else "",
             "measurement_group_code": group.code if group else "",
             "measurement_group_name": group.name if group else "",
             "measurement_point_code": point.code if point else "",
@@ -1235,6 +1354,10 @@ def _quality_measurement_export_rows(
             "part_code": part.code if part else "",
             "part_name": part.name if part else "",
             "quality_type": measurement.quality_type,
+            "color_code": color.code if color else "",
+            "shift": run.shift if run else "",
+            "production_started_at": run.started_at if run else "",
+            "production_completed_at": run.completed_at if run else "",
             "measured_at": measurement.measured_at,
             "measured_by": measurement.measured_by,
             "data_type": measurement.data_type,
@@ -1323,6 +1446,9 @@ def _import_quality_measurements(
         raise HTTPException(status_code=422, detail=f"模板字段不匹配，未知字段：{', '.join(unknown)}")
 
     runs_by_no = {item.run_no: item for item in db.scalars(select(ProductionRun))}
+    factories_by_code = {item.code: item for item in db.scalars(select(Factory))}
+    vehicle_models_by_code = {item.code: item for item in db.scalars(select(VehicleModel))}
+    colors_by_code = {item.code: item for item in db.scalars(select(Color))}
     groups_by_vehicle_code = {
         (item.vehicle_model_id, item.code): item for item in db.scalars(select(MeasurementGroup))
     }
@@ -1361,9 +1487,15 @@ def _import_quality_measurements(
             if not data_no or not run_no or not point_code or _is_blank(measured_at_value):
                 raise ValueError("缺少必填字段：data_no, production_run_no, measurement_point_code, measured_at")
 
-            run = runs_by_no.get(run_no)
-            if not run:
-                raise ValueError(f"生产事件 {run_no} 不存在")
+            run = _resolve_or_create_quality_production_run(
+                db=db,
+                runs_by_no=runs_by_no,
+                factories_by_code=factories_by_code,
+                vehicle_models_by_code=vehicle_models_by_code,
+                colors_by_code=colors_by_code,
+                row=raw_row,
+                measured_at_value=measured_at_value,
+            )
 
             group_code = str(raw_row.get("measurement_group_code") or "").strip()
             group = (

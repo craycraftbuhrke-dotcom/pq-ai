@@ -126,7 +126,6 @@ export function AppShell({ children }: AppShellProps) {
               <div className="nav-group-header">
                 <div className="nav-section-copy">
                   <span className="nav-section-label">常用入口</span>
-                  <span className="nav-section-description">结合当前角色预置的高频页面，优先放在最上方。</span>
                 </div>
               </div>
               {quickAccessItems.map((item) => {
@@ -161,7 +160,6 @@ export function AppShell({ children }: AppShellProps) {
                 >
                   <div className="nav-section-copy">
                     <span className="nav-section-label">{section.title}</span>
-                    <span className="nav-section-description">{section.description}</span>
                   </div>
                   {section.collapsible ? (
                     <span className={`nav-section-toggle${isCollapsed ? " collapsed" : ""}`}>
@@ -194,7 +192,6 @@ export function AppShell({ children }: AppShellProps) {
               <div className="nav-group-header">
                 <div className="nav-section-copy">
                   <span className="nav-section-label">权限治理</span>
-                  <span className="nav-section-description">仅管理员使用的账号、角色与 API Key 管理入口。</span>
                 </div>
               </div>
               <Link

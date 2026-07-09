@@ -216,6 +216,26 @@ textarea {
   line-height: 1.5;
 }
 
+.nav-section-description,
+.modal-description,
+.modal-note,
+.workspace-empty-copy p,
+.section-header-copy p,
+.page-header-copy p,
+.page-copy p,
+.page-intro p,
+.panel-heading p,
+.master-empty,
+.program-empty,
+.large-empty,
+.ai-hint,
+.helper-text,
+.field-helper,
+.form-helper,
+.form-section-description {
+  display: none !important;
+}
+
 .nav-section-toggle {
   align-items: center;
   color: var(--text-muted);

@@ -37,7 +37,6 @@ export type NavItem = {
 export type NavSection = {
   key: string;
   title: string;
-  description: string;
   collapsible?: boolean;
   items: readonly NavItem[];
 };
@@ -46,13 +45,11 @@ export const navSections: readonly NavSection[] = [
   {
     key: "overview",
     title: "总览",
-    description: "先看整体态势，再决定今天要处理的重点。",
     items: [{ href: "/", label: "工艺质量总览", icon: "dashboard" }],
   },
   {
     key: "execution",
     title: "现场执行",
-    description: "面向日常工艺执行、生产记录和批次分析。",
     items: [
       { href: "/programs", label: "工艺配方管理", icon: "program" },
       { href: "/production", label: "生产执行记录", icon: "production" },
@@ -62,7 +59,6 @@ export const navSections: readonly NavSection[] = [
   {
     key: "improvement",
     title: "质量改进",
-    description: "围绕测量、问题、AI 优化和试验形成改进闭环。",
     items: [
       { href: "/quality", label: "质量测量与标准", icon: "quality" },
       { href: "/quality-monitor", label: "质量数据监控", icon: "monitor" },
@@ -74,7 +70,6 @@ export const navSections: readonly NavSection[] = [
   {
     key: "governance",
     title: "治理工具",
-    description: "低频配置、导入、集成和审计类工具统一收口。",
     collapsible: true,
     items: [
       { href: "/import-wizard", label: "批量数据导入", icon: "import" },
