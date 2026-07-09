@@ -56,7 +56,6 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const CORE_COLUMNS = [
-  "data_no",
   "production_run_no",
   "body_no",
   "factory_code",
@@ -71,7 +70,6 @@ const CORE_COLUMNS = [
 ];
 
 const EDITABLE_HINT_COLUMNS = new Set([
-  "data_no",
   "production_run_no",
   "body_no",
   "factory_code",
@@ -125,13 +123,11 @@ function serializePreviewCsv(columns: string[], rows: PreviewRow[]): string {
 
 function validatePreviewRow(row: PreviewRow, columns: string[]): FieldIssue[] {
   const issues: FieldIssue[] = [];
-  const dataNo = row.data_no?.trim() ?? "";
   const pointCode = row.measurement_point_code?.trim() ?? "";
   const measuredAt = row.measured_at?.trim() ?? "";
   const runNo = row.production_run_no?.trim() ?? "";
   const bodyNo = row.body_no?.trim() ?? "";
 
-  if (!dataNo) issues.push({ field: "data_no", message: "缺少 data_no" });
   if (!pointCode) issues.push({ field: "measurement_point_code", message: "缺少 measurement_point_code" });
   if (!measuredAt) issues.push({ field: "measured_at", message: "缺少 measured_at" });
   if (!runNo && !bodyNo) {
@@ -153,7 +149,6 @@ function validatePreviewRow(row: PreviewRow, columns: string[]): FieldIssue[] {
 
 function inferIssueField(message: string): string | undefined {
   const fields = [
-    "data_no",
     "production_run_no",
     "body_no",
     "factory_code",
@@ -593,7 +588,7 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
                 <tbody>
                   <tr>
                     <td className="mono">body_no</td>
-                    <td>车号，建议必填；未填生产事件编号时用于自动生成</td>
+                    <td>车号，建议必填；未填生产事件编号时用于自动生成，并参与自动生成 data_no</td>
                   </tr>
                   <tr>
                     <td className="mono">factory_code / vehicle_model_code / color_code</td>
@@ -602,6 +597,10 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
                   <tr>
                     <td className="mono">production_run_no</td>
                     <td>可留空；留空时按 `RUN-车号` 自动创建。已存在则直接关联</td>
+                  </tr>
+                  <tr>
+                    <td className="mono">data_no</td>
+                    <td>模板无需填写；后端按 `QM-车号-测量点-质量类型` 自动生成（如 QM-BODY-0001-PT1-OP）</td>
                   </tr>
                   <tr>
                     <td className="mono">shift / production_started_at</td>

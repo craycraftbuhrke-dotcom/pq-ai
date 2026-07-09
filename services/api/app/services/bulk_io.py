@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from io import BytesIO, StringIO
@@ -397,7 +398,7 @@ def render_template(
 ) -> Response:
     resource = get_resource(resource_key)
     if resource.key == "quality.measurements":
-        fields = _quality_measurement_bulk_fields(quality_type)
+        fields = _quality_measurement_template_fields(quality_type)
         rows = _quality_measurement_template_rows(
             db,
             quality_type=quality_type,
@@ -1007,12 +1008,40 @@ def _quality_metric_catalog_for(quality_type: str | None = None) -> list[dict[st
     return catalog
 
 
+_QUALITY_TYPE_DATA_NO_CODE = {
+    "ORANGE_PEEL": "OP",
+    "COLOR_DIFFERENCE": "CD",
+    "THICKNESS": "TH",
+}
+
+
+def _sanitize_data_no_token(value: str, *, fallback: str) -> str:
+    cleaned = re.sub(r"[^\w\-]+", "-", str(value or "").strip(), flags=re.UNICODE)
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-_")
+    return cleaned or fallback
+
+
+def _build_quality_data_no(*, body_no: str, point_code: str, quality_type: str) -> str:
+    body = _sanitize_data_no_token(body_no, fallback="BODY")
+    point = _sanitize_data_no_token(point_code, fallback="POINT")
+    quality = str(quality_type or "").strip().upper()
+    quality_code = _QUALITY_TYPE_DATA_NO_CODE.get(quality, _sanitize_data_no_token(quality, fallback="QT"))
+    return f"QM-{body}-{point}-{quality_code}"
+
+
 def _quality_measurement_base_fields() -> tuple[BulkField, ...]:
     return (
         BulkField("id", "ID（可选，用于更新）", "string", False, "", "存在 id 时可直接更新对应质量测量。"),
-        BulkField("data_no", "质量数据编号", "string", True, "QM-20260708-001", "质量测量业务编号，建议保持唯一。"),
+        BulkField(
+            "data_no",
+            "质量数据编号",
+            "string",
+            False,
+            "",
+            "可留空。留空时后端按「车号 + 测量点代码 + 质量类型」自动生成，例如 QM-BODY-0001-PT1-OP。手工填写时仍可用于覆盖。",
+        ),
         BulkField("production_run_no", "生产事件编号", "string", False, "RT_RUN_001", "可留空；留空时按车号自动生成 RUN-车号。若该生产事件不存在，后端会结合同一行的车号与生产上下文自动补建。"),
-        BulkField("body_no", "车号", "string", False, "BODY-0001", "建议始终填写车号；生产事件编号留空或尚不存在时，车号用于自动创建生产事件。"),
+        BulkField("body_no", "车号", "string", False, "BODY-0001", "建议始终填写车号；生产事件编号留空或尚不存在时，车号用于自动创建生产事件，并参与自动生成 data_no。"),
         BulkField("factory_code", "工厂代码", "string", False, "F01", "当生产事件尚不存在时必填，用于自动创建生产事件。"),
         BulkField("measurement_group_code", "测量编组代码", "string", False, "RT_MG_OP", "模板会自动预填当前编组代码，导入时按车型+代码解析。"),
         BulkField("measurement_group_name", "测量编组名称", "string", False, "", "模板说明列，仅用于帮助识别编组，可保留原值。"),
@@ -1056,6 +1085,15 @@ def _quality_measurement_bulk_fields(quality_type: str | None = None) -> tuple[B
         for metric in _quality_metric_catalog_for(quality_type)
     )
     return _quality_measurement_base_fields() + metric_fields
+
+
+def _quality_measurement_template_fields(quality_type: str | None = None) -> tuple[BulkField, ...]:
+    """Upload template omits id/data_no — data_no is generated on import."""
+    return tuple(
+        field
+        for field in _quality_measurement_bulk_fields(quality_type)
+        if field.name not in {"id", "data_no"}
+    )
 
 
 def _normalize_optional_text(value: Any) -> str | None:
@@ -1182,7 +1220,6 @@ def _quality_measurement_template_rows(
     for _, group, point, model, part in db.execute(query):
         rows.append(
             {
-                "data_no": "",
                 "production_run_no": "",
                 "body_no": "",
                 "factory_code": pref_factory,
@@ -1511,10 +1548,10 @@ def _import_quality_measurements(
             body_no = str(raw_row.get("body_no") or "").strip()
             point_code = str(raw_row.get("measurement_point_code") or "").strip()
             measured_at_value = raw_row.get("measured_at")
-            if not data_no or not point_code or _is_blank(measured_at_value):
-                raise ValueError("缺少必填字段：data_no, measurement_point_code, measured_at")
+            if not point_code or _is_blank(measured_at_value):
+                raise ValueError("缺少必填字段：measurement_point_code, measured_at")
             if not run_no and not body_no:
-                raise ValueError("请填写 production_run_no，或填写 body_no 以便自动生成生产事件编号")
+                raise ValueError("请填写 production_run_no，或填写 body_no 以便自动生成生产事件编号与 data_no")
 
             run = _resolve_or_create_quality_production_run(
                 db=db,
@@ -1566,6 +1603,16 @@ def _import_quality_measurements(
                 )
             if not metrics:
                 raise ValueError("至少填写 1 个质量指标列")
+
+            if not data_no:
+                resolved_body = body_no or str(run.body_no or "").strip()
+                if not resolved_body:
+                    raise ValueError("自动生成 data_no 需要车号；请填写 body_no，或使用已维护车号的生产事件")
+                data_no = _build_quality_data_no(
+                    body_no=resolved_body,
+                    point_code=point_code,
+                    quality_type=quality_type,
+                )
 
             payload = {
                 "data_no": data_no,

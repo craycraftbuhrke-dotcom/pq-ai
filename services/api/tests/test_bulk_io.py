@@ -372,6 +372,7 @@ def test_quality_measurement_template_uses_flat_metric_columns() -> None:
     assert "metric__doi" in content
     assert "metrics" not in content
     assert "repeat_readings" not in content
+    assert "data_no" not in content.splitlines()[0]
     assert "G1" in content
     assert "PT1" in content
     db.close()
@@ -399,6 +400,30 @@ def test_quality_measurement_bulk_import_transforms_flat_metric_columns() -> Non
     assert measurement.measurement_group_id == context["group_id"]
     assert measurement.measurement_point_id == context["point_id"]
     assert metric.raw_value == 88.2
+    db.close()
+
+
+def test_quality_measurement_bulk_import_auto_generates_data_no() -> None:
+    db = build_session()
+    context = build_quality_bulk_context(db)
+    csv_content = (
+        "production_run_no,body_no,factory_code,measurement_group_code,measurement_point_code,vehicle_model_code,quality_type,color_code,measured_at,metric__doi\n"
+        f",BODY-AUTO-DN,{context['factory_code']},{context['group_code']},{context['point_code']},{context['vehicle_code']},ORANGE_PEEL,{context['color_code']},2026-07-08T08:00:00+00:00,90.1\n"
+    )
+
+    result = import_resource(
+        "quality.measurements",
+        csv_content.encode("utf-8"),
+        filename="quality-measurements-auto-data-no.csv",
+        mode="upsert",
+        db=db,
+    )
+
+    assert result["created"] == 1
+    expected = f"QM-BODY-AUTO-DN-{context['point_code']}-OP"
+    measurement = db.query(QualityMeasurement).filter_by(data_no=expected).one()
+    run = db.query(ProductionRun).filter_by(run_no="RUN-BODY-AUTO-DN").one()
+    assert measurement.production_run_id == run.id
     db.close()
 
 
