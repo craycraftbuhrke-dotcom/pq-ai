@@ -395,6 +395,7 @@ def render_template(
     color_code: str | None = None,
     vehicle_model_code: str | None = None,
     shift: str | None = None,
+    brush_id: str | None = None,
 ) -> Response:
     resource = get_resource(resource_key)
     if resource.key == "quality.measurements":
@@ -407,6 +408,17 @@ def render_template(
             vehicle_model_code=vehicle_model_code,
             shift=shift,
         )
+        return _file_response(
+            resource,
+            file_format,
+            rows,
+            purpose="template",
+            include_metadata=True,
+            fields=fields,
+        )
+    if resource.key == "process.brush-contributions":
+        fields = _brush_contribution_template_fields()
+        rows = _brush_contribution_template_rows(db, brush_id=brush_id)
         return _file_response(
             resource,
             file_format,
@@ -468,6 +480,14 @@ def import_resource(
         raise HTTPException(status_code=405, detail=f"{resource.label}不支持批量导入")
     if resource.key == "quality.measurements":
         return _import_quality_measurements(content, filename=filename, mode=mode, db=db)
+    if resource.key == "process.brush-contributions":
+        return _import_brush_contributions(
+            content,
+            filename=filename,
+            mode=mode,
+            default_values=default_values,
+            db=db,
+        )
     rows = _parse_rows(content, filename)
     field_names = {field.name for field in resource.fields}
     required = {field.name for field in resource.fields if field.required}
@@ -1671,6 +1691,452 @@ def _import_quality_measurements(
     return {
         "resource_key": "quality.measurements",
         "resource_label": "质量测量",
+        "mode": mode,
+        "total_rows": len(rows),
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "failed": len(errors),
+        "errors": errors[:100],
+        "truncated_errors": len(errors) > 100,
+    }
+
+
+def _brush_contribution_template_fields() -> tuple[BulkField, ...]:
+    """Friendly template: business codes + lineage labels; IDs optional for advanced use."""
+    return (
+        BulkField(
+            "id",
+            "贡献记录 ID",
+            "string",
+            False,
+            "",
+            "可选；导出回写时使用，新建可留空",
+        ),
+        BulkField(
+            "factory_code",
+            "工厂代码",
+            "string",
+            False,
+            "F01",
+            "只读上下文，导入时忽略；由当前刷子所属程序自动填写",
+        ),
+        BulkField(
+            "factory_name",
+            "工厂名称",
+            "string",
+            False,
+            "",
+            "只读上下文，导入时忽略",
+        ),
+        BulkField(
+            "program_code",
+            "喷涂程序代码",
+            "string",
+            False,
+            "PRG-CC2",
+            "与 program_version + brush_no 一起定位刷子；也可直接填 brush_id",
+        ),
+        BulkField(
+            "program_name",
+            "喷涂程序名称",
+            "string",
+            False,
+            "",
+            "只读上下文，导入时忽略",
+        ),
+        BulkField(
+            "program_version",
+            "程序版本号",
+            "string",
+            False,
+            "V1",
+            "与 program_code + brush_no 一起定位刷子",
+        ),
+        BulkField(
+            "process_stage",
+            "工序阶段",
+            "string",
+            False,
+            "CLEARCOAT_2",
+            "只读上下文，导入时忽略",
+        ),
+        BulkField(
+            "brush_no",
+            "刷子号",
+            "string",
+            False,
+            "B01",
+            "与程序版本一起定位刷子；页面下载模板时已预填",
+        ),
+        BulkField(
+            "brush_table_no",
+            "刷子表号",
+            "string",
+            False,
+            "BT01",
+            "只读上下文，导入时忽略",
+        ),
+        BulkField(
+            "brush_id",
+            "刷子 ID",
+            "string",
+            False,
+            "",
+            "可选；留空时按 factory/program/version/brush_no 解析，或使用导入默认 brush_id",
+        ),
+        BulkField(
+            "vehicle_model_code",
+            "车型代码",
+            "string",
+            True,
+            "VM01",
+            "与 measurement_point_code 一起定位测量点",
+        ),
+        BulkField(
+            "vehicle_model_name",
+            "车型名称",
+            "string",
+            False,
+            "",
+            "只读上下文，导入时忽略",
+        ),
+        BulkField(
+            "part_code",
+            "零件代码",
+            "string",
+            False,
+            "ROOF",
+            "只读上下文，导入时忽略",
+        ),
+        BulkField(
+            "part_name",
+            "零件名称",
+            "string",
+            False,
+            "",
+            "只读上下文，导入时忽略",
+        ),
+        BulkField(
+            "measurement_point_code",
+            "测量点代码",
+            "string",
+            True,
+            "P01",
+            "与车型代码一起定位质量测量点",
+        ),
+        BulkField(
+            "measurement_point_name",
+            "测量点名称",
+            "string",
+            False,
+            "",
+            "只读上下文，导入时忽略",
+        ),
+        BulkField(
+            "measurement_point_id",
+            "测量点 ID",
+            "string",
+            False,
+            "",
+            "可选；留空时按车型+测量点代码解析",
+        ),
+        BulkField(
+            "overlap_ratio",
+            "重叠率",
+            "number",
+            True,
+            "0.5",
+            "0~1，填写本刷子对该点的重叠率",
+        ),
+        BulkField(
+            "contribution_weight",
+            "贡献权重",
+            "number",
+            True,
+            "0.5",
+            "0~1（不含 0），填写本刷子对该点的贡献权重",
+        ),
+        BulkField("source", "来源", "string", False, "EXPERT", "默认 EXPERT"),
+        BulkField("version", "贡献版本", "string", False, "1.0", "默认 1.0"),
+        BulkField("is_approved", "是否已审批", "boolean", False, "false", "true/false"),
+    )
+
+
+def _brush_contribution_template_rows(
+    db: Session | None,
+    *,
+    brush_id: str | None = None,
+) -> list[dict[str, Any]]:
+    if db is None or not brush_id:
+        return []
+    brush = db.get(Brush, brush_id)
+    if not brush:
+        raise HTTPException(status_code=404, detail="刷子不存在")
+    version = db.get(SprayProgramVersion, brush.program_version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="程序版本不存在")
+    program = db.get(SprayProgram, version.spray_program_id)
+    if not program:
+        raise HTTPException(status_code=404, detail="喷涂程序不存在")
+    factory = db.get(Factory, program.factory_id)
+    if not factory:
+        raise HTTPException(status_code=404, detail="工厂不存在")
+
+    applicable_vehicle_model_ids = set(
+        db.scalars(
+            select(ProgramVehicleModel.vehicle_model_id).where(
+                ProgramVehicleModel.program_version_id == version.id
+            )
+        )
+    )
+    existing_by_point = {
+        item.measurement_point_id: item
+        for item in db.scalars(
+            select(BrushPointContribution).where(BrushPointContribution.brush_id == brush.id)
+        )
+    }
+
+    query = (
+        select(MeasurementPoint, VehicleModel, Part)
+        .join(VehicleModel, VehicleModel.id == MeasurementPoint.vehicle_model_id)
+        .join(Part, Part.id == MeasurementPoint.part_id)
+        .where(MeasurementPoint.point_type == "QUALITY")
+        .order_by(VehicleModel.code, MeasurementPoint.code)
+    )
+    if brush.part_id:
+        query = query.where(MeasurementPoint.part_id == brush.part_id)
+    if applicable_vehicle_model_ids:
+        query = query.where(MeasurementPoint.vehicle_model_id.in_(applicable_vehicle_model_ids))
+
+    rows: list[dict[str, Any]] = []
+    for point, model, part in db.execute(query):
+        existing = existing_by_point.get(point.id)
+        rows.append(
+            {
+                "factory_code": factory.code,
+                "factory_name": factory.name,
+                "program_code": program.program_code,
+                "program_name": program.name,
+                "program_version": version.version,
+                "process_stage": program.process_stage,
+                "brush_no": brush.brush_no,
+                "brush_table_no": brush.brush_table_no,
+                "brush_id": brush.id,
+                "vehicle_model_code": model.code,
+                "vehicle_model_name": model.name,
+                "part_code": part.code,
+                "part_name": part.name,
+                "measurement_point_code": point.code,
+                "measurement_point_name": point.name,
+                "measurement_point_id": point.id,
+                "overlap_ratio": existing.overlap_ratio if existing else "",
+                "contribution_weight": existing.contribution_weight if existing else "",
+                "source": existing.source if existing else "EXPERT",
+                "version": existing.version if existing else "1.0",
+                "is_approved": existing.is_approved if existing else False,
+            }
+        )
+    return rows
+
+
+def _resolve_brush_for_contribution_import(
+    row: dict[str, Any],
+    *,
+    brushes_by_id: dict[str, Brush],
+    programs_by_factory_code: dict[tuple[str, str], SprayProgram],
+    versions_by_program_version: dict[tuple[str, str], SprayProgramVersion],
+    brushes_by_version_no: dict[tuple[str, str], Brush],
+    factories_by_code: dict[str, Factory],
+) -> Brush:
+    brush_id = _normalize_optional_text(row.get("brush_id"))
+    if brush_id:
+        brush = brushes_by_id.get(brush_id)
+        if not brush:
+            raise ValueError(f"刷子 {brush_id} 不存在")
+        return brush
+
+    program_code = _normalize_optional_text(row.get("program_code"))
+    program_version = _normalize_optional_text(row.get("program_version"))
+    brush_no = _normalize_optional_text(row.get("brush_no"))
+    if not program_code or not program_version or not brush_no:
+        raise ValueError(
+            "缺少刷子定位信息：请填写 brush_id，或同时填写 program_code、program_version、brush_no"
+        )
+
+    factory_code = _normalize_optional_text(row.get("factory_code"))
+    if factory_code:
+        factory = factories_by_code.get(factory_code)
+        if not factory:
+            raise ValueError(f"工厂 {factory_code} 不存在")
+        program = programs_by_factory_code.get((factory.id, program_code))
+        if not program:
+            raise ValueError(f"工厂 {factory_code} 下喷涂程序 {program_code} 不存在")
+    else:
+        matches = [
+            program
+            for (_fid, code), program in programs_by_factory_code.items()
+            if code == program_code
+        ]
+        if not matches:
+            raise ValueError(f"喷涂程序 {program_code} 不存在")
+        if len(matches) > 1:
+            raise ValueError(
+                f"喷涂程序代码 {program_code} 在多个工厂下存在，请同时填写 factory_code"
+            )
+        program = matches[0]
+
+    version = versions_by_program_version.get((program.id, program_version))
+    if not version:
+        raise ValueError(f"程序 {program_code} 的版本 {program_version} 不存在")
+    brush = brushes_by_version_no.get((version.id, brush_no))
+    if not brush:
+        raise ValueError(f"程序版本 {program_code}/{program_version} 下刷子 {brush_no} 不存在")
+    return brush
+
+
+def _resolve_measurement_point_for_contribution_import(
+    row: dict[str, Any],
+    *,
+    points_by_id: dict[str, MeasurementPoint],
+    points_by_vehicle_code: dict[tuple[str, str], MeasurementPoint],
+    vehicle_models_by_code: dict[str, VehicleModel],
+) -> MeasurementPoint:
+    point_id = _normalize_optional_text(row.get("measurement_point_id"))
+    if point_id:
+        point = points_by_id.get(point_id)
+        if not point:
+            raise ValueError(f"测量点 {point_id} 不存在")
+        return point
+
+    point_code = _normalize_optional_text(row.get("measurement_point_code"))
+    vehicle_model_code = _normalize_optional_text(row.get("vehicle_model_code"))
+    if not point_code:
+        raise ValueError("缺少必填字段：measurement_point_code 或 measurement_point_id")
+    if not vehicle_model_code:
+        raise ValueError("按测量点代码导入时必须填写 vehicle_model_code")
+    vehicle_model = vehicle_models_by_code.get(vehicle_model_code)
+    if not vehicle_model:
+        raise ValueError(f"车型 {vehicle_model_code} 不存在")
+    point = points_by_vehicle_code.get((vehicle_model.id, point_code))
+    if not point:
+        raise ValueError(f"车型 {vehicle_model_code} 下测量点 {point_code} 不存在")
+    return point
+
+
+def _import_brush_contributions(
+    content: bytes,
+    *,
+    filename: str,
+    mode: ImportMode,
+    default_values: dict[str, Any] | None,
+    db: Session,
+) -> dict[str, Any]:
+    resource = get_resource("process.brush-contributions")
+    rows = _parse_rows(content, filename)
+    allowed_fields = {field.name for field in _brush_contribution_template_fields()}
+    unknown = sorted({key for row in rows for key in row if key and key not in allowed_fields})
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"模板字段不匹配，未知字段：{', '.join(unknown)}")
+
+    default_values = default_values or {}
+    allowed_defaults = {"brush_id"}
+    unknown_defaults = sorted(key for key in default_values if key not in allowed_defaults)
+    if unknown_defaults:
+        raise HTTPException(
+            status_code=422,
+            detail=f"默认导入字段不匹配：{', '.join(unknown_defaults)}",
+        )
+
+    factories_by_code = {item.code: item for item in db.scalars(select(Factory))}
+    programs = list(db.scalars(select(SprayProgram)))
+    programs_by_factory_code = {(item.factory_id, item.program_code): item for item in programs}
+    versions = list(db.scalars(select(SprayProgramVersion)))
+    versions_by_program_version = {
+        (item.spray_program_id, item.version): item for item in versions
+    }
+    brushes = list(db.scalars(select(Brush)))
+    brushes_by_id = {item.id: item for item in brushes}
+    brushes_by_version_no = {(item.program_version_id, item.brush_no): item for item in brushes}
+    vehicle_models_by_code = {item.code: item for item in db.scalars(select(VehicleModel))}
+    points = list(db.scalars(select(MeasurementPoint)))
+    points_by_id = {item.id: item for item in points}
+    points_by_vehicle_code = {(item.vehicle_model_id, item.code): item for item in points}
+
+    created = 0
+    updated = 0
+    skipped = 0
+    errors: list[dict[str, Any]] = []
+    data_keys = {
+        "brush_id",
+        "measurement_point_id",
+        "measurement_point_code",
+        "vehicle_model_code",
+        "overlap_ratio",
+        "contribution_weight",
+        "source",
+        "version",
+        "is_approved",
+        "program_code",
+        "program_version",
+        "brush_no",
+    }
+    for row_index, raw_row in enumerate(rows, start=2):
+        merged_row = _apply_default_values(raw_row, default_values)
+        if not any(str(merged_row.get(key) or "").strip() for key in data_keys):
+            skipped += 1
+            continue
+        try:
+            brush = _resolve_brush_for_contribution_import(
+                merged_row,
+                brushes_by_id=brushes_by_id,
+                programs_by_factory_code=programs_by_factory_code,
+                versions_by_program_version=versions_by_program_version,
+                brushes_by_version_no=brushes_by_version_no,
+                factories_by_code=factories_by_code,
+            )
+            point = _resolve_measurement_point_for_contribution_import(
+                merged_row,
+                points_by_id=points_by_id,
+                points_by_vehicle_code=points_by_vehicle_code,
+                vehicle_models_by_code=vehicle_models_by_code,
+            )
+            if _is_blank(merged_row.get("overlap_ratio")) or _is_blank(
+                merged_row.get("contribution_weight")
+            ):
+                raise ValueError("缺少必填字段：overlap_ratio, contribution_weight")
+
+            payload = BrushPointContributionUpsert(
+                overlap_ratio=float(merged_row["overlap_ratio"]),
+                contribution_weight=float(merged_row["contribution_weight"]),
+                source=str(merged_row.get("source") or "EXPERT").strip() or "EXPERT",
+                version=str(merged_row.get("version") or "1.0").strip() or "1.0",
+                is_approved=(
+                    False
+                    if _is_blank(merged_row.get("is_approved"))
+                    else _coerce_bool(merged_row.get("is_approved"))
+                ),
+            )
+            existing_id = (
+                _brush_contribution_match(
+                    db,
+                    {"brush_id": brush.id, "measurement_point_id": point.id},
+                )
+                if mode == "upsert"
+                else None
+            )
+            upsert_brush_point_contribution(brush.id, point.id, payload, db)
+            if existing_id:
+                updated += 1
+            else:
+                created += 1
+        except Exception as exc:  # noqa: BLE001 - row-level import must collect all failures.
+            db.rollback()
+            errors.append({"row": row_index, "message": _error_message(exc)})
+
+    return {
+        "resource_key": resource.key,
+        "resource_label": resource.label,
         "mode": mode,
         "total_rows": len(rows),
         "created": created,

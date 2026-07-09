@@ -223,6 +223,9 @@ export function ProgramWorkspace({
   const contributionImportQuery = selectedBrushId
     ? { default_values: JSON.stringify({ brush_id: selectedBrushId }) }
     : undefined;
+  const contributionDownloadQuery = selectedBrushId
+    ? { brush_id: selectedBrushId }
+    : undefined;
   const loadBrush = useCallback(async (brushId: string) => {
     if (!brushId) {
       setParameters([]);
@@ -645,7 +648,7 @@ export function ProgramWorkspace({
                     <small>当前归属刷子 {selectedBrush.brush_no} · 与参数同表单维护</small>
                   </div>
                   <div className="row-actions program-heading-actions">
-                    <BulkDataActions resourceKey="process.brush-contributions" resourceLabel="点位贡献" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={contributionImportQuery} className="program-version-bulk-actions" />
+                    <BulkDataActions resourceKey="process.brush-contributions" resourceLabel="点位贡献" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={contributionImportQuery} downloadQuery={contributionDownloadQuery} className="program-version-bulk-actions" />
                     <button className="button button-secondary" onClick={() => openBrushConfig("edit", selectedBrush)}><Pencil />在表单中改</button>
                   </div>
                 </div>

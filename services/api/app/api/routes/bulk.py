@@ -29,6 +29,7 @@ def bulk_template(
     color_code: str | None = Query(default=None),
     vehicle_model_code: str | None = Query(default=None),
     shift: str | None = Query(default=None),
+    brush_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     return render_template(
@@ -40,6 +41,7 @@ def bulk_template(
         color_code=color_code,
         vehicle_model_code=vehicle_model_code,
         shift=shift,
+        brush_id=brush_id,
     )
 
 

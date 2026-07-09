@@ -357,6 +357,137 @@ def test_bulk_import_uses_default_values_for_brush_contributions() -> None:
     db.close()
 
 
+def test_brush_contribution_template_prefills_parent_lineage() -> None:
+    db = build_session()
+    factory = create_factory(
+        FactoryCreate(code="F-BC", name="Brush Contrib Factory", site_owner="Owner"),
+        db,
+    )
+    model = create_vehicle_model(VehicleModelCreate(code="VM-BC", name="Brush Contrib Model"), db)
+    part = create_part(PartCreate(code="PART-BC", name="Hood"), db)
+    point = create_measurement_point(
+        MeasurementPointCreate(
+            code="PT-BC",
+            name="Hood Center",
+            vehicle_model_id=model.id,
+            part_id=part.id,
+            point_type="QUALITY",
+            region="Hood",
+            quality_types=["ORANGE_PEEL"],
+        ),
+        db,
+    )
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-BC",
+            name="Brush Contrib Program",
+            factory_id=factory.id,
+            process_stage="CLEARCOAT_1",
+            station_code="ST-BC",
+            station_name="Station BC",
+        ),
+        db,
+    )
+    version = create_program_version(
+        program.id,
+        SprayProgramVersionCreate(version="V2", vehicle_model_ids=[model.id]),
+        db,
+    )
+    brush = create_brush(
+        version.id,
+        BrushCreate(brush_no="B12", brush_table_no="BT12", part_id=part.id),
+        db,
+    )
+
+    response = render_template(
+        "process.brush-contributions",
+        "csv",
+        db=db,
+        brush_id=brush.id,
+    )
+    content = response.body.decode("utf-8-sig")
+    header = content.splitlines()[0]
+
+    assert "factory_code" in header
+    assert "program_code" in header
+    assert "program_version" in header
+    assert "brush_no" in header
+    assert "vehicle_model_code" in header
+    assert "measurement_point_code" in header
+    assert "F-BC" in content
+    assert "PRG-BC" in content
+    assert "V2" in content
+    assert "B12" in content
+    assert "VM-BC" in content
+    assert "PT-BC" in content
+    assert "Hood Center" in content
+    assert point.id in content
+    assert brush.id in content
+    db.close()
+
+
+def test_brush_contribution_bulk_import_resolves_business_codes() -> None:
+    db = build_session()
+    factory = create_factory(
+        FactoryCreate(code="F-BC2", name="Factory BC2", site_owner="Owner"),
+        db,
+    )
+    model = create_vehicle_model(VehicleModelCreate(code="VM-BC2", name="Model BC2"), db)
+    part = create_part(PartCreate(code="PART-BC2", name="Door"), db)
+    point = create_measurement_point(
+        MeasurementPointCreate(
+            code="PT-BC2",
+            name="Door Outer",
+            vehicle_model_id=model.id,
+            part_id=part.id,
+            point_type="QUALITY",
+            region="Door",
+            quality_types=["THICKNESS"],
+        ),
+        db,
+    )
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-BC2",
+            name="Program BC2",
+            factory_id=factory.id,
+            process_stage="BASECOAT_1",
+            station_code="ST-BC2",
+            station_name="Station BC2",
+        ),
+        db,
+    )
+    version = create_program_version(
+        program.id,
+        SprayProgramVersionCreate(version="V1", vehicle_model_ids=[model.id]),
+        db,
+    )
+    brush = create_brush(version.id, BrushCreate(brush_no="B20", brush_table_no="BT20"), db)
+    csv_content = (
+        "factory_code,program_code,program_version,brush_no,vehicle_model_code,measurement_point_code,"
+        "overlap_ratio,contribution_weight,source,version,is_approved\n"
+        "F-BC2,PRG-BC2,V1,B20,VM-BC2,PT-BC2,0.4,0.35,EXPERT,1.0,false\n"
+    )
+
+    result = import_resource(
+        "process.brush-contributions",
+        csv_content.encode("utf-8"),
+        filename="brush-contributions-codes.csv",
+        mode="upsert",
+        db=db,
+    )
+
+    assert result["created"] == 1
+    assert result["failed"] == 0
+    contribution = db.query(BrushPointContribution).filter_by(
+        brush_id=brush.id,
+        measurement_point_id=point.id,
+    ).one()
+    assert contribution.overlap_ratio == 0.4
+    assert contribution.contribution_weight == 0.35
+    db.close()
+
+
 def test_quality_measurement_template_uses_flat_metric_columns() -> None:
     db = build_session()
     build_quality_bulk_context(db)
