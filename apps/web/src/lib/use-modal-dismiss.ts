@@ -1,56 +1,84 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /**
- * P0 无障碍增强：所有 modal 复用这一个 hook，避免每处手写监听器。
+ * Shared modal dismiss + initial-focus behavior.
  *
- * 提供三件事：
- *  1) Esc 键触发 onClose（仅 open=true 且 !busy 才生效——保存中禁止意外关闭）
- *  2) modal 挂载后自动 focus 第一个可交互控件
- *  3) 关闭后归还焦点到打开前的 activeElement，保持键盘导航连续
+ * - Esc closes when open and not busy
+ * - Focus the first form field once when the modal opens (not on every parent re-render)
+ * - Restore focus to the previously focused element on close
  *
- * 采用“单实例假设”：全站同时只允许一个 modal 打开，通过 document.querySelector 定位当前 modal。
- * 不引入 focus-trap 等三方依赖；完整 focus trap 会随 P1 阶段的 <Modal> 基础组件一并引入。
+ * Important: do NOT put `onClose` / `busy` in the focus effect deps. Unstable inline
+ * `onClose` handlers used to re-run this effect on every keystroke and steal focus
+ * to the header close button (first matching `button` in DOM order).
  */
+const DEFAULT_FOCUS_SELECTOR =
+  "input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled])";
+
 export function useModalDismiss(options: {
   open: boolean;
   onClose: () => void;
   busy?: boolean;
-  /** 首个可 focus 元素的定位器；默认 `.modal-card` 里首个 input/select/textarea/button。 */
+  /** First focusable locator inside `.modal-card`. Defaults to form fields only. */
   focusSelector?: string;
 }) {
   const { open, onClose, busy = false, focusSelector } = options;
+  const onCloseRef = useRef(onClose);
+  const busyRef = useRef(busy);
+  const focusSelectorRef = useRef(focusSelector);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
+  onCloseRef.current = onClose;
+  busyRef.current = busy;
+  focusSelectorRef.current = focusSelector;
 
   useEffect(() => {
     if (!open) return;
     if (typeof document === "undefined") return;
 
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-
-    // 首字段 focus：在下一帧执行，避免与 React 挂载时的默认 focus 竞争。
-    const focusTimer = window.setTimeout(() => {
-      const container = document.querySelector(".modal-card");
-      if (!container) return;
-      const selector =
-        focusSelector ??
-        "input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])";
-      const target = container.querySelector<HTMLElement>(selector);
-      target?.focus();
-    }, 0);
-
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
-      if (busy) return; // 保存中禁止 Esc 关闭，避免丢失表单内容
+      if (busyRef.current) return;
       event.stopPropagation();
-      onClose();
+      onCloseRef.current();
     }
 
     document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (typeof document === "undefined") return;
+
+    previouslyFocusedRef.current = document.activeElement as HTMLElement | null;
+
+    const focusTimer = window.setTimeout(() => {
+      const container = document.querySelector(".modal-card");
+      if (!container) return;
+
+      const selector = focusSelectorRef.current ?? DEFAULT_FOCUS_SELECTOR;
+      let target = container.querySelector<HTMLElement>(selector);
+
+      if (!target) {
+        const buttons = Array.from(
+          container.querySelectorAll<HTMLElement>("button:not([disabled])"),
+        );
+        target =
+          buttons.find(
+            (button) =>
+              !button.closest(".modal-heading") &&
+              button.getAttribute("data-modal-close") == null,
+          ) ?? null;
+      }
+
+      target?.focus();
+    }, 0);
 
     return () => {
       window.clearTimeout(focusTimer);
-      document.removeEventListener("keydown", handleKeyDown);
+      const previouslyFocused = previouslyFocusedRef.current;
       if (
         previouslyFocused &&
         typeof previouslyFocused.focus === "function" &&
@@ -59,5 +87,5 @@ export function useModalDismiss(options: {
         previouslyFocused.focus();
       }
     };
-  }, [open, busy, onClose, focusSelector]);
+  }, [open]);
 }

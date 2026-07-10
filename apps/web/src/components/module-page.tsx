@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowUpRight, FileCheck2, Plus, Search, SlidersHorizontal, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { ModalBody, ModalShell } from "@/components/modal-shell";
 
@@ -57,6 +57,10 @@ export function ModulePage({
     }
     setNotice(`${primaryAction}写操作正在按开发计划接入，当前页面使用真实 API 只读数据。`);
   }
+
+  const closeDetail = useCallback(() => {
+    setSelectedRow(null);
+  }, []);
 
   return (
     <div className="page-stack">
@@ -149,7 +153,7 @@ export function ModulePage({
           eyebrow="记录详情"
           title={selectedRow[0]}
           description="统一使用弹窗详情视图查看当前记录，支持 Esc 和遮罩关闭。"
-          onClose={() => setSelectedRow(null)}
+          onClose={closeDetail}
         >
           <ModalBody>
             <dl className="module-detail-list">

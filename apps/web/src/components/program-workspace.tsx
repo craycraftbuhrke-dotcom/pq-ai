@@ -187,6 +187,9 @@ export function ProgramWorkspace({
     if (submitting) return;
     setModal(null);
   }, [submitting]);
+  const closeBrushConfig = useCallback(() => {
+    setBrushConfig(null);
+  }, []);
   const selectedProgram = programs.find((item) => item.id === selectedProgramId);
   const selectedVersion = versions.find((item) => item.id === selectedVersionId);
   const selectedBrush = brushes.find((item) => item.id === selectedBrushId);
@@ -691,7 +694,7 @@ export function ProgramWorkspace({
           existingParameters={brushConfig.mode === "edit" ? parameters : []}
           existingContributions={brushConfig.mode === "edit" ? contributions : []}
           busy={loading || submitting}
-          onClose={() => setBrushConfig(null)}
+          onClose={closeBrushConfig}
           onSaved={(brushId) => void handleBrushConfigSaved(brushId)}
           onError={setError}
         />

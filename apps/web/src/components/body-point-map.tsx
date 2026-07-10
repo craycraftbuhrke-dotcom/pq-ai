@@ -244,6 +244,11 @@ export function BodyPointMap() {
   const stageRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointId: string; pointerId: number; moved: boolean } | null>(null);
 
+  const closeCreateModal = useCallback(() => {
+    if (submitting) return;
+    setCreateDraft(null);
+  }, [submitting]);
+
   const gridCols = mapData?.grid_cols ?? 48;
   const gridRows = mapData?.grid_rows ?? 24;
   const backgroundUrl =
@@ -968,7 +973,7 @@ export function BodyPointMap() {
           eyebrow="新建测量点"
           title="在网格上创建点位"
           description="将同步写入测量点主数据，并在当前视图落图；若已选测量编组会自动绑定。"
-          onClose={() => setCreateDraft(null)}
+          onClose={closeCreateModal}
           busy={submitting}
         >
           <form onSubmit={(event) => void submitCreate(event)}>

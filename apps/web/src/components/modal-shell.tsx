@@ -68,7 +68,14 @@ export function ModalShell({
               </p>
             ) : null}
           </div>
-          <button className="icon-button" onClick={onClose} disabled={busy} aria-label={closeLabel}>
+          <button
+            className="icon-button"
+            type="button"
+            data-modal-close=""
+            onClick={onClose}
+            disabled={busy}
+            aria-label={closeLabel}
+          >
             <X aria-hidden="true" />
           </button>
         </div>

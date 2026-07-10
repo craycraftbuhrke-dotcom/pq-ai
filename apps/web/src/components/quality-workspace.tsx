@@ -357,6 +357,7 @@ export function QualityWorkspace({
 
   const closeModal = useCallback(() => {
     if (submitting) return;
+    setCreateRunInline(false);
     setModal(null);
   }, [submitting]);
 
@@ -886,14 +887,14 @@ export function QualityWorkspace({
       </section>
 
       {modal ? (
-        <ModalShell className="quality-modal" eyebrow={modal.record ? "编辑" : "新建"} title={`${modal.record ? "编辑" : "新建"}${modal.kind === "measurement" ? "质量测量" : "质量标准"}`} description={modal.kind === "measurement" ? "可选择已有生产事件，或在本表单内同时新建生产事件后再录入质量数据。日常批量请用「批量上传」Tab。" : "统一维护质量标准的适用范围、上下限和状态信息。"} onClose={() => { if (!submitting) { setCreateRunInline(false); closeModal(); } }} busy={submitting}>
+        <ModalShell className="quality-modal" eyebrow={modal.record ? "编辑" : "新建"} title={`${modal.record ? "编辑" : "新建"}${modal.kind === "measurement" ? "质量测量" : "质量标准"}`} description={modal.kind === "measurement" ? "可选择已有生产事件，或在本表单内同时新建生产事件后再录入质量数据。日常批量请用「批量上传」Tab。" : "统一维护质量标准的适用范围、上下限和状态信息。"} onClose={closeModal} busy={submitting}>
           <form onSubmit={(event) => void submit(event)}>
             <div className="form-grid">
               {modal.kind === "measurement"
                 ? renderMeasurementForm(form, setMeasurementForm, metricRows, setMetricRows, repeatRows, setRepeatRows, { runs, groups, groupPoints, points, definitions, instruments, methods, calibrations, references, importProfiles, factories, vehicleModels, colors }, { createRunInline, setCreateRunInline, isEdit: Boolean(modal.record) })
                 : renderStandardForm(form, setForm, { vehicleModels, colors, parts, points, definitions })}
             </div>
-            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => { if (!submitting) { setCreateRunInline(false); closeModal(); } }} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存"}</button></div>
+            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={closeModal} disabled={submitting}>取消</button><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? <LoaderCircle className="spin" aria-hidden="true" /> : null}{submitting ? "正在保存" : "保存"}</button></div>
           </form>
         </ModalShell>
       ) : null}

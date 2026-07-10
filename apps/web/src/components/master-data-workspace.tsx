@@ -444,11 +444,11 @@ export function MasterDataWorkspace({ mode = "full" }: { mode?: MasterMode } = {
     setError("");
   }
 
-  function closeModal() {
+  const closeModal = useCallback(() => {
     if (submitting) return;
     setModalMode(null);
     setEditing(null);
-  }
+  }, [submitting]);
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
