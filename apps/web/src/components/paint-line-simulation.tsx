@@ -64,6 +64,68 @@ type BrushParameter = {
   configured_value: number;
   unit: string;
 };
+type ProductionRun = {
+  id: string;
+  run_no: string;
+  body_no?: string | null;
+  factory_id: string;
+  vehicle_model_id: string;
+  color_id: string;
+  shift?: string | null;
+  started_at: string;
+};
+type StageRun = {
+  id: string;
+  production_run_id: string;
+  process_stage: string;
+  program_version_id: string;
+  status: string;
+};
+type ActualParameter = {
+  id: string;
+  production_stage_run_id: string;
+  brush_id?: string | null;
+  parameter_code: string;
+  actual_value: number;
+  unit: string;
+};
+type TrajectoryProgram = {
+  id: string;
+  program_version_id: string;
+  trajectory_code: string;
+  name: string;
+  version: string;
+  checksum: string;
+  tcp_name?: string | null;
+  status?: string;
+};
+type PathSegment = {
+  id: string;
+  trajectory_program_id: string;
+  segment_no: number;
+  name: string;
+  brush_id?: string | null;
+  configured_speed?: number | null;
+  speed_unit?: string | null;
+  start_position?: Record<string, unknown> | null;
+  end_position?: Record<string, unknown> | null;
+  trigger_state: string;
+};
+type DeviceExecution = {
+  id: string;
+  production_stage_run_id: string;
+  trajectory_program_id: string;
+  executed_checksum: string;
+  status: string;
+};
+type SegmentExecution = {
+  id: string;
+  device_execution_id: string;
+  path_segment_id: string;
+  actual_speed?: number | null;
+  speed_unit?: string | null;
+  trigger_state?: string | null;
+};
 
 type StageCode =
   | "MIDCOAT_EXT"
@@ -87,6 +149,15 @@ type Selection =
   | { kind: "stage"; stage: StageCode }
   | { kind: "slot"; stage: StageCode; side: SlotSide }
   | null;
+
+type Point2D = { x: number; y: number };
+
+type NormalizedSegment = {
+  segment: PathSegment;
+  start: Point2D;
+  end: Point2D;
+  placeholder: boolean;
+};
 
 const STAGE_ORDER: StageCode[] = [
   "MIDCOAT_EXT",
@@ -133,6 +204,9 @@ const STAGE_META: Record<
 };
 
 const LAYOUT_STORAGE_KEY = "pq-ai-paint-line-layout-v1";
+const PATH_VIEW_W = 320;
+const PATH_VIEW_H = 180;
+const PATH_PAD = 16;
 
 function emptyLayout(): LineLayout {
   return {
@@ -175,8 +249,153 @@ function formatValue(value?: number | null, unit?: string | null): string {
   return unit ? `${text} ${unit}` : text;
 }
 
+function formatDelta(delta: number | null): string {
+  if (delta == null || Number.isNaN(delta)) return "—";
+  const sign = delta > 0 ? "+" : "";
+  const text = Number.isInteger(delta) ? String(delta) : delta.toFixed(2);
+  return `${sign}${text}`;
+}
+
+function matchesContextId(recordId?: string | null, contextId?: string): boolean {
+  if (!contextId) return true;
+  if (!recordId) return true;
+  return recordId === contextId;
+}
+
+function extractPoint(position?: Record<string, unknown> | null): Point2D | null {
+  if (!position || typeof position !== "object") return null;
+  const x = Number(position.x);
+  const yRaw = position.y != null ? Number(position.y) : Number(position.z);
+  if (!Number.isFinite(x) || !Number.isFinite(yRaw)) return null;
+  return { x, y: yRaw };
+}
+
+function synthesizeZigzag(index: number): { start: Point2D; end: Point2D } {
+  const row = Math.floor(index / 2);
+  const goingRight = index % 2 === 0;
+  const y = row * 40;
+  return goingRight
+    ? { start: { x: 0, y }, end: { x: 100, y } }
+    : { start: { x: 100, y }, end: { x: 0, y: y + 40 } };
+}
+
+function normalizeSegments(segments: PathSegment[]): NormalizedSegment[] {
+  const sorted = [...segments].sort((a, b) => a.segment_no - b.segment_no);
+  return sorted.map((segment, index) => {
+    const start = extractPoint(segment.start_position);
+    const end = extractPoint(segment.end_position);
+    if (start && end) {
+      return { segment, start, end, placeholder: false };
+    }
+    const zigzag = synthesizeZigzag(index);
+    return {
+      segment,
+      start: start ?? zigzag.start,
+      end: end ?? zigzag.end,
+      placeholder: true,
+    };
+  });
+}
+
+function buildPolyline(normalized: NormalizedSegment[]): Point2D[] {
+  if (!normalized.length) return [];
+  const points: Point2D[] = [normalized[0].start];
+  for (const item of normalized) {
+    const last = points[points.length - 1];
+    if (last.x !== item.start.x || last.y !== item.start.y) {
+      points.push(item.start);
+    }
+    points.push(item.end);
+  }
+  return points;
+}
+
+function polylineLength(points: Point2D[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const dx = points[i].x - points[i - 1].x;
+    const dy = points[i].y - points[i - 1].y;
+    total += Math.hypot(dx, dy);
+  }
+  return total;
+}
+
+function pointAlongPolyline(points: Point2D[], t: number): Point2D | null {
+  if (!points.length) return null;
+  if (points.length === 1) return points[0];
+  const total = polylineLength(points);
+  if (total <= 0) return points[0];
+  let remaining = Math.max(0, Math.min(1, t)) * total;
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1];
+    const b = points[i];
+    const segLen = Math.hypot(b.x - a.x, b.y - a.y);
+    if (remaining <= segLen || i === points.length - 1) {
+      const ratio = segLen > 0 ? remaining / segLen : 0;
+      return { x: a.x + (b.x - a.x) * ratio, y: a.y + (b.y - a.y) * ratio };
+    }
+    remaining -= segLen;
+  }
+  return points[points.length - 1];
+}
+
+function activeSegmentAt(normalized: NormalizedSegment[], t: number): NormalizedSegment | null {
+  if (!normalized.length) return null;
+  const points = buildPolyline(normalized);
+  const total = polylineLength(points);
+  if (total <= 0) return normalized[0];
+  const target = Math.max(0, Math.min(1, t)) * total;
+  let walked = 0;
+  for (const item of normalized) {
+    const segLen = Math.hypot(item.end.x - item.start.x, item.end.y - item.start.y);
+    if (target <= walked + segLen || item === normalized[normalized.length - 1]) {
+      return item;
+    }
+    walked += segLen;
+  }
+  return normalized[normalized.length - 1];
+}
+
+function projectPoints(points: Point2D[]): { projected: Point2D[]; width: number; height: number } {
+  if (!points.length) {
+    return { projected: [], width: PATH_VIEW_W, height: PATH_VIEW_H };
+  }
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = Math.max(1e-6, maxX - minX);
+  const spanY = Math.max(1e-6, maxY - minY);
+  const innerW = PATH_VIEW_W - PATH_PAD * 2;
+  const innerH = PATH_VIEW_H - PATH_PAD * 2;
+  const scale = Math.min(innerW / spanX, innerH / spanY);
+  const offsetX = PATH_PAD + (innerW - spanX * scale) / 2;
+  const offsetY = PATH_PAD + (innerH - spanY * scale) / 2;
+  return {
+    projected: points.map((p) => ({
+      x: offsetX + (p.x - minX) * scale,
+      y: offsetY + (p.y - minY) * scale,
+    })),
+    width: PATH_VIEW_W,
+    height: PATH_VIEW_H,
+  };
+}
+
+function findActualParameter(
+  actuals: ActualParameter[],
+  brushId: string,
+  parameterCode: string,
+): ActualParameter | undefined {
+  return (
+    actuals.find((item) => item.brush_id === brushId && item.parameter_code === parameterCode) ??
+    actuals.find((item) => item.parameter_code === parameterCode)
+  );
+}
+
 export function PaintLineSimulation() {
-  const { factoryId, modelId, stage: contextStage } = useWorkspaceContext();
+  const { factoryId, modelId, colorId, stage: contextStage } = useWorkspaceContext();
   const [robots, setRobots] = useState<Robot[]>([]);
   const [atomizers, setAtomizers] = useState<Atomizer[]>([]);
   const [programs, setPrograms] = useState<SprayProgram[]>([]);
@@ -192,14 +411,28 @@ export function PaintLineSimulation() {
   });
   const [brushes, setBrushes] = useState<Brush[]>([]);
   const [parametersByBrush, setParametersByBrush] = useState<Record<string, BrushParameter[]>>({});
+  const [productionRuns, setProductionRuns] = useState<ProductionRun[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState("");
+  const [stageRuns, setStageRuns] = useState<StageRun[]>([]);
+  const [actualParameters, setActualParameters] = useState<ActualParameter[]>([]);
+  const [trajectoryProgram, setTrajectoryProgram] = useState<TrajectoryProgram | null>(null);
+  const [pathSegments, setPathSegments] = useState<PathSegment[]>([]);
+  const [deviceExecution, setDeviceExecution] = useState<DeviceExecution | null>(null);
+  const [segmentExecutions, setSegmentExecutions] = useState<SegmentExecution[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [pathLoading, setPathLoading] = useState(false);
+  const [actualLoading, setActualLoading] = useState(false);
   const [error, setError] = useState("");
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [activeStageIndex, setActiveStageIndex] = useState(0);
+  const [pathPlaying, setPathPlaying] = useState(false);
+  const [pathProgress, setPathProgress] = useState(0);
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
+  const pathRafRef = useRef<number | null>(null);
+  const pathLastTsRef = useRef<number | null>(null);
 
   const filteredRobots = useMemo(
     () => robots.filter((item) => !factoryId || item.factory_id === factoryId),
@@ -208,6 +441,17 @@ export function PaintLineSimulation() {
   const filteredAtomizers = useMemo(
     () => atomizers.filter((item) => !factoryId || item.factory_id === factoryId),
     [atomizers, factoryId],
+  );
+
+  const filteredRuns = useMemo(
+    () =>
+      productionRuns.filter(
+        (run) =>
+          matchesContextId(run.factory_id, factoryId) &&
+          matchesContextId(run.vehicle_model_id, modelId) &&
+          matchesContextId(run.color_id, colorId),
+      ),
+    [productionRuns, factoryId, modelId, colorId],
   );
 
   const installedRobotIds = useMemo(() => {
@@ -228,18 +472,39 @@ export function PaintLineSimulation() {
     return layout[selection.stage][selection.side] ?? null;
   }, [layout, selection]);
 
+  const matchedStageRun = useMemo(() => {
+    if (!selectedStage || !selectedRunId) return null;
+    return stageRuns.find((item) => item.process_stage === selectedStage) ?? null;
+  }, [stageRuns, selectedStage, selectedRunId]);
+
+  const normalizedPath = useMemo(() => normalizeSegments(pathSegments), [pathSegments]);
+  const pathUsesPlaceholder = useMemo(
+    () => normalizedPath.some((item) => item.placeholder),
+    [normalizedPath],
+  );
+  const activePathSegment = useMemo(
+    () => activeSegmentAt(normalizedPath, pathProgress),
+    [normalizedPath, pathProgress],
+  );
+  const activeSegmentExecution = useMemo(() => {
+    if (!activePathSegment) return null;
+    return segmentExecutions.find((item) => item.path_segment_id === activePathSegment.segment.id) ?? null;
+  }, [activePathSegment, segmentExecutions]);
+
   const reload = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [nextRobots, nextAtomizers, nextPrograms] = await Promise.all([
+      const [nextRobots, nextAtomizers, nextPrograms, nextRuns] = await Promise.all([
         request<Robot[]>("/api/process/robot-governance/robots"),
         request<Atomizer[]>("/api/process/robot-governance/atomizers"),
         request<SprayProgram[]>("/api/process/spray-programs"),
+        request<ProductionRun[]>("/api/process/production-runs?limit=500"),
       ]);
       setRobots(nextRobots);
       setAtomizers(nextAtomizers);
       setPrograms(nextPrograms);
+      setProductionRuns(nextRuns);
       setLayout(loadLayout(factoryId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载虚拟产线数据失败");
@@ -264,6 +529,12 @@ export function PaintLineSimulation() {
   useEffect(() => {
     saveLayout(factoryId, layout);
   }, [factoryId, layout]);
+
+  useEffect(() => {
+    if (selectedRunId && !filteredRuns.some((run) => run.id === selectedRunId)) {
+      setSelectedRunId("");
+    }
+  }, [filteredRuns, selectedRunId]);
 
   useEffect(() => {
     if (!playing) {
@@ -295,6 +566,33 @@ export function PaintLineSimulation() {
     };
   }, [playing]);
 
+  useEffect(() => {
+    if (!pathPlaying || !normalizedPath.length) {
+      if (pathRafRef.current != null) cancelAnimationFrame(pathRafRef.current);
+      pathRafRef.current = null;
+      pathLastTsRef.current = null;
+      return;
+    }
+    const tick = (ts: number) => {
+      if (pathLastTsRef.current == null) pathLastTsRef.current = ts;
+      const delta = (ts - pathLastTsRef.current) / 1000;
+      pathLastTsRef.current = ts;
+      setPathProgress((current) => {
+        const next = current + delta * 0.22;
+        if (next >= 1) {
+          setPathPlaying(false);
+          return 1;
+        }
+        return next;
+      });
+      pathRafRef.current = requestAnimationFrame(tick);
+    };
+    pathRafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (pathRafRef.current != null) cancelAnimationFrame(pathRafRef.current);
+    };
+  }, [pathPlaying, normalizedPath.length]);
+
   const loadSlotDetail = useCallback(async (assignment: SlotAssignment | null) => {
     setBrushes([]);
     setParametersByBrush({});
@@ -322,6 +620,113 @@ export function PaintLineSimulation() {
   useEffect(() => {
     void loadSlotDetail(selectedAssignment);
   }, [selectedAssignment, loadSlotDetail]);
+
+  const loadTrajectory = useCallback(async (programVersionId?: string) => {
+    setTrajectoryProgram(null);
+    setPathSegments([]);
+    setPathProgress(0);
+    setPathPlaying(false);
+    if (!programVersionId) return;
+    setPathLoading(true);
+    try {
+      const programsList = await request<TrajectoryProgram[]>(
+        `/api/process/robot-governance/trajectory-programs?program_version_id=${encodeURIComponent(programVersionId)}`,
+      );
+      const preferred =
+        programsList.find((item) => item.status === "ACTIVE") ??
+        programsList.find((item) => item.status === "APPROVED") ??
+        programsList[0] ??
+        null;
+      setTrajectoryProgram(preferred);
+      if (!preferred) return;
+      const segments = await request<PathSegment[]>(
+        `/api/process/robot-governance/path-segments?trajectory_program_id=${encodeURIComponent(preferred.id)}`,
+      );
+      setPathSegments(segments);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载轨迹路径失败");
+    } finally {
+      setPathLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadTrajectory(selectedAssignment?.programVersionId);
+  }, [selectedAssignment?.programVersionId, loadTrajectory]);
+
+  useEffect(() => {
+    if (!selectedRunId) {
+      setStageRuns([]);
+      setActualParameters([]);
+      setDeviceExecution(null);
+      setSegmentExecutions([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setActualLoading(true);
+      try {
+        const stages = await request<StageRun[]>(`/api/process/production-runs/${selectedRunId}/stages`);
+        if (cancelled) return;
+        setStageRuns(stages);
+      } catch (err) {
+        if (!cancelled) {
+          setStageRuns([]);
+          setError(err instanceof Error ? err.message : "加载生产工序实绩失败");
+        }
+      } finally {
+        if (!cancelled) setActualLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRunId]);
+
+  useEffect(() => {
+    setActualParameters([]);
+    setDeviceExecution(null);
+    setSegmentExecutions([]);
+    if (!matchedStageRun) return;
+    let cancelled = false;
+    (async () => {
+      setActualLoading(true);
+      try {
+        const [actuals, executions] = await Promise.all([
+          request<ActualParameter[]>(
+            `/api/process/production-stage-runs/${matchedStageRun.id}/actual-parameters`,
+          ),
+          request<DeviceExecution[]>(
+            `/api/process/robot-governance/device-executions?production_stage_run_id=${encodeURIComponent(matchedStageRun.id)}`,
+          ),
+        ]);
+        if (cancelled) return;
+        setActualParameters(actuals);
+        const execution = executions[0] ?? null;
+        setDeviceExecution(execution);
+        if (execution) {
+          const segs = await request<SegmentExecution[]>(
+            `/api/process/robot-governance/device-executions/${execution.id}/segments`,
+          );
+          if (!cancelled) setSegmentExecutions(segs);
+        } else {
+          setSegmentExecutions([]);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setActualParameters([]);
+          setDeviceExecution(null);
+          setSegmentExecutions([]);
+          setError(err instanceof Error ? err.message : "加载实绩参数失败");
+        }
+      } finally {
+        if (!cancelled) setActualLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [matchedStageRun]);
 
   async function ensureVersions(programId: string) {
     if (!programId || versionsByProgram[programId]) return;
@@ -380,6 +785,8 @@ export function PaintLineSimulation() {
     setProgress(0);
     setActiveStageIndex(0);
     setPlaying(false);
+    setPathPlaying(false);
+    setPathProgress(0);
   }
 
   const bodyLeft = `${Math.min(94, Math.max(3, progress))}%`;
@@ -406,6 +813,9 @@ export function PaintLineSimulation() {
       (installTarget && layout[installTarget.stage][installTarget.side]?.robotId === robot.id),
   );
 
+  const showBoothPathOverlay =
+    selection?.kind === "slot" && Boolean(selectedAssignment?.programVersionId) && normalizedPath.length > 0;
+
   return (
     <section className="panel paint-line-panel">
       <div className="program-subheading">
@@ -416,7 +826,23 @@ export function PaintLineSimulation() {
             按中涂外喷 → 色漆一/二站 → 清漆一/二站布置旋杯机器人。布局保存在本机；喷涂参数来自已维护的程序版本与刷子设定，不编造设备限值。
           </small>
         </div>
-        <div className="row-actions">
+        <div className="row-actions paint-line-toolbar">
+          <label className="paint-line-run-select">
+            <span>生产事件</span>
+            <select
+              value={selectedRunId}
+              onChange={(event) => setSelectedRunId(event.target.value)}
+              disabled={loading}
+            >
+              <option value="">未选择（仅看设定）</option>
+              {filteredRuns.map((run) => (
+                <option key={run.id} value={run.id}>
+                  {run.run_no}
+                  {run.body_no ? ` · ${run.body_no}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
           <button className="button button-secondary" type="button" onClick={() => void reload()} disabled={loading}>
             {loading ? <LoaderCircle className="spin" /> : <RefreshCw />}
             刷新主数据
@@ -467,100 +893,130 @@ export function PaintLineSimulation() {
           </span>
         </div>
 
-        <div className="paint-line-stage">
-          <div className="paint-line-sky" aria-hidden="true" />
-          <div className="paint-line-ceiling" aria-hidden="true" />
-          <div className="paint-line-conveyor" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </div>
+        <div className="paint-line-stage is-3d">
+          <div className="paint-line-scene">
+            <div className="paint-line-sky" aria-hidden="true" />
+            <div className="paint-line-ceiling" aria-hidden="true" />
 
-          <div
-            className={`paint-line-body ${playing ? "is-moving" : ""}`}
-            style={{ left: bodyLeft }}
-            aria-hidden="true"
-          >
-            <div className="paint-line-skid" />
-            <div className="paint-line-biw">
-              <span />
-              <span />
-              <span />
+            <div className="paint-line-conveyor-plane" aria-hidden="true">
+              <div className="paint-line-conveyor">
+                <i />
+                <i />
+                <i />
+              </div>
+              <div
+                className={`paint-line-body ${playing ? "is-moving" : ""}`}
+                style={{ left: bodyLeft }}
+              >
+                <div className="paint-line-skid" />
+                <div className="paint-line-biw">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
             </div>
-          </div>
 
-          <div className="paint-line-booths">
-            {STAGE_ORDER.map((stage, index) => {
-              const meta = STAGE_META[stage];
-              const isActive = activeStageIndex === index && (playing || progress > 0);
-              const isSelected = selectedStage === stage;
-              return (
-                <article
-                  key={stage}
-                  className={`paint-line-booth ${isActive ? "is-active" : ""} ${isSelected ? "is-selected" : ""}`}
-                  style={{ "--booth-tone": meta.tone } as CSSProperties}
-                  onClick={() => setSelection({ kind: "stage", stage })}
-                >
-                  <header className="paint-line-booth-head">
-                    <span className="mono">{String(index + 1).padStart(2, "0")}</span>
-                    <div>
-                      <strong>{stageLabel(stage)}</strong>
-                      <small>{meta.stationHint}</small>
+            <div className="paint-line-booths">
+              {STAGE_ORDER.map((stage, index) => {
+                const meta = STAGE_META[stage];
+                const isActive = activeStageIndex === index && (playing || progress > 0);
+                const isSelected = selectedStage === stage;
+                const showOverlay =
+                  showBoothPathOverlay &&
+                  selection?.kind === "slot" &&
+                  selection.stage === stage;
+                return (
+                  <article
+                    key={stage}
+                    className={`paint-line-booth ${isActive ? "is-active" : ""} ${isSelected ? "is-selected" : ""}`}
+                    style={{ "--booth-tone": meta.tone } as CSSProperties}
+                    onClick={() => setSelection({ kind: "stage", stage })}
+                  >
+                    <div className="paint-line-booth-3d">
+                      <div className="paint-line-booth-back" aria-hidden="true" />
+                      <div className="paint-line-booth-side is-left" aria-hidden="true" />
+                      <div className="paint-line-booth-side is-right" aria-hidden="true" />
+                      <div className="paint-line-booth-floor" aria-hidden="true" />
+                      <div className="paint-line-booth-face">
+                        <header className="paint-line-booth-head">
+                          <span className="mono">{String(index + 1).padStart(2, "0")}</span>
+                          <div>
+                            <strong>{stageLabel(stage)}</strong>
+                            <small>{meta.stationHint}</small>
+                          </div>
+                          <em>{meta.coatingLabel}</em>
+                        </header>
+
+                        <div className="paint-line-booth-chamber">
+                          <div className="paint-line-booth-glass" />
+                          {showOverlay ? (
+                            <div className="paint-line-booth-path-overlay" aria-hidden="true">
+                              <TrajectoryPathCanvas
+                                normalized={normalizedPath}
+                                progress={pathProgress}
+                                compact
+                              />
+                            </div>
+                          ) : null}
+                          {(["L", "R"] as SlotSide[]).map((side) => {
+                            const assignment = layout[stage][side];
+                            const robot = assignment
+                              ? robots.find((item) => item.id === assignment.robotId)
+                              : null;
+                            const spraying = isActive && Boolean(assignment);
+                            return (
+                              <button
+                                key={side}
+                                type="button"
+                                className={`paint-line-robot-slot side-${side.toLowerCase()} ${assignment ? "has-robot" : ""} ${
+                                  selection?.kind === "slot" &&
+                                  selection.stage === stage &&
+                                  selection.side === side
+                                    ? "is-selected"
+                                    : ""
+                                } ${spraying ? "is-spraying" : ""}`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (!assignment) {
+                                    openInstall(stage, side);
+                                    return;
+                                  }
+                                  setSelection({ kind: "slot", stage, side });
+                                }}
+                                title={
+                                  robot
+                                    ? `${robot.code} / ${robot.name}`
+                                    : `安装${side === "L" ? "左侧" : "右侧"}机器人`
+                                }
+                              >
+                                {assignment && robot ? (
+                                  <>
+                                    <span className="paint-line-arm-wrap">
+                                      <RobotArmSvg spraying={spraying} />
+                                    </span>
+                                    <span className="paint-line-robot-tag">
+                                      <b>{robot.code}</b>
+                                      <small>{side === "L" ? "左" : "右"}</small>
+                                    </span>
+                                    {spraying ? <i className="paint-line-mist" aria-hidden="true" /> : null}
+                                  </>
+                                ) : (
+                                  <span className="paint-line-slot-empty">
+                                    <Plus />
+                                    安装
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
-                    <em>{meta.coatingLabel}</em>
-                  </header>
-
-                  <div className="paint-line-booth-chamber">
-                    <div className="paint-line-booth-glass" />
-                    {(["L", "R"] as SlotSide[]).map((side) => {
-                      const assignment = layout[stage][side];
-                      const robot = assignment
-                        ? robots.find((item) => item.id === assignment.robotId)
-                        : null;
-                      const spraying = isActive && Boolean(assignment);
-                      return (
-                        <button
-                          key={side}
-                          type="button"
-                          className={`paint-line-robot-slot side-${side.toLowerCase()} ${assignment ? "has-robot" : ""} ${
-                            selection?.kind === "slot" && selection.stage === stage && selection.side === side
-                              ? "is-selected"
-                              : ""
-                          } ${spraying ? "is-spraying" : ""}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (!assignment) {
-                              openInstall(stage, side);
-                              return;
-                            }
-                            setSelection({ kind: "slot", stage, side });
-                          }}
-                          title={robot ? `${robot.code} / ${robot.name}` : `安装${side === "L" ? "左侧" : "右侧"}机器人`}
-                        >
-                          {assignment && robot ? (
-                            <>
-                              <span className="paint-line-arm-wrap">
-                                <RobotArmSvg spraying={spraying} />
-                              </span>
-                              <span className="paint-line-robot-tag">
-                                <b>{robot.code}</b>
-                                <small>{side === "L" ? "左" : "右"}</small>
-                              </span>
-                              {spraying ? <i className="paint-line-mist" aria-hidden="true" /> : null}
-                            </>
-                          ) : (
-                            <span className="paint-line-slot-empty">
-                              <Plus />
-                              安装
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </article>
-              );
-            })}
+                  </article>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -573,6 +1029,9 @@ export function PaintLineSimulation() {
           <small>
             当前工位 · {stageLabel(STAGE_ORDER[activeStageIndex])}
             {modelId ? " · 已按顶部车型上下文过滤程序" : ""}
+            {selectedRunId
+              ? ` · 对照生产事件 ${filteredRuns.find((run) => run.id === selectedRunId)?.run_no ?? selectedRunId}`
+              : ""}
           </small>
         </div>
 
@@ -634,6 +1093,8 @@ export function PaintLineSimulation() {
                 stage={selection.stage}
                 layout={layout}
                 robots={robots}
+                matchedStageRun={matchedStageRun}
+                actualLoading={actualLoading}
                 onInstall={openInstall}
                 onSelectSlot={(side) => setSelection({ kind: "slot", stage: selection.stage, side })}
               />
@@ -648,7 +1109,29 @@ export function PaintLineSimulation() {
                 version={selectedVersion}
                 brushes={brushes}
                 parametersByBrush={parametersByBrush}
+                actualParameters={actualParameters}
                 loading={detailLoading}
+                actualLoading={actualLoading}
+                hasProductionRun={Boolean(selectedRunId)}
+                matchedStageRun={matchedStageRun}
+                deviceExecution={deviceExecution}
+                trajectoryProgram={trajectoryProgram}
+                pathLoading={pathLoading}
+                normalizedPath={normalizedPath}
+                pathUsesPlaceholder={pathUsesPlaceholder}
+                pathProgress={pathProgress}
+                pathPlaying={pathPlaying}
+                activePathSegment={activePathSegment}
+                activeSegmentExecution={activeSegmentExecution}
+                onTogglePathPlay={() => {
+                  if (!normalizedPath.length) return;
+                  if (pathProgress >= 1) setPathProgress(0);
+                  setPathPlaying((value) => !value);
+                }}
+                onResetPath={() => {
+                  setPathPlaying(false);
+                  setPathProgress(0);
+                }}
                 onEdit={() => openInstall(selection.stage, selection.side)}
                 onUninstall={() => uninstallSlot(selection.stage, selection.side)}
               />
@@ -775,16 +1258,81 @@ function RobotArmSvg({ spraying }: { spraying: boolean }) {
   );
 }
 
+function projectWorldPoint(points: Point2D[], point: Point2D): Point2D | null {
+  if (!points.length) return null;
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = Math.max(1e-6, maxX - minX);
+  const spanY = Math.max(1e-6, maxY - minY);
+  const innerW = PATH_VIEW_W - PATH_PAD * 2;
+  const innerH = PATH_VIEW_H - PATH_PAD * 2;
+  const scale = Math.min(innerW / spanX, innerH / spanY);
+  const offsetX = PATH_PAD + (innerW - spanX * scale) / 2;
+  const offsetY = PATH_PAD + (innerH - spanY * scale) / 2;
+  return {
+    x: offsetX + (point.x - minX) * scale,
+    y: offsetY + (point.y - minY) * scale,
+  };
+}
+
+function TrajectoryPathCanvas({
+  normalized,
+  progress,
+  compact = false,
+}: {
+  normalized: NormalizedSegment[];
+  progress: number;
+  compact?: boolean;
+}) {
+  const points = useMemo(() => buildPolyline(normalized), [normalized]);
+  const { projected, width, height } = useMemo(() => projectPoints(points), [points]);
+  const marker = useMemo(() => {
+    const raw = pointAlongPolyline(points, progress);
+    if (!raw) return null;
+    return projectWorldPoint(points, raw);
+  }, [points, progress]);
+
+  if (!projected.length) {
+    return <div className="paint-line-path-empty">暂无路径段坐标</div>;
+  }
+
+  const d = projected
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`)
+    .join(" ");
+
+  return (
+    <svg
+      className={`paint-line-path-svg ${compact ? "is-compact" : ""}`}
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label="轨迹路径"
+    >
+      <path d={d} className="paint-line-path-line" />
+      {marker ? (
+        <circle cx={marker.x} cy={marker.y} r={compact ? 3.5 : 5} className="paint-line-path-tcp" />
+      ) : null}
+    </svg>
+  );
+}
+
 function StageSummary({
   stage,
   layout,
   robots,
+  matchedStageRun,
+  actualLoading,
   onInstall,
   onSelectSlot,
 }: {
   stage: StageCode;
   layout: LineLayout;
   robots: Robot[];
+  matchedStageRun: StageRun | null;
+  actualLoading: boolean;
   onInstall: (stage: StageCode, side: SlotSide) => void;
   onSelectSlot: (side: SlotSide) => void;
 }) {
@@ -817,7 +1365,11 @@ function StageSummary({
         })}
       </div>
       <p className="paint-line-scope-note">
-        本页仅做产线布局与参数只读仿真。设备限值、TDS 与推荐变更仍以受控主数据 / AI 闭环为准，不在此编造。
+        {actualLoading
+          ? "正在加载工序实绩…"
+          : matchedStageRun
+            ? `已匹配生产工序实绩（${matchedStageRun.status}）。选择槽位可对照刷子设定与实绩。`
+            : "本页仅做产线布局与参数只读仿真。选择生产事件后，可在槽位中对照设定与实绩；设备限值、TDS 与推荐变更仍以受控主数据 / AI 闭环为准，不在此编造。"}
       </p>
     </div>
   );
@@ -833,7 +1385,22 @@ function SlotInspector({
   version,
   brushes,
   parametersByBrush,
+  actualParameters,
   loading,
+  actualLoading,
+  hasProductionRun,
+  matchedStageRun,
+  deviceExecution,
+  trajectoryProgram,
+  pathLoading,
+  normalizedPath,
+  pathUsesPlaceholder,
+  pathProgress,
+  pathPlaying,
+  activePathSegment,
+  activeSegmentExecution,
+  onTogglePathPlay,
+  onResetPath,
   onEdit,
   onUninstall,
 }: {
@@ -846,7 +1413,22 @@ function SlotInspector({
   version?: ProgramVersion | null;
   brushes: Brush[];
   parametersByBrush: Record<string, BrushParameter[]>;
+  actualParameters: ActualParameter[];
   loading: boolean;
+  actualLoading: boolean;
+  hasProductionRun: boolean;
+  matchedStageRun: StageRun | null;
+  deviceExecution: DeviceExecution | null;
+  trajectoryProgram: TrajectoryProgram | null;
+  pathLoading: boolean;
+  normalizedPath: NormalizedSegment[];
+  pathUsesPlaceholder: boolean;
+  pathProgress: number;
+  pathPlaying: boolean;
+  activePathSegment: NormalizedSegment | null;
+  activeSegmentExecution: SegmentExecution | null;
+  onTogglePathPlay: () => void;
+  onResetPath: () => void;
   onEdit: () => void;
   onUninstall: () => void;
 }) {
@@ -858,6 +1440,8 @@ function SlotInspector({
       </div>
     );
   }
+
+  const checksumMismatch = deviceExecution?.status === "CHECKSUM_MISMATCH";
 
   return (
     <div className="paint-line-inspector-body">
@@ -874,6 +1458,9 @@ function SlotInspector({
           </small>
         </div>
         <div className="row-actions">
+          {checksumMismatch ? (
+            <span className="status-badge status-danger">CHECKSUM_MISMATCH</span>
+          ) : null}
           <button className="button button-secondary" type="button" onClick={onEdit}>
             更换
           </button>
@@ -905,11 +1492,96 @@ function SlotInspector({
         </article>
       </div>
 
+      {assignment.programVersionId ? (
+        <div className="paint-line-path-panel">
+          <div className="program-subheading compact">
+            <div>
+              <span className="eyebrow">轨迹回放</span>
+              <h4>{trajectoryProgram ? trajectoryProgram.name : "路径段"}</h4>
+            </div>
+            <div className="row-actions">
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={!normalizedPath.length || pathLoading}
+                onClick={onResetPath}
+              >
+                复位
+              </button>
+              <button
+                className={`button ${pathPlaying ? "button-secondary" : "button-primary"}`}
+                type="button"
+                disabled={!normalizedPath.length || pathLoading}
+                onClick={onTogglePathPlay}
+              >
+                {pathPlaying ? <Pause /> : <Play />}
+                {pathPlaying ? "暂停路径" : "播放路径"}
+              </button>
+            </div>
+          </div>
+
+          {pathLoading ? (
+            <div className="program-empty">
+              <LoaderCircle className="spin" />
+              正在加载轨迹…
+            </div>
+          ) : !trajectoryProgram ? (
+            <div className="program-empty">该程序版本暂无轨迹程序。请到「机器人与轨迹」维护。</div>
+          ) : !normalizedPath.length ? (
+            <div className="program-empty">轨迹程序下暂无路径段。</div>
+          ) : (
+            <>
+              {pathUsesPlaceholder ? (
+                <p className="paint-line-path-note">几何占位，非实测坐标</p>
+              ) : null}
+              <TrajectoryPathCanvas normalized={normalizedPath} progress={pathProgress} />
+              <div className="paint-line-path-status">
+                <div>
+                  <span>当前段</span>
+                  <strong>{activePathSegment?.segment.name ?? "—"}</strong>
+                </div>
+                <div>
+                  <span>设定速度</span>
+                  <strong className="mono">
+                    {formatValue(
+                      activePathSegment?.segment.configured_speed,
+                      activePathSegment?.segment.speed_unit,
+                    )}
+                  </strong>
+                </div>
+                <div>
+                  <span>触发</span>
+                  <strong className="mono">{activePathSegment?.segment.trigger_state ?? "—"}</strong>
+                </div>
+                <div>
+                  <span>实绩速度</span>
+                  <strong className="mono">
+                    {activeSegmentExecution
+                      ? formatValue(
+                          activeSegmentExecution.actual_speed,
+                          activeSegmentExecution.speed_unit ??
+                            activePathSegment?.segment.speed_unit,
+                        )
+                      : "—"}
+                  </strong>
+                </div>
+              </div>
+              {trajectoryProgram.tcp_name ? (
+                <small className="muted mono">TCP · {trajectoryProgram.tcp_name}</small>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+
       <div className="program-subheading compact">
         <div>
           <span className="eyebrow">喷涂参数</span>
-          <h4>刷子设定值（只读）</h4>
+          <h4>刷子设定 / 实绩对照</h4>
         </div>
+        {hasProductionRun && !matchedStageRun && !actualLoading ? (
+          <small className="muted">本工序无实绩</small>
+        ) : null}
       </div>
 
       {loading ? (
@@ -935,21 +1607,40 @@ function SlotInspector({
                   </div>
                 </div>
                 {params.length ? (
-                  <div className="body-map-param-table">
-                    {params.map((parameter) => (
-                      <div className="body-map-param-row" key={parameter.id}>
-                        <span>
-                          <strong>{parameter.parameter_name}</strong>
-                          <small className="mono">{parameter.parameter_code}</small>
-                        </span>
-                        <span className="mono">
-                          <em>设定</em> {formatValue(parameter.configured_value, parameter.unit)}
-                        </span>
-                        <span className="mono">
-                          <em>实绩</em> —
-                        </span>
-                      </div>
-                    ))}
+                  <div className="body-map-param-table paint-line-param-table">
+                    {params.map((parameter) => {
+                      const actual = findActualParameter(
+                        actualParameters,
+                        brush.id,
+                        parameter.parameter_code,
+                      );
+                      const actualValue = actual?.actual_value ?? null;
+                      const delta =
+                        actualValue != null && parameter.configured_value != null
+                          ? actualValue - parameter.configured_value
+                          : null;
+                      const hasDelta = delta != null && Math.abs(delta) > 0;
+                      return (
+                        <div className="body-map-param-row paint-line-param-row" key={parameter.id}>
+                          <span>
+                            <strong>{parameter.parameter_name}</strong>
+                            <small className="mono">{parameter.parameter_code}</small>
+                          </span>
+                          <span className="mono">
+                            <em>设定</em> {formatValue(parameter.configured_value, parameter.unit)}
+                          </span>
+                          <span className="mono">
+                            <em>实绩</em>{" "}
+                            {actualLoading && hasProductionRun
+                              ? "…"
+                              : formatValue(actualValue, actual?.unit ?? parameter.unit)}
+                          </span>
+                          <span className={`mono paint-line-delta ${hasDelta ? "has-delta" : ""}`}>
+                            <em>Δ</em> {formatDelta(delta)}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <small className="muted">该刷子暂无配置参数</small>

@@ -7211,6 +7211,34 @@ button.message-banner {
   padding: 0 15px 15px;
 }
 
+.paint-line-toolbar {
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.paint-line-run-select {
+  display: grid;
+  gap: 4px;
+  min-width: 200px;
+}
+
+.paint-line-run-select span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.paint-line-run-select select {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 11px;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
 .paint-line-legend {
   align-items: center;
   display: flex;
@@ -7252,6 +7280,22 @@ button.message-banner {
   position: relative;
 }
 
+.paint-line-stage.is-3d {
+  perspective: 1180px;
+  perspective-origin: 50% 38%;
+}
+
+.paint-line-scene {
+  min-height: inherit;
+  position: relative;
+  transform-style: preserve-3d;
+}
+
+.paint-line-stage.is-3d .paint-line-scene {
+  transform: rotateX(12deg) translateZ(0);
+  transform-origin: 50% 72%;
+}
+
 .paint-line-sky {
   background:
     radial-gradient(ellipse at 20% 0%, rgb(255 255 255 / 55%), transparent 42%),
@@ -7273,15 +7317,32 @@ button.message-banner {
   position: absolute;
 }
 
-.paint-line-conveyor {
-  background: linear-gradient(180deg, #6d7f84, #4d5d62);
-  border-radius: 3px;
-  bottom: 42px;
-  box-shadow: 0 8px 18px rgb(19 39 44 / 18%);
-  height: 10px;
+.paint-line-conveyor-plane {
+  bottom: 28px;
   left: 18px;
   position: absolute;
   right: 18px;
+  transform: rotateX(68deg) translateZ(0);
+  transform-origin: center bottom;
+  transform-style: preserve-3d;
+  z-index: 4;
+}
+
+.paint-line-conveyor {
+  background:
+    linear-gradient(180deg, #7a8c91, #4d5d62),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 18px,
+      rgb(255 255 255 / 10%) 18px 20px
+    );
+  border-radius: 3px;
+  box-shadow:
+    0 10px 22px rgb(19 39 44 / 22%),
+    inset 0 1px 0 rgb(255 255 255 / 18%);
+  height: 18px;
+  position: relative;
+  width: 100%;
 }
 
 .paint-line-conveyor i {
@@ -7290,16 +7351,17 @@ button.message-banner {
   left: 0;
   position: absolute;
   right: 0;
-  top: 4px;
+  top: 7px;
 }
 
 .paint-line-body {
-  bottom: 48px;
+  bottom: 14px;
   position: absolute;
-  transform: translateX(-50%);
+  transform: translateX(-50%) rotateX(-68deg);
+  transform-origin: center bottom;
   transition: left 80ms linear;
   width: 92px;
-  z-index: 4;
+  z-index: 5;
 }
 
 .paint-line-body.is-moving .paint-line-biw {
@@ -7309,6 +7371,7 @@ button.message-banner {
 .paint-line-skid {
   background: #2c3a3e;
   border-radius: 2px;
+  box-shadow: 0 2px 0 rgb(0 0 0 / 25%);
   height: 6px;
   margin: 0 auto;
   width: 78px;
@@ -7352,37 +7415,123 @@ button.message-banner {
 
 .paint-line-booths {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   grid-template-columns: repeat(5, minmax(140px, 1fr));
-  padding: 42px 14px 78px;
+  padding: 42px 14px 96px;
   position: relative;
+  transform-style: preserve-3d;
   z-index: 3;
 }
 
 .paint-line-booth {
-  background: color-mix(in srgb, var(--booth-tone) 8%, rgb(255 255 255 / 72%));
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  cursor: pointer;
+  min-height: 220px;
+  padding: 0;
+  transform-style: preserve-3d;
+  transition: transform 140ms ease;
+}
+
+.paint-line-booth-3d {
+  height: 100%;
+  min-height: 220px;
+  position: relative;
+  transform-style: preserve-3d;
+}
+
+.paint-line-booth-back,
+.paint-line-booth-side,
+.paint-line-booth-floor {
+  pointer-events: none;
+  position: absolute;
+  transform-style: preserve-3d;
+}
+
+.paint-line-booth-back {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--booth-tone) 22%, #d7e4e8),
+      color-mix(in srgb, var(--booth-tone) 10%, #eef4f5)
+    );
+  border: 1px solid color-mix(in srgb, var(--booth-tone) 28%, var(--line));
+  border-radius: 10px 10px 4px 4px;
+  inset: 0 8px 28px;
+  transform: translateZ(-28px);
+}
+
+.paint-line-booth-side {
+  background: color-mix(in srgb, var(--booth-tone) 14%, #c5d4d8);
+  border: 1px solid color-mix(in srgb, var(--booth-tone) 22%, var(--line));
+  bottom: 28px;
+  top: 0;
+  width: 28px;
+}
+
+.paint-line-booth-side.is-left {
+  left: 0;
+  transform: rotateY(90deg) translateZ(0);
+  transform-origin: left center;
+}
+
+.paint-line-booth-side.is-right {
+  right: 0;
+  transform: rotateY(-90deg) translateZ(0);
+  transform-origin: right center;
+}
+
+.paint-line-booth-floor {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--booth-tone) 12%, #b7c6cb),
+      color-mix(in srgb, var(--booth-tone) 8%, #9aadb3)
+    );
+  border: 1px solid color-mix(in srgb, var(--booth-tone) 20%, var(--line));
+  border-radius: 0 0 8px 8px;
+  bottom: 0;
+  height: 34px;
+  left: 8px;
+  right: 8px;
+  transform: rotateX(78deg);
+  transform-origin: center bottom;
+}
+
+.paint-line-booth-face {
+  background: color-mix(in srgb, var(--booth-tone) 8%, rgb(255 255 255 / 78%));
   border: 1px solid color-mix(in srgb, var(--booth-tone) 28%, var(--line));
   border-radius: 10px;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 55%);
-  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 55%),
+    0 12px 24px rgb(19 39 44 / 12%);
   display: grid;
   gap: 8px;
+  height: 100%;
   min-height: 210px;
   padding: 10px;
-  transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+  position: relative;
+  transform: translateZ(12px);
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+  z-index: 2;
+}
+
+.paint-line-booth:hover .paint-line-booth-face,
+.paint-line-booth.is-selected .paint-line-booth-face {
+  border-color: color-mix(in srgb, var(--booth-tone) 55%, var(--line));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 65%),
+    0 14px 28px rgb(19 39 44 / 14%);
 }
 
 .paint-line-booth:hover,
 .paint-line-booth.is-selected {
-  border-color: color-mix(in srgb, var(--booth-tone) 55%, var(--line));
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 65%),
-    0 10px 24px rgb(19 39 44 / 10%);
-  transform: translateY(-2px);
+  transform: translateY(-4px) translateZ(8px);
 }
 
-.paint-line-booth.is-active {
-  background: color-mix(in srgb, var(--booth-tone) 16%, rgb(255 255 255 / 78%));
+.paint-line-booth.is-active .paint-line-booth-face {
+  background: color-mix(in srgb, var(--booth-tone) 16%, rgb(255 255 255 / 82%));
 }
 
 .paint-line-booth-head {
@@ -7440,6 +7589,19 @@ button.message-banner {
   position: relative;
 }
 
+.paint-line-booth-path-overlay {
+  inset: 22px 10px 10px;
+  opacity: 0.55;
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+}
+
+.paint-line-booth-path-overlay .paint-line-path-svg {
+  height: 100%;
+  width: 100%;
+}
+
 .paint-line-booth-glass {
   background: linear-gradient(180deg, rgb(255 255 255 / 35%), transparent);
   border-radius: 8px 8px 0 0;
@@ -7447,6 +7609,7 @@ button.message-banner {
   inset: 0 0 auto;
   pointer-events: none;
   position: absolute;
+  z-index: 2;
 }
 
 .paint-line-robot-slot {
@@ -7463,6 +7626,7 @@ button.message-banner {
   padding: 6px;
   position: relative;
   transition: border-color 120ms ease, background 120ms ease;
+  z-index: 2;
 }
 
 .paint-line-robot-slot:hover,
@@ -7703,6 +7867,115 @@ button.message-banner {
   gap: 10px;
 }
 
+.paint-line-path-panel {
+  background: color-mix(in srgb, var(--surface) 45%, var(--bg-elevated));
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.paint-line-path-note {
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--line));
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--amber) 55%, var(--text));
+  font-size: 11px;
+  margin: 0;
+  padding: 6px 8px;
+}
+
+.paint-line-path-svg {
+  background:
+    linear-gradient(180deg, rgb(19 39 44 / 3%), transparent),
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 17px,
+      rgb(19 39 44 / 4%) 17px,
+      rgb(19 39 44 / 4%) 18px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 17px,
+      rgb(19 39 44 / 4%) 17px,
+      rgb(19 39 44 / 4%) 18px
+    );
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: block;
+  height: auto;
+  max-width: 100%;
+  width: 100%;
+}
+
+.paint-line-path-svg.is-compact {
+  background: transparent;
+  border: 0;
+}
+
+.paint-line-path-line {
+  fill: none;
+  stroke: var(--teal);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.paint-line-path-tcp {
+  fill: var(--cyan);
+  stroke: #13272c;
+  stroke-width: 1.25;
+}
+
+.paint-line-path-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 18px 8px;
+  text-align: center;
+}
+
+.paint-line-path-status {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.paint-line-path-status > div {
+  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+}
+
+.paint-line-path-status span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.paint-line-path-status strong {
+  font-size: 12px;
+}
+
+.paint-line-param-table .paint-line-param-row {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) minmax(0, 0.85fr) minmax(0, 0.7fr);
+}
+
+.paint-line-delta.has-delta {
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--amber) 45%, var(--text));
+  padding: 2px 4px;
+}
+
+.paint-line-delta.has-delta em {
+  color: color-mix(in srgb, var(--red) 40%, var(--amber));
+}
+
 @keyframes paint-line-bob {
   0%,
   100% {
@@ -7741,6 +8014,18 @@ button.message-banner {
   .paint-line-booths {
     grid-template-columns: repeat(3, minmax(160px, 1fr));
   }
+
+  .paint-line-path-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .paint-line-stage.is-3d {
+    perspective: 1600px;
+  }
+
+  .paint-line-stage.is-3d .paint-line-scene {
+    transform: rotateX(8deg);
+  }
 }
 
 @media (max-width: 900px) {
@@ -7753,6 +8038,23 @@ button.message-banner {
 
   .paint-line-stage {
     min-height: 520px;
+  }
+
+  .paint-line-stage.is-3d {
+    perspective: 2200px;
+  }
+
+  .paint-line-stage.is-3d .paint-line-scene {
+    transform: rotateX(4deg);
+  }
+
+  .paint-line-booth-side,
+  .paint-line-booth-floor {
+    opacity: 0.55;
+  }
+
+  .paint-line-param-table .paint-line-param-row {
+    grid-template-columns: 1fr 1fr;
   }
 }
 
