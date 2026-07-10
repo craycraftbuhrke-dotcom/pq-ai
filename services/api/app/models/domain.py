@@ -236,8 +236,6 @@ class MeasurementPointLayout(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("measurement_point_id", "body_view", name="uk_point_layout_view"),
         Index("idx_point_layout_view_status", "body_view", "row_status"),
-        CheckConstraint("layout_x >= 0 AND layout_x <= 1", name="ck_point_layout_x"),
-        CheckConstraint("layout_y >= 0 AND layout_y <= 1", name="ck_point_layout_y"),
     )
 
     measurement_point_id: Mapped[str] = logical_fk("measurement_point.id", nullable=False)
