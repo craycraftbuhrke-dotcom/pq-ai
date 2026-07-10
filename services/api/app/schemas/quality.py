@@ -464,6 +464,7 @@ class BodyMapQualitySummary(BaseModel):
     measured_at: datetime | None = None
     data_no: str | None = None
     judgement: str | None = None
+    reliability_status: str | None = None
 
 
 class BodyMapPointItem(BaseModel):
@@ -495,6 +496,8 @@ class BodyMapResponse(BaseModel):
     grid_rows: int
     measurement_group_id: str | None = None
     production_run_id: str | None = None
+    production_run_no: str | None = None
+    quality_scope: str = "VERIFIED"
     placed_count: int = 0
     group_point_count: int = 0
     fail_count: int = 0
@@ -504,7 +507,8 @@ class BodyMapResponse(BaseModel):
 class BodyMapBrushParameter(BaseModel):
     parameter_code: str
     parameter_name: str
-    configured_value: float
+    configured_value: float | None = None
+    actual_value: float | None = None
     unit: str
 
 
@@ -519,6 +523,10 @@ class BodyMapBrushContribution(BaseModel):
     source: str
     version: str
     is_approved: bool
+    contribution_source: str = "LEGACY"
+    target_family: str | None = None
+    validation_score: float | None = None
+    path_segment_id: str | None = None
     parameters: list[BodyMapBrushParameter] = Field(default_factory=list)
 
 

@@ -12,31 +12,49 @@ from app.api.routes.body_map import (
 )
 from app.api.routes.factories import create_factory
 from app.api.routes.master_data import (
+    bind_factory_vehicle_model,
+    bind_vehicle_model_color,
+    create_color,
     create_measurement_group,
     create_measurement_point,
     create_part,
     create_vehicle_model,
 )
 from app.api.routes.process import (
+    create_actual_parameter,
     create_brush,
     create_brush_parameter,
+    create_production_run,
+    create_production_stage_run,
     create_program_version,
     create_spray_program,
     upsert_brush_point_contribution,
 )
 from app.api.routes.quality import create_quality_measurement
-from app.models.domain import MeasurementPointLayout
+from app.api.routes.robot_governance import (
+    create_contribution_entry,
+    create_contribution_version,
+)
+from app.models.domain import MeasurementPointLayout, QualityMeasurement
 from app.schemas.common import FactoryCreate
 from app.schemas.master_data import (
+    ColorCreate,
+    FactoryVehicleModelCreate,
     MeasurementGroupCreate,
     MeasurementPointCreate,
     PartCreate,
+    VehicleModelColorCreate,
     VehicleModelCreate,
 )
 from app.schemas.process import (
+    ActualParameterCreate,
     BrushCreate,
     BrushParameterCreate,
     BrushPointContributionUpsert,
+    PointContributionEntryCreate,
+    PointContributionVersionCreate,
+    ProductionRunCreate,
+    ProductionStageRunCreate,
     SprayProgramCreate,
     SprayProgramVersionCreate,
 )
@@ -47,10 +65,7 @@ from app.schemas.quality import (
     QualityMeasurementCreate,
     QualityMetricInput,
 )
-from app.api.routes.process import create_production_run
-from app.schemas.process import ProductionRunCreate
-from app.api.routes.master_data import bind_factory_vehicle_model, bind_vehicle_model_color, create_color
-from app.schemas.master_data import ColorCreate, FactoryVehicleModelCreate, VehicleModelColorCreate
+from app.services.measurement_reliability import VERIFIED
 from tests.schema_guard import create_transient_test_schema
 
 
@@ -58,6 +73,17 @@ def build_session() -> Session:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     create_transient_test_schema(engine)
     return Session(engine)
+
+
+def mark_verified(db: Session, measurement_id: str) -> QualityMeasurement:
+    measurement = db.get(QualityMeasurement, measurement_id)
+    assert measurement is not None
+    measurement.reliability_status = VERIFIED
+    measurement.reliability_issues = []
+    measurement.is_valid = True
+    db.commit()
+    db.refresh(measurement)
+    return measurement
 
 
 def build_body_map_context(db: Session) -> dict:
@@ -134,6 +160,9 @@ def test_body_map_layout_snaps_to_grid_center() -> None:
     body_map = get_body_map(vehicle_model_id=context["model"].id, body_view="TOP", db=db)
     assert body_map.placed_count == 1
     assert body_map.background_image_url == "/body-maps/top.jpg"
+    assert body_map.production_run_id == context["run"].id
+    assert body_map.production_run_no == "RUN-BM-1"
+    assert body_map.quality_scope == "VERIFIED"
     db.close()
 
 
@@ -251,7 +280,7 @@ def test_body_map_create_point_binds_group_and_detail_includes_brush() -> None:
         BrushPointContributionUpsert(overlap_ratio=0.5, contribution_weight=0.6),
         db,
     )
-    create_quality_measurement(
+    measurement = create_quality_measurement(
         QualityMeasurementCreate(
             data_no="QM-BM-1",
             production_run_id=run.id,
@@ -262,13 +291,276 @@ def test_body_map_create_point_binds_group_and_detail_includes_brush() -> None:
         ),
         db,
     )
+    mark_verified(db, measurement["id"])
 
     detail = get_body_map_point_detail(created.measurement_point_id, production_run_id=run.id, db=db)
     assert detail.code == "PT-NEW"
     orange = next(item for item in detail.quality_summaries if item.quality_type == "ORANGE_PEEL")
     assert orange.value == 88.5
+    assert orange.reliability_status == VERIFIED
     assert len(detail.brush_contributions) == 1
     assert detail.brush_contributions[0].brush_no == "B01"
     assert detail.brush_contributions[0].coating_system == "CLEARCOAT"
+    assert detail.brush_contributions[0].contribution_source == "LEGACY"
     assert detail.brush_contributions[0].parameters[0].configured_value == 280
+    db.close()
+
+
+def test_body_map_ignores_unverified_measurements() -> None:
+    db = build_session()
+    context = build_body_map_context(db)
+    point = context["point"]
+    run = context["run"]
+
+    upsert_body_map_layout(
+        point.id,
+        BodyMapLayoutUpsert(body_view="SIDE", layout_x=0.4, layout_y=0.5),
+        db,
+    )
+    create_quality_measurement(
+        QualityMeasurementCreate(
+            data_no="QM-UNVERIFIED",
+            production_run_id=run.id,
+            measurement_point_id=point.id,
+            quality_type="THICKNESS",
+            measured_at=datetime(2026, 7, 10, 9, 0, tzinfo=UTC),
+            metrics=[
+                QualityMetricInput(
+                    metric_code="thickness_total",
+                    metric_name="总膜厚",
+                    raw_value=120.0,
+                )
+            ],
+        ),
+        db,
+    )
+
+    body_map = get_body_map(
+        vehicle_model_id=context["model"].id,
+        body_view="SIDE",
+        production_run_id=run.id,
+        db=db,
+    )
+    mapped = next(item for item in body_map.points if item.measurement_point_id == point.id)
+    thickness = next(item for item in mapped.quality_summaries if item.quality_type == "THICKNESS")
+    assert thickness.value is None
+    assert thickness.judgement is None
+    assert body_map.fail_count == 0
+    db.close()
+
+
+def test_body_map_defaults_to_latest_production_run() -> None:
+    db = build_session()
+    context = build_body_map_context(db)
+    model = context["model"]
+    point = context["point"]
+    older = context["run"]
+    newer = create_production_run(
+        ProductionRunCreate(
+            run_no="RUN-BM-2",
+            body_no="BODY-BM-2",
+            factory_id=context["factory"].id,
+            vehicle_model_id=model.id,
+            color_id=context["color"].id,
+            started_at=datetime(2026, 7, 11, 8, 0, tzinfo=UTC),
+        ),
+        db,
+    )
+    upsert_body_map_layout(
+        point.id,
+        BodyMapLayoutUpsert(body_view="SIDE", layout_x=0.4, layout_y=0.5),
+        db,
+    )
+    older_measurement = create_quality_measurement(
+        QualityMeasurementCreate(
+            data_no="QM-OLD",
+            production_run_id=older.id,
+            measurement_point_id=point.id,
+            quality_type="ORANGE_PEEL",
+            measured_at=datetime(2026, 7, 10, 9, 0, tzinfo=UTC),
+            metrics=[QualityMetricInput(metric_code="doi", metric_name="DOI", raw_value=70.0)],
+        ),
+        db,
+    )
+    newer_measurement = create_quality_measurement(
+        QualityMeasurementCreate(
+            data_no="QM-NEW",
+            production_run_id=newer.id,
+            measurement_point_id=point.id,
+            quality_type="ORANGE_PEEL",
+            measured_at=datetime(2026, 7, 11, 9, 0, tzinfo=UTC),
+            metrics=[QualityMetricInput(metric_code="doi", metric_name="DOI", raw_value=91.0)],
+        ),
+        db,
+    )
+    mark_verified(db, older_measurement["id"])
+    mark_verified(db, newer_measurement["id"])
+
+    body_map = get_body_map(vehicle_model_id=model.id, body_view="SIDE", db=db)
+    assert body_map.production_run_id == newer.id
+    assert body_map.production_run_no == "RUN-BM-2"
+    mapped = next(item for item in body_map.points if item.measurement_point_id == point.id)
+    orange = next(item for item in mapped.quality_summaries if item.quality_type == "ORANGE_PEEL")
+    assert orange.value == 91.0
+    db.close()
+
+
+def test_body_map_fail_count_only_counts_placed_points() -> None:
+    db = build_session()
+    context = build_body_map_context(db)
+    model = context["model"]
+    part = context["part"]
+    run = context["run"]
+    unplaced = create_measurement_point(
+        MeasurementPointCreate(
+            code="PT-UNPLACED",
+            name="Unplaced Fail",
+            vehicle_model_id=model.id,
+            part_id=part.id,
+            point_type="QUALITY",
+            region="Hood",
+            quality_types=["THICKNESS"],
+        ),
+        db,
+    )
+    upsert_body_map_layout(
+        context["point"].id,
+        BodyMapLayoutUpsert(body_view="SIDE", layout_x=0.3, layout_y=0.4),
+        db,
+    )
+    measurement = create_quality_measurement(
+        QualityMeasurementCreate(
+            data_no="QM-UNPLACED",
+            production_run_id=run.id,
+            measurement_point_id=unplaced.id,
+            quality_type="THICKNESS",
+            measured_at=datetime(2026, 7, 10, 9, 0, tzinfo=UTC),
+            metrics=[
+                QualityMetricInput(
+                    metric_code="thickness_total",
+                    metric_name="总膜厚",
+                    raw_value=10.0,
+                )
+            ],
+        ),
+        db,
+    )
+    mark_verified(db, measurement["id"])
+    body_map = get_body_map(
+        vehicle_model_id=model.id,
+        body_view="SIDE",
+        production_run_id=run.id,
+        db=db,
+    )
+    assert body_map.placed_count == 1
+    unplaced_item = next(
+        item for item in body_map.points if item.measurement_point_id == unplaced.id
+    )
+    assert unplaced_item.layout_x is None
+    placed_fails = sum(
+        1
+        for item in body_map.points
+        if item.layout_x is not None
+        and any(summary.judgement == "FAIL" for summary in item.quality_summaries)
+    )
+    assert body_map.fail_count == placed_fails
+    db.close()
+
+
+def test_body_map_detail_prefers_governed_contribution_and_actuals() -> None:
+    db = build_session()
+    context = build_body_map_context(db)
+    model = context["model"]
+    part = context["part"]
+    run = context["run"]
+    point = context["point"]
+
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-GOV",
+            name="Governed Clearcoat",
+            factory_id=context["factory"].id,
+            process_stage="CLEARCOAT_1",
+            station_code="ST-GOV",
+            station_name="Station Gov",
+        ),
+        db,
+    )
+    version = create_program_version(
+        program.id,
+        SprayProgramVersionCreate(version="V1", vehicle_model_ids=[model.id]),
+        db,
+    )
+    brush = create_brush(version.id, BrushCreate(brush_no="G01", brush_table_no="GT01", part_id=part.id), db)
+    create_brush_parameter(
+        brush.id,
+        BrushParameterCreate(
+            parameter_code="flow",
+            parameter_name="流量",
+            configured_value=300,
+            unit="ml/min",
+        ),
+        db,
+    )
+    upsert_brush_point_contribution(
+        brush.id,
+        point.id,
+        BrushPointContributionUpsert(overlap_ratio=0.1, contribution_weight=0.2),
+        db,
+    )
+    contrib_version = create_contribution_version(
+        PointContributionVersionCreate(
+            program_version_id=version.id,
+            target_family="ORANGE_PEEL",
+            version="CV1",
+            method="EXPERT",
+            status="ACTIVE",
+            approved_by="tester",
+        ),
+        db,
+    )
+    create_contribution_entry(
+        PointContributionEntryCreate(
+            contribution_version_id=contrib_version.id,
+            measurement_point_id=point.id,
+            brush_id=brush.id,
+            overlap_ratio=0.55,
+            contribution_weight=0.8,
+            validation_score=0.9,
+        ),
+        db,
+    )
+    stage = create_production_stage_run(
+        run.id,
+        ProductionStageRunCreate(
+            process_stage="CLEARCOAT_1",
+            program_version_id=version.id,
+            status="COMPLETED",
+        ),
+        db,
+    )
+    create_actual_parameter(
+        stage.id,
+        ActualParameterCreate(
+            brush_id=brush.id,
+            parameter_code="flow",
+            actual_value=312.5,
+            unit="ml/min",
+            sampled_at=datetime(2026, 7, 10, 8, 30, tzinfo=UTC),
+            source_system="TEST",
+        ),
+        db,
+    )
+
+    detail = get_body_map_point_detail(point.id, production_run_id=run.id, db=db)
+    assert len(detail.brush_contributions) == 1
+    item = detail.brush_contributions[0]
+    assert item.contribution_source == "GOVERNED"
+    assert item.brush_no == "G01"
+    assert item.overlap_ratio == 0.55
+    assert item.contribution_weight == 0.8
+    assert item.target_family == "ORANGE_PEEL"
+    assert item.validation_score == 0.9
+    assert item.parameters[0].configured_value == 300
+    assert item.parameters[0].actual_value == 312.5
     db.close()

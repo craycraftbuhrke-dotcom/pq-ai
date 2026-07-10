@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
 from app.models.domain import (
+    ActualParameter,
     Brush,
     BrushParameter,
     BrushPointContribution,
@@ -19,8 +20,11 @@ from app.models.domain import (
     MeasurementPoint,
     MeasurementPointLayout,
     Part,
+    PointContributionEntry,
+    PointContributionVersion,
     ProcessStage,
     ProductionRun,
+    ProductionStageRun,
     QualityMeasurement,
     QualityMetricValue,
     SprayProgram,
@@ -44,6 +48,7 @@ from app.schemas.quality import (
     BodyMapQualitySummary,
     BodyMapResponse,
 )
+from app.services.measurement_reliability import VERIFIED
 from app.services.quality_evaluation import evaluate_quality_measurement
 
 router = APIRouter(prefix="/quality/body-map", tags=["quality-body-map"])
@@ -115,6 +120,23 @@ def _normalize_layout_coords(
     return snapped_x, snapped_y, grid_col, grid_row
 
 
+def _resolve_production_run(
+    db: Session,
+    vehicle_model_id: str,
+    production_run_id: str | None,
+) -> ProductionRun | None:
+    if production_run_id:
+        run = _required(db, ProductionRun, production_run_id, "生产事件")
+        if run.vehicle_model_id != vehicle_model_id:
+            raise HTTPException(status_code=422, detail="生产事件不属于所选车型")
+        return run
+    return db.scalar(
+        select(ProductionRun)
+        .where(ProductionRun.vehicle_model_id == vehicle_model_id)
+        .order_by(ProductionRun.started_at.desc())
+    )
+
+
 def _latest_quality_summaries(
     db: Session,
     point_ids: set[str],
@@ -123,12 +145,31 @@ def _latest_quality_summaries(
 ) -> dict[str, list[BodyMapQualitySummary]]:
     if not point_ids:
         return {}
+    # Overlay only uses VERIFIED measurements so unverified/failed imports never paint teal.
     query = select(QualityMeasurement).where(
         QualityMeasurement.measurement_point_id.in_(point_ids),
         QualityMeasurement.is_valid.is_(True),
+        QualityMeasurement.reliability_status == VERIFIED,
     )
     if production_run_id:
         query = query.where(QualityMeasurement.production_run_id == production_run_id)
+    else:
+        # Without a run scope, refuse cross-run bleed — callers should resolve latest run first.
+        return {
+            point_id: [
+                BodyMapQualitySummary(
+                    quality_type=quality_type,
+                    metric_code=PRIMARY_METRIC_BY_TYPE.get(quality_type),
+                    metric_name=METRIC_NAME_BY_CODE.get(
+                        PRIMARY_METRIC_BY_TYPE.get(quality_type, ""),
+                        PRIMARY_METRIC_BY_TYPE.get(quality_type),
+                    ),
+                    unit=METRIC_UNIT_BY_CODE.get(PRIMARY_METRIC_BY_TYPE.get(quality_type, "")),
+                )
+                for quality_type in QUALITY_TYPE_ORDER
+            ]
+            for point_id in point_ids
+        }
     measurements = list(db.scalars(query.order_by(QualityMeasurement.measured_at.desc())))
 
     latest_by_point_type: dict[tuple[str, str], QualityMeasurement] = {}
@@ -158,6 +199,8 @@ def _latest_quality_summaries(
             judgement = evaluation.get("judgement")
         except Exception:  # noqa: BLE001 - map overlay should not fail on evaluation edge cases
             judgement = None
+        if not measurement.is_valid:
+            judgement = "INVALID"
         result[point_id].append(
             BodyMapQualitySummary(
                 quality_type=quality_type,
@@ -176,6 +219,7 @@ def _latest_quality_summaries(
                 measured_at=measurement.measured_at,
                 data_no=measurement.data_no,
                 judgement=judgement,
+                reliability_status=measurement.reliability_status,
             )
         )
     for point_id in point_ids:
@@ -206,11 +250,242 @@ def _risk_score(summaries: list[BodyMapQualitySummary]) -> float:
     for item in summaries:
         if item.judgement == "FAIL":
             score += 40
+        elif item.judgement == "INVALID":
+            score += 25
         elif item.judgement == "NO_STANDARD":
             score += 10
         elif item.value is None:
             score += 5
     return min(100.0, score)
+
+
+def _parameter_cards(
+    configured: list[BrushParameter],
+    actual_by_code: dict[str, float],
+) -> list[BodyMapBrushParameter]:
+    codes = {item.parameter_code for item in configured} | set(actual_by_code)
+    configured_by_code = {item.parameter_code: item for item in configured}
+    cards: list[BodyMapBrushParameter] = []
+    for code in sorted(codes):
+        conf = configured_by_code.get(code)
+        cards.append(
+            BodyMapBrushParameter(
+                parameter_code=code,
+                parameter_name=conf.parameter_name if conf else code,
+                configured_value=conf.configured_value if conf else None,
+                actual_value=actual_by_code.get(code),
+                unit=conf.unit if conf else "",
+            )
+        )
+    return cards
+
+
+def _brush_contributions_for_point(
+    db: Session,
+    point: MeasurementPoint,
+    *,
+    production_run_id: str | None = None,
+) -> list[BodyMapBrushContribution]:
+    stage_runs: list[ProductionStageRun] = []
+    if production_run_id:
+        stage_runs = list(
+            db.scalars(
+                select(ProductionStageRun).where(
+                    ProductionStageRun.production_run_id == production_run_id
+                )
+            )
+        )
+
+    actual_by_brush_code: dict[tuple[str, str], float] = {}
+    if stage_runs:
+        stage_ids = [item.id for item in stage_runs]
+        for actual in db.scalars(
+            select(ActualParameter).where(
+                ActualParameter.production_stage_run_id.in_(stage_ids),
+                ActualParameter.brush_id.is_not(None),
+            )
+        ):
+            if actual.brush_id:
+                actual_by_brush_code[(actual.brush_id, actual.parameter_code)] = actual.actual_value
+
+    brush_items: list[BodyMapBrushContribution] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+
+    target_families = [
+        family
+        for family in QUALITY_TYPE_ORDER
+        if not point.quality_types or family in set(point.quality_types)
+    ] or list(QUALITY_TYPE_ORDER)
+
+    if stage_runs:
+        for stage_run in stage_runs:
+            for target_family in target_families:
+                contribution_version = db.scalar(
+                    select(PointContributionVersion)
+                    .where(
+                        PointContributionVersion.program_version_id
+                        == stage_run.program_version_id,
+                        PointContributionVersion.target_family == target_family,
+                        PointContributionVersion.status == "ACTIVE",
+                    )
+                    .order_by(PointContributionVersion.approved_at.desc())
+                )
+                if not contribution_version:
+                    continue
+                entries = list(
+                    db.scalars(
+                        select(PointContributionEntry).where(
+                            PointContributionEntry.contribution_version_id
+                            == contribution_version.id,
+                            PointContributionEntry.measurement_point_id == point.id,
+                            PointContributionEntry.brush_id.is_not(None),
+                        )
+                    )
+                )
+                if not entries:
+                    continue
+                brush_ids = {entry.brush_id for entry in entries if entry.brush_id}
+                brushes = {
+                    item.id: item
+                    for item in db.scalars(
+                        select(Brush).where(Brush.id.in_(brush_ids or {"__none__"}))
+                    )
+                }
+                parameters_by_brush: dict[str, list[BrushParameter]] = defaultdict(list)
+                for parameter in db.scalars(
+                    select(BrushParameter)
+                    .where(BrushParameter.brush_id.in_(brush_ids or {"__none__"}))
+                    .order_by(BrushParameter.parameter_code)
+                ):
+                    parameters_by_brush[parameter.brush_id].append(parameter)
+                version = db.get(SprayProgramVersion, stage_run.program_version_id)
+                program = (
+                    db.get(SprayProgram, version.spray_program_id) if version else None
+                )
+                process_stage = program.process_stage if program else stage_run.process_stage
+                for entry in entries:
+                    brush = brushes.get(entry.brush_id or "")
+                    if not brush:
+                        continue
+                    dedupe_key = (brush.id, process_stage, target_family)
+                    if dedupe_key in seen_keys:
+                        continue
+                    seen_keys.add(dedupe_key)
+                    actual_codes = {
+                        code: value
+                        for (brush_id, code), value in actual_by_brush_code.items()
+                        if brush_id == brush.id
+                    }
+                    brush_items.append(
+                        BodyMapBrushContribution(
+                            brush_id=brush.id,
+                            brush_no=brush.brush_no,
+                            brush_table_no=brush.brush_table_no,
+                            process_stage=process_stage,
+                            coating_system=_coating_system(process_stage),
+                            overlap_ratio=entry.overlap_ratio,
+                            contribution_weight=entry.contribution_weight,
+                            source=contribution_version.method,
+                            version=contribution_version.version,
+                            is_approved=True,
+                            contribution_source="GOVERNED",
+                            target_family=target_family,
+                            validation_score=entry.validation_score,
+                            path_segment_id=entry.path_segment_id,
+                            parameters=_parameter_cards(
+                                parameters_by_brush.get(brush.id, []),
+                                actual_codes,
+                            ),
+                        )
+                    )
+
+    if brush_items:
+        brush_items.sort(
+            key=lambda item: (
+                {"MIDCOAT": 0, "BASECOAT": 1, "CLEARCOAT": 2}.get(item.coating_system, 9),
+                item.brush_no,
+                item.target_family or "",
+            )
+        )
+        return brush_items
+
+    # Legacy fallback: approved BrushPointContribution rows for the point.
+    contributions = list(
+        db.scalars(
+            select(BrushPointContribution).where(
+                BrushPointContribution.measurement_point_id == point.id
+            )
+        )
+    )
+    brush_ids = {item.brush_id for item in contributions}
+    brushes = {
+        item.id: item
+        for item in db.scalars(select(Brush).where(Brush.id.in_(brush_ids or {"__none__"})))
+    }
+    version_ids = {brush.program_version_id for brush in brushes.values()}
+    versions = {
+        item.id: item
+        for item in db.scalars(
+            select(SprayProgramVersion).where(
+                SprayProgramVersion.id.in_(version_ids or {"__none__"})
+            )
+        )
+    }
+    program_ids = {version.spray_program_id for version in versions.values()}
+    programs = {
+        item.id: item
+        for item in db.scalars(
+            select(SprayProgram).where(SprayProgram.id.in_(program_ids or {"__none__"}))
+        )
+    }
+    parameters_by_brush: dict[str, list[BrushParameter]] = defaultdict(list)
+    for parameter in db.scalars(
+        select(BrushParameter)
+        .where(BrushParameter.brush_id.in_(brush_ids or {"__none__"}))
+        .order_by(BrushParameter.parameter_code)
+    ):
+        parameters_by_brush[parameter.brush_id].append(parameter)
+
+    for contribution in contributions:
+        brush = brushes.get(contribution.brush_id)
+        if not brush:
+            continue
+        version = versions.get(brush.program_version_id)
+        program = programs.get(version.spray_program_id) if version else None
+        process_stage = program.process_stage if program else "UNKNOWN"
+        actual_codes = {
+            code: value
+            for (brush_id, code), value in actual_by_brush_code.items()
+            if brush_id == brush.id
+        }
+        brush_items.append(
+            BodyMapBrushContribution(
+                brush_id=brush.id,
+                brush_no=brush.brush_no,
+                brush_table_no=brush.brush_table_no,
+                process_stage=process_stage,
+                coating_system=_coating_system(process_stage)
+                if process_stage != "UNKNOWN"
+                else "UNKNOWN",
+                overlap_ratio=contribution.overlap_ratio,
+                contribution_weight=contribution.contribution_weight,
+                source=contribution.source,
+                version=contribution.version,
+                is_approved=contribution.is_approved,
+                contribution_source="LEGACY",
+                parameters=_parameter_cards(
+                    parameters_by_brush.get(brush.id, []),
+                    actual_codes,
+                ),
+            )
+        )
+    brush_items.sort(
+        key=lambda item: (
+            {"MIDCOAT": 0, "BASECOAT": 1, "CLEARCOAT": 2}.get(item.coating_system, 9),
+            item.brush_no,
+        )
+    )
+    return brush_items
 
 
 def _upsert_layout(
@@ -264,10 +539,8 @@ def get_body_map(
 ) -> BodyMapResponse:
     view = _validate_body_view(body_view)
     model = _required(db, VehicleModel, vehicle_model_id, "车型")
-    if production_run_id:
-        run = _required(db, ProductionRun, production_run_id, "生产事件")
-        if run.vehicle_model_id != vehicle_model_id:
-            raise HTTPException(status_code=422, detail="生产事件不属于所选车型")
+    resolved_run = _resolve_production_run(db, vehicle_model_id, production_run_id)
+    resolved_run_id = resolved_run.id if resolved_run else None
     group_point_ids: set[str] = set()
     if measurement_group_id:
         group = _required(db, MeasurementGroup, measurement_group_id, "测量编组")
@@ -309,7 +582,7 @@ def get_body_map(
         )
     }
     summaries = _latest_quality_summaries(
-        db, point_ids, production_run_id=production_run_id
+        db, point_ids, production_run_id=resolved_run_id
     )
 
     items: list[BodyMapPointItem] = []
@@ -342,10 +615,12 @@ def get_body_map(
     group_point_count = (
         sum(1 for item in items if item.in_group) if measurement_group_id else len(items)
     )
+    # Fail count only for placed points — unplaced FAIL must not inflate map stats.
     fail_count = sum(
         1
         for item in items
-        if any(summary.judgement == "FAIL" for summary in item.quality_summaries)
+        if item.layout_x is not None
+        and any(summary.judgement == "FAIL" for summary in item.quality_summaries)
     )
 
     return BodyMapResponse(
@@ -357,7 +632,9 @@ def get_body_map(
         grid_cols=DEFAULT_GRID_COLS,
         grid_rows=DEFAULT_GRID_ROWS,
         measurement_group_id=measurement_group_id,
-        production_run_id=production_run_id,
+        production_run_id=resolved_run_id,
+        production_run_no=resolved_run.run_no if resolved_run else None,
+        quality_scope="VERIFIED",
         placed_count=placed_count,
         group_point_count=group_point_count,
         fail_count=fail_count,
@@ -488,84 +765,13 @@ def get_body_map_point_detail(
 ) -> BodyMapPointDetail:
     point = _required(db, MeasurementPoint, measurement_point_id, "测量点")
     part = db.get(Part, point.part_id)
+    resolved_run = _resolve_production_run(db, point.vehicle_model_id, production_run_id)
+    resolved_run_id = resolved_run.id if resolved_run else None
     summaries = _latest_quality_summaries(
-        db, {point.id}, production_run_id=production_run_id
+        db, {point.id}, production_run_id=resolved_run_id
     ).get(point.id, [])
-
-    contributions = list(
-        db.scalars(
-            select(BrushPointContribution).where(
-                BrushPointContribution.measurement_point_id == point.id
-            )
-        )
-    )
-    brush_ids = {item.brush_id for item in contributions}
-    brushes = {
-        item.id: item
-        for item in db.scalars(select(Brush).where(Brush.id.in_(brush_ids or {"__none__"})))
-    }
-    version_ids = {brush.program_version_id for brush in brushes.values()}
-    versions = {
-        item.id: item
-        for item in db.scalars(
-            select(SprayProgramVersion).where(
-                SprayProgramVersion.id.in_(version_ids or {"__none__"})
-            )
-        )
-    }
-    program_ids = {version.spray_program_id for version in versions.values()}
-    programs = {
-        item.id: item
-        for item in db.scalars(
-            select(SprayProgram).where(SprayProgram.id.in_(program_ids or {"__none__"}))
-        )
-    }
-    parameters_by_brush: dict[str, list[BrushParameter]] = defaultdict(list)
-    for parameter in db.scalars(
-        select(BrushParameter)
-        .where(BrushParameter.brush_id.in_(brush_ids or {"__none__"}))
-        .order_by(BrushParameter.parameter_code)
-    ):
-        parameters_by_brush[parameter.brush_id].append(parameter)
-
-    brush_items: list[BodyMapBrushContribution] = []
-    for contribution in contributions:
-        brush = brushes.get(contribution.brush_id)
-        if not brush:
-            continue
-        version = versions.get(brush.program_version_id)
-        program = programs.get(version.spray_program_id) if version else None
-        process_stage = program.process_stage if program else "UNKNOWN"
-        brush_items.append(
-            BodyMapBrushContribution(
-                brush_id=brush.id,
-                brush_no=brush.brush_no,
-                brush_table_no=brush.brush_table_no,
-                process_stage=process_stage,
-                coating_system=_coating_system(process_stage)
-                if process_stage != "UNKNOWN"
-                else "UNKNOWN",
-                overlap_ratio=contribution.overlap_ratio,
-                contribution_weight=contribution.contribution_weight,
-                source=contribution.source,
-                version=contribution.version,
-                is_approved=contribution.is_approved,
-                parameters=[
-                    BodyMapBrushParameter(
-                        parameter_code=item.parameter_code,
-                        parameter_name=item.parameter_name,
-                        configured_value=item.configured_value,
-                        unit=item.unit,
-                    )
-                    for item in parameters_by_brush.get(brush.id, [])
-                ],
-            )
-        )
-    brush_items.sort(
-        key=lambda item: (
-            {"MIDCOAT": 0, "BASECOAT": 1, "CLEARCOAT": 2}.get(item.coating_system, 9),
-            item.brush_no,
-        )
+    brush_items = _brush_contributions_for_point(
+        db, point, production_run_id=resolved_run_id
     )
 
     return BodyMapPointDetail(

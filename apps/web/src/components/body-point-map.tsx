@@ -34,6 +34,7 @@ type QualitySummary = {
   measured_at?: string | null;
   data_no?: string | null;
   judgement?: string | null;
+  reliability_status?: string | null;
 };
 
 type MapPoint = {
@@ -65,6 +66,8 @@ type BodyMapPayload = {
   grid_rows: number;
   measurement_group_id?: string | null;
   production_run_id?: string | null;
+  production_run_no?: string | null;
+  quality_scope?: string;
   placed_count?: number;
   group_point_count?: number;
   fail_count?: number;
@@ -74,7 +77,8 @@ type BodyMapPayload = {
 type BrushParameter = {
   parameter_code: string;
   parameter_name: string;
-  configured_value: number;
+  configured_value?: number | null;
+  actual_value?: number | null;
   unit: string;
 };
 
@@ -89,6 +93,9 @@ type BrushContribution = {
   source: string;
   version: string;
   is_approved: boolean;
+  contribution_source?: string;
+  target_family?: string | null;
+  validation_score?: number | null;
   parameters: BrushParameter[];
 };
 
@@ -145,6 +152,12 @@ const judgementLabels: Record<string, string> = {
   INVALID: "无效",
 };
 
+const reliabilityLabels: Record<string, string> = {
+  VERIFIED: "已核验",
+  UNVERIFIED: "未核验",
+  FAILED: "核验失败",
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { cache: "no-store", ...init });
   if (response.status === 204) return undefined as T;
@@ -163,22 +176,28 @@ function formatValue(value?: number | null, unit?: string | null): string {
 
 function riskColor(score: number, judgement?: string | null): string {
   if (judgement === "FAIL" || score >= 40) return "var(--red)";
+  if (judgement === "INVALID" || score >= 25) return "var(--amber)";
   if (judgement === "NO_STANDARD" || score >= 10) return "var(--amber)";
-  if (judgement === "PASS" || score > 0) return "var(--teal)";
+  if (judgement === "PASS") return "var(--teal)";
   return "var(--text-soft)";
 }
 
 function pointColor(point: MapPoint, overlay: OverlayMode): string {
   if (overlay === "RISK") {
-    const primary = point.quality_summaries.find((item) => item.value != null) ?? point.quality_summaries[0];
+    const primary =
+      point.quality_summaries.find((item) => item.judgement === "FAIL") ??
+      point.quality_summaries.find((item) => item.judgement === "PASS") ??
+      point.quality_summaries.find((item) => item.value != null) ??
+      point.quality_summaries[0];
     return riskColor(point.risk_score, primary?.judgement);
   }
   const summary = point.quality_summaries.find((item) => item.quality_type === overlay);
   if (!summary) return "var(--text-soft)";
   if (summary.judgement === "FAIL") return "var(--red)";
+  if (summary.judgement === "INVALID") return "var(--amber)";
   if (summary.judgement === "PASS") return "var(--teal)";
   if (summary.judgement === "NO_STANDARD") return "var(--amber)";
-  if (summary.value != null) return "var(--teal)";
+  // Unverified / empty values stay soft — never teal from raw presence alone.
   return "var(--text-soft)";
 }
 
@@ -298,12 +317,13 @@ export function BodyPointMap() {
   }, [vehicleModelId, bodyView, groupId, runId]);
 
   const loadDetail = useCallback(
-    async (pointId: string) => {
+    async (pointId: string, scopedRunId?: string) => {
       setSelectedPointId(pointId);
       setDetailLoading(true);
       try {
         const params = new URLSearchParams();
-        if (runId) params.set("production_run_id", runId);
+        const effectiveRunId = scopedRunId || runId;
+        if (effectiveRunId) params.set("production_run_id", effectiveRunId);
         const query = params.toString();
         const payload = await request<PointDetail>(
           `/api/quality/body-map/points/${pointId}/detail${query ? `?${query}` : ""}`,
@@ -487,7 +507,7 @@ export function BodyPointMap() {
 
   function onPointPointerDown(event: ReactPointerEvent<HTMLButtonElement>, point: MapPoint) {
     event.stopPropagation();
-    void loadDetail(point.measurement_point_id);
+    void loadDetail(point.measurement_point_id, runId || mapData?.production_run_id || undefined);
     if (!editMode) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { pointId: point.measurement_point_id, pointerId: event.pointerId, moved: false };
@@ -563,292 +583,385 @@ export function BodyPointMap() {
         </div>
       </div>
 
-      <div className="body-map-toolbar">
-        <label>
-          <span>车型</span>
-          <select value={vehicleModelId} onChange={(event) => setVehicleModelId(event.target.value)}>
-            <option value="">请选择车型</option>
-            {models.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.code} / {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="body-map-view-toggle" role="group" aria-label="车身视图">
-          <button
-            type="button"
-            className={bodyView === "SIDE" ? "is-active" : ""}
-            onClick={() => setBodyView("SIDE")}
-          >
-            侧视
-          </button>
-          <button type="button" className={bodyView === "TOP" ? "is-active" : ""} onClick={() => setBodyView("TOP")}>
-            俯视
-          </button>
-        </div>
-        <label>
-          <span>测量编组</span>
-          <select value={groupId} onChange={(event) => setGroupId(event.target.value)}>
-            <option value="">全部点位</option>
-            {filteredGroups.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.code} / {item.name}
-                {item.quality_type ? ` · ${qualityLabels[item.quality_type] ?? item.quality_type}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>生产事件</span>
-          <select value={runId} onChange={(event) => setRunId(event.target.value)}>
-            <option value="">最新质量数据</option>
-            {filteredRuns.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.run_no}
-                {item.body_no ? ` · ${item.body_no}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>着色</span>
-          <select value={overlayMode} onChange={(event) => setOverlayMode(event.target.value as OverlayMode)}>
-            <option value="RISK">综合风险</option>
-            <option value="THICKNESS">膜厚</option>
-            <option value="COLOR_DIFFERENCE">色差</option>
-            <option value="ORANGE_PEEL">橘皮</option>
-          </select>
-        </label>
-        <label className="body-map-check">
-          <input type="checkbox" checked={showUngrouped} onChange={(event) => setShowUngrouped(event.target.checked)} />
-          <span>显示编组外点位</span>
-        </label>
-      </div>
+      <div className="body-map-shell">
+        {mapData ? (
+          <section className="quality-analytics-stat-grid body-map-stat-grid">
+            <article>
+              <span>已落图</span>
+              <strong>{mapData.placed_count ?? visiblePoints.length}</strong>
+              <small>当前视图 ACTIVE 布局</small>
+            </article>
+            <article>
+              <span>编组内</span>
+              <strong>{mapData.group_point_count ?? mapData.points.length}</strong>
+              <small>{groupId ? "所选测量编组" : "全部质量点位"}</small>
+            </article>
+            <article className={(mapData.fail_count ?? 0) > 0 ? "stat-alert" : ""}>
+              <span>超差（已落图）</span>
+              <strong>{mapData.fail_count ?? 0}</strong>
+              <small>仅统计 VERIFIED 判定</small>
+            </article>
+            <article>
+              <span>未落图</span>
+              <strong>{unplaced.length}</strong>
+              <small>可进入编辑后放置</small>
+            </article>
+            <article className="body-map-stat-scope">
+              <span>质量范围</span>
+              <strong className="mono">
+                {mapData.production_run_no ?? "无生产事件"}
+              </strong>
+              <small>{mapData.quality_scope ?? "VERIFIED"} · 自动/指定生产事件</small>
+            </article>
+          </section>
+        ) : null}
 
-      {mapData ? (
-        <div className="body-map-stats">
-          <span>
-            已落图 <b>{mapData.placed_count ?? visiblePoints.length}</b>
-          </span>
-          <span>
-            编组内 <b>{mapData.group_point_count ?? mapData.points.length}</b>
-          </span>
-          <span>
-            超差 <b>{mapData.fail_count ?? 0}</b>
-          </span>
-          <span>
-            未落图 <b>{unplaced.length}</b>
-          </span>
-        </div>
-      ) : null}
-
-      <div className="body-map-legend">
-        <span>
-          <i style={{ background: "var(--teal)" }} />
-          合格/有值
-        </span>
-        <span>
-          <i style={{ background: "var(--amber)" }} />
-          无标准
-        </span>
-        <span>
-          <i style={{ background: "var(--red)" }} />
-          超差
-        </span>
-        <span>
-          <i style={{ background: "var(--text-soft)" }} />
-          无数据
-        </span>
-      </div>
-
-      {error ? <div className="form-error">{error}</div> : null}
-      {message ? <div className="form-success">{message}</div> : null}
-      {pendingPlaceId ? (
-        <div className="body-map-hint is-active">
-          <MapPinned />
-          放置模式：在白车身上点击目标网格，将未落图点位放到该位置。
-          <button type="button" className="button button-secondary" onClick={() => setPendingPlaceId("")}>
-            取消
-          </button>
-        </div>
-      ) : null}
-
-      {!vehicleModelId ? (
-        <div className="program-empty large-empty">
-          <MapPinned />
-          请先选择车型以加载白车身点位图。
-        </div>
-      ) : (
-        <div className="body-map-layout">
-          <div className="body-map-stage-wrap">
-            <div
-              ref={stageRef}
-              className={`body-map-stage ${editMode || pendingPlaceId ? "is-editing" : ""}`}
-              style={{ "--grid-cols": String(gridCols), "--grid-rows": String(gridRows) } as CSSProperties}
-              onPointerDown={onStagePointerDown}
-            >
-              <img className="body-map-bg" src={backgroundUrl} alt={`${bodyView === "TOP" ? "俯视" : "侧视"}白车身`} draggable={false} />
-              <div className="body-map-grid" aria-hidden="true" />
-              {visiblePoints.map((point) => (
+        <div className="governance-scope-bar body-map-scope-bar">
+          <div>
+            <strong>工作范围</strong>
+            <span>先选车型与视图，再按编组 / 生产事件过滤；着色仅基于已核验质量数据。</span>
+          </div>
+          <div className="governance-scope-fields body-map-scope-fields">
+            <label className="form-field">
+              <span>车型</span>
+              <select value={vehicleModelId} onChange={(event) => setVehicleModelId(event.target.value)}>
+                <option value="">请选择车型</option>
+                {models.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.code} / {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="form-field">
+              <span>车身视图</span>
+              <div className="body-map-view-toggle" role="group" aria-label="车身视图">
                 <button
-                  key={point.measurement_point_id}
                   type="button"
-                  className={`body-map-point ${selectedPointId === point.measurement_point_id ? "is-selected" : ""} ${point.in_group ? "in-group" : "out-group"}`}
-                  style={{
-                    left: `${(point.layout_x ?? 0) * 100}%`,
-                    top: `${(point.layout_y ?? 0) * 100}%`,
-                    ["--point-color" as string]: pointColor(point, overlayMode),
-                  }}
-                  title={`${point.code} / ${point.name}`}
-                  onPointerDown={(event) => onPointPointerDown(event, point)}
-                  onPointerMove={onPointPointerMove}
-                  onPointerUp={(event) => void onPointPointerUp(event)}
+                  className={bodyView === "SIDE" ? "is-active" : ""}
+                  onClick={() => setBodyView("SIDE")}
                 >
-                  <span>{point.code}</span>
+                  侧视
                 </button>
-              ))}
-              {loading ? (
-                <div className="body-map-loading">
-                  <LoaderCircle className="spin" />
-                  正在加载点位…
-                </div>
-              ) : null}
-            </div>
-            {editMode ? (
-              <div className="body-map-hint">
-                <Plus />
-                编辑模式：拖拽点位吸附到网格；点击空白格新建测量点。图上「移除」仅停用当前视图布局。
+                <button
+                  type="button"
+                  className={bodyView === "TOP" ? "is-active" : ""}
+                  onClick={() => setBodyView("TOP")}
+                >
+                  俯视
+                </button>
               </div>
-            ) : null}
-            {(editMode || unplaced.length > 0) && unplaced.length ? (
-              <div className="body-map-unplaced">
-                <strong>未落图点位（{unplaced.length}）</strong>
-                <div className="body-map-unplaced-list">
-                  {unplaced.map((point) => (
+            </div>
+            <label className="form-field">
+              <span>测量编组</span>
+              <select value={groupId} onChange={(event) => setGroupId(event.target.value)}>
+                <option value="">全部点位</option>
+                {filteredGroups.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.code} / {item.name}
+                    {item.quality_type ? ` · ${qualityLabels[item.quality_type] ?? item.quality_type}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>生产事件</span>
+              <select value={runId} onChange={(event) => setRunId(event.target.value)}>
+                <option value="">最新生产事件（自动）</option>
+                {filteredRuns.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.run_no}
+                    {item.body_no ? ` · ${item.body_no}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>着色</span>
+              <select value={overlayMode} onChange={(event) => setOverlayMode(event.target.value as OverlayMode)}>
+                <option value="RISK">综合风险</option>
+                <option value="THICKNESS">膜厚</option>
+                <option value="COLOR_DIFFERENCE">色差</option>
+                <option value="ORANGE_PEEL">橘皮</option>
+              </select>
+            </label>
+            <label className="governance-chip body-map-check-chip">
+              <input
+                type="checkbox"
+                checked={showUngrouped}
+                onChange={(event) => setShowUngrouped(event.target.checked)}
+              />
+              显示编组外点位
+            </label>
+          </div>
+        </div>
+
+        <div className="body-map-legend">
+          <span className="body-map-legend-label">图例</span>
+          <span className="body-map-legend-item">
+            <i style={{ background: "var(--teal)" }} />
+            合格（已核验）
+          </span>
+          <span className="body-map-legend-item">
+            <i style={{ background: "var(--amber)" }} />
+            无标准 / 无效
+          </span>
+          <span className="body-map-legend-item">
+            <i style={{ background: "var(--red)" }} />
+            超差
+          </span>
+          <span className="body-map-legend-item">
+            <i style={{ background: "var(--text-muted)" }} />
+            无已核验数据
+          </span>
+        </div>
+
+        {error ? <div className="form-error">{error}</div> : null}
+        {message ? <div className="form-success">{message}</div> : null}
+        {pendingPlaceId ? (
+          <div className="body-map-hint is-active">
+            <div className="body-map-hint-copy">
+              <MapPinned />
+              <span>放置模式：在白车身上点击目标网格，将未落图点位放到该位置。</span>
+            </div>
+            <button type="button" className="button button-secondary" onClick={() => setPendingPlaceId("")}>
+              取消
+            </button>
+          </div>
+        ) : null}
+
+        {!vehicleModelId ? (
+          <div className="program-empty large-empty body-map-empty">
+            <MapPinned />
+            请先选择车型以加载白车身点位图。
+          </div>
+        ) : (
+          <div className="body-map-layout">
+            <div className="body-map-stage-wrap">
+              <div className="body-map-stage-card">
+                <div className="body-map-stage-meta">
+                  <div>
+                    <span className="eyebrow">{bodyView === "TOP" ? "俯视" : "侧视"}白车身</span>
+                    <strong>
+                      {mapData?.vehicle_model_code ?? "—"} · {mapData?.vehicle_model_name ?? "加载中"}
+                    </strong>
+                  </div>
+                  <small className="mono">
+                    网格 {gridCols}×{gridRows}
+                    {editMode ? " · 编辑中" : ""}
+                  </small>
+                </div>
+                <div
+                  ref={stageRef}
+                  className={`body-map-stage ${editMode || pendingPlaceId ? "is-editing" : ""}`}
+                  style={{ "--grid-cols": String(gridCols), "--grid-rows": String(gridRows) } as CSSProperties}
+                  onPointerDown={onStagePointerDown}
+                >
+                  <img
+                    className="body-map-bg"
+                    src={backgroundUrl}
+                    alt={`${bodyView === "TOP" ? "俯视" : "侧视"}白车身`}
+                    draggable={false}
+                  />
+                  <div className="body-map-grid" aria-hidden="true" />
+                  {visiblePoints.map((point) => (
                     <button
                       key={point.measurement_point_id}
                       type="button"
-                      className={`button button-secondary ${pendingPlaceId === point.measurement_point_id ? "is-pending" : ""}`}
-                      onClick={() => {
-                        setEditMode(true);
-                        setPendingPlaceId(point.measurement_point_id);
-                        setMessage(`请在图上点击放置 ${point.code}`);
+                      className={`body-map-point ${selectedPointId === point.measurement_point_id ? "is-selected" : ""} ${point.in_group ? "in-group" : "out-group"}`}
+                      style={{
+                        left: `${(point.layout_x ?? 0) * 100}%`,
+                        top: `${(point.layout_y ?? 0) * 100}%`,
+                        ["--point-color" as string]: pointColor(point, overlayMode),
                       }}
+                      title={`${point.code} / ${point.name}`}
+                      onPointerDown={(event) => onPointPointerDown(event, point)}
+                      onPointerMove={onPointPointerMove}
+                      onPointerUp={(event) => void onPointPointerUp(event)}
                     >
-                      放置 {point.code}
+                      <span>{point.code}</span>
                     </button>
                   ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <aside className="body-map-detail">
-            {!selectedPointId ? (
-              <div className="program-empty">
-                <MapPinned />
-                点击图上点位查看质量与刷子参数。
-              </div>
-            ) : detailLoading || !detail ? (
-              <div className="program-empty">
-                <LoaderCircle className="spin" />
-                正在加载点位详情…
-              </div>
-            ) : (
-              <>
-                <div className="body-map-detail-head">
-                  <div>
-                    <span className="eyebrow">测量点</span>
-                    <h4>
-                      {detail.code} · {detail.name}
-                    </h4>
-                    <small>
-                      {[detail.part_code, detail.part_name, detail.region].filter(Boolean).join(" · ") || "未标注零件/区域"}
-                    </small>
-                  </div>
-                  {editMode ? (
-                    <button
-                      className="button button-secondary"
-                      type="button"
-                      disabled={submitting}
-                      onClick={() => {
-                        const point = mapData?.points.find(
-                          (item) => item.measurement_point_id === detail.measurement_point_id,
-                        );
-                        if (point) void deactivatePoint(point);
-                      }}
-                    >
-                      <X />
-                      从图移除
-                    </button>
+                  {loading ? (
+                    <div className="body-map-loading">
+                      <LoaderCircle className="spin" />
+                      正在加载点位…
+                    </div>
                   ) : null}
                 </div>
-
-                <div className="body-map-quality-grid">
-                  {detail.quality_summaries.map((item) => (
-                    <article key={item.quality_type} data-judgement={item.judgement ?? "EMPTY"}>
-                      <span>{qualityLabels[item.quality_type] ?? item.quality_type}</span>
-                      <strong>{formatValue(item.value, item.unit)}</strong>
-                      <small>
-                        {item.metric_name ?? item.metric_code ?? "—"}
-                        {item.judgement ? ` · ${judgementLabels[item.judgement] ?? item.judgement}` : " · 无数据"}
-                      </small>
-                      {item.measured_at ? (
-                        <small>{new Date(item.measured_at).toLocaleString("zh-CN", { hour12: false })}</small>
-                      ) : null}
-                    </article>
-                  ))}
+              </div>
+              {editMode ? (
+                <div className="body-map-hint">
+                  <Plus />
+                  <span>编辑模式：拖拽点位吸附到网格；点击空白格新建测量点。图上「移除」仅停用当前视图布局。</span>
                 </div>
-
-                <div className="body-map-brush-block">
-                  <div className="program-subheading compact">
-                    <div>
-                      <span className="eyebrow">喷涂关联</span>
-                      <h4>刷子号与参数</h4>
-                    </div>
+              ) : null}
+              {(editMode || unplaced.length > 0) && unplaced.length ? (
+                <div className="body-map-unplaced">
+                  <div className="body-map-unplaced-head">
+                    <strong>未落图点位</strong>
+                    <span>{unplaced.length}</span>
                   </div>
-                  {!detail.brush_contributions.length ? (
-                    <div className="program-empty">暂无点位贡献；请在工艺管理中维护刷子与点位贡献。</div>
-                  ) : (
-                    detail.brush_contributions.map((brush) => (
-                      <div className="body-map-brush-card" key={`${brush.brush_id}-${brush.process_stage}`}>
-                        <div className="body-map-brush-head">
-                          <strong>
-                            {coatingLabels[brush.coating_system] ?? brush.coating_system} · {brush.brush_no}
-                          </strong>
-                          <small>
-                            {brush.process_stage} · 表 {brush.brush_table_no} · 重叠{" "}
-                            {(brush.overlap_ratio * 100).toFixed(0)}% · 权重 {(brush.contribution_weight * 100).toFixed(0)}%
-                            {brush.is_approved ? " · 已审批" : " · 待审批"}
-                          </small>
-                        </div>
-                        {brush.parameters.length ? (
-                          <div className="compact-table">
-                            {brush.parameters.map((parameter) => (
-                              <div className="compact-row" key={parameter.parameter_code}>
-                                <span>
-                                  <strong>{parameter.parameter_name}</strong>
-                                  <small>{parameter.parameter_code}</small>
-                                </span>
-                                <span className="mono">
-                                  {parameter.configured_value} {parameter.unit}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <small className="muted">该刷子暂无配置参数</small>
-                        )}
-                      </div>
-                    ))
-                  )}
+                  <div className="body-map-unplaced-list">
+                    {unplaced.map((point) => (
+                      <button
+                        key={point.measurement_point_id}
+                        type="button"
+                        className={`button button-secondary ${pendingPlaceId === point.measurement_point_id ? "is-pending" : ""}`}
+                        onClick={() => {
+                          setEditMode(true);
+                          setPendingPlaceId(point.measurement_point_id);
+                          setMessage(`请在图上点击放置 ${point.code}`);
+                        }}
+                      >
+                        放置 {point.code}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </>
-            )}
-          </aside>
-        </div>
-      )}
+              ) : null}
+            </div>
+
+            <aside className="body-map-detail">
+              {!selectedPointId ? (
+                <div className="program-empty body-map-detail-empty">
+                  <MapPinned />
+                  点击图上点位查看质量与刷子参数。
+                </div>
+              ) : detailLoading || !detail ? (
+                <div className="program-empty body-map-detail-empty">
+                  <LoaderCircle className="spin" />
+                  正在加载点位详情…
+                </div>
+              ) : (
+                <>
+                  <div className="body-map-detail-head">
+                    <div>
+                      <span className="eyebrow">测量点</span>
+                      <h4>
+                        {detail.code} · {detail.name}
+                      </h4>
+                      <small>
+                        {[detail.part_code, detail.part_name, detail.region].filter(Boolean).join(" · ") ||
+                          "未标注零件/区域"}
+                      </small>
+                    </div>
+                    {editMode ? (
+                      <button
+                        className="button button-secondary"
+                        type="button"
+                        disabled={submitting}
+                        onClick={() => {
+                          const point = mapData?.points.find(
+                            (item) => item.measurement_point_id === detail.measurement_point_id,
+                          );
+                          if (point) void deactivatePoint(point);
+                        }}
+                      >
+                        <X />
+                        从图移除
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="body-map-quality-grid">
+                    {detail.quality_summaries.map((item) => (
+                      <article key={item.quality_type} data-judgement={item.judgement ?? "EMPTY"}>
+                        <span>{qualityLabels[item.quality_type] ?? item.quality_type}</span>
+                        <strong className="mono">{formatValue(item.value, item.unit)}</strong>
+                        <small>
+                          {item.metric_name ?? item.metric_code ?? "—"}
+                          {item.judgement
+                            ? ` · ${judgementLabels[item.judgement] ?? item.judgement}`
+                            : " · 无已核验数据"}
+                        </small>
+                        {item.reliability_status ? (
+                          <span
+                            className={`body-map-reliability reliability-${item.reliability_status.toLowerCase()}`}
+                          >
+                            {reliabilityLabels[item.reliability_status] ?? item.reliability_status}
+                          </span>
+                        ) : null}
+                        {item.measured_at ? (
+                          <small className="mono">
+                            {new Date(item.measured_at).toLocaleString("zh-CN", { hour12: false })}
+                          </small>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+
+                  <div className="body-map-brush-block">
+                    <div className="program-subheading compact">
+                      <div>
+                        <span className="eyebrow">喷涂关联</span>
+                        <h4>刷子号与参数</h4>
+                      </div>
+                    </div>
+                    {!detail.brush_contributions.length ? (
+                      <div className="program-empty">
+                        暂无点位贡献；请在工艺管理中维护 ACTIVE 贡献版本或遗留刷子贡献。
+                      </div>
+                    ) : (
+                      detail.brush_contributions.map((brush) => (
+                        <div
+                          className="body-map-brush-card"
+                          key={`${brush.brush_id}-${brush.process_stage}-${brush.target_family ?? brush.version}`}
+                        >
+                          <div className="body-map-brush-head">
+                            <div className="body-map-brush-title">
+                              <strong>
+                                {coatingLabels[brush.coating_system] ?? brush.coating_system} · {brush.brush_no}
+                              </strong>
+                              <span
+                                className={`status-badge ${brush.contribution_source === "GOVERNED" ? "" : "status-muted"}`}
+                              >
+                                {brush.contribution_source === "GOVERNED" ? "治理贡献" : "遗留贡献"}
+                              </span>
+                            </div>
+                            <small>
+                              {brush.process_stage} · 表 {brush.brush_table_no} · 重叠{" "}
+                              {(brush.overlap_ratio * 100).toFixed(0)}% · 权重{" "}
+                              {(brush.contribution_weight * 100).toFixed(0)}%
+                              {brush.target_family
+                                ? ` · ${qualityLabels[brush.target_family] ?? brush.target_family}`
+                                : ""}
+                              {brush.is_approved ? " · 已审批" : " · 待审批"}
+                            </small>
+                          </div>
+                          {brush.parameters.length ? (
+                            <div className="body-map-param-table">
+                              {brush.parameters.map((parameter) => (
+                                <div className="body-map-param-row" key={parameter.parameter_code}>
+                                  <span>
+                                    <strong>{parameter.parameter_name}</strong>
+                                    <small className="mono">{parameter.parameter_code}</small>
+                                  </span>
+                                  <span className="mono">
+                                    <em>设定</em> {formatValue(parameter.configured_value, parameter.unit)}
+                                  </span>
+                                  <span className="mono">
+                                    <em>实绩</em>{" "}
+                                    {parameter.actual_value != null
+                                      ? formatValue(parameter.actual_value, parameter.unit)
+                                      : "—"}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <small className="muted">该刷子暂无配置参数</small>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
+            </aside>
+          </div>
+        )}
+      </div>
 
       {createDraft ? (
         <ModalShell
