@@ -229,6 +229,26 @@ class MeasurementPoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_match_point: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
+class MeasurementPointLayout(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Normalized body-map placement for a measurement point on TOP or SIDE view."""
+
+    __tablename__ = "measurement_point_layout"
+    __table_args__ = (
+        UniqueConstraint("measurement_point_id", "body_view", name="uk_point_layout_view"),
+        Index("idx_point_layout_view_status", "body_view", "row_status"),
+        CheckConstraint("layout_x >= 0 AND layout_x <= 1", name="ck_point_layout_x"),
+        CheckConstraint("layout_y >= 0 AND layout_y <= 1", name="ck_point_layout_y"),
+    )
+
+    measurement_point_id: Mapped[str] = logical_fk("measurement_point.id", nullable=False)
+    body_view: Mapped[str] = mapped_column(String(16), nullable=False)
+    layout_x: Mapped[float] = mapped_column(Float, nullable=False)
+    layout_y: Mapped[float] = mapped_column(Float, nullable=False)
+    grid_col: Mapped[int | None] = mapped_column(Integer)
+    grid_row: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
+
+
 class MeasurementGroup(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "measurement_group"
     __table_args__ = (

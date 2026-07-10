@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     ai,
+    body_map,
     bulk,
     dashboard,
     engineering,
@@ -29,6 +30,7 @@ api_router.include_router(process.router)
 api_router.include_router(material_governance.router)
 api_router.include_router(robot_governance.router)
 api_router.include_router(quality.router)
+api_router.include_router(body_map.router)
 api_router.include_router(measurement_governance.router)
 api_router.include_router(features.router)
 api_router.include_router(modeling.router)

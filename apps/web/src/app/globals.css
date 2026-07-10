@@ -6612,3 +6612,321 @@ button.message-banner {
     grid-template-columns: 1fr;
   }
 }
+
+/* Body point map (quality hub) */
+.body-map-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.body-map-toolbar {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.body-map-toolbar label {
+  display: grid;
+  gap: 6px;
+}
+
+.body-map-toolbar span {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.body-map-toolbar select {
+  min-height: 36px;
+}
+
+.body-map-view-toggle {
+  display: inline-flex;
+  gap: 0;
+  min-height: 36px;
+}
+
+.body-map-view-toggle button {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text);
+  cursor: pointer;
+  min-width: 72px;
+  padding: 8px 12px;
+}
+
+.body-map-view-toggle button:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.body-map-view-toggle button:last-child {
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+}
+
+.body-map-view-toggle button.is-active {
+  background: color-mix(in srgb, var(--teal) 16%, var(--surface));
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+  font-weight: 600;
+}
+
+.body-map-check {
+  align-items: center;
+  display: flex !important;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.body-map-stats,
+.body-map-legend {
+  align-items: center;
+  color: var(--text-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  font-size: 13px;
+}
+
+.body-map-stats b {
+  color: var(--text);
+}
+
+.body-map-legend i {
+  border-radius: 2px;
+  display: inline-block;
+  height: 10px;
+  margin-right: 6px;
+  vertical-align: middle;
+  width: 10px;
+}
+
+.body-map-hint.is-active {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.body-map-unplaced-list .button.is-pending {
+  border-color: color-mix(in srgb, var(--teal) 50%, var(--line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--teal) 35%, transparent);
+}
+
+.body-map-layout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
+}
+
+.body-map-stage-wrap {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.body-map-stage {
+  background-color: #f7f7f7;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  line-height: 0;
+  overflow: hidden;
+  position: relative;
+  touch-action: none;
+  user-select: none;
+  width: 100%;
+}
+
+.body-map-stage.is-editing {
+  cursor: crosshair;
+}
+
+.body-map-bg {
+  display: block;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+  width: 100%;
+}
+
+.body-map-grid {
+  background-image:
+    linear-gradient(to right, rgba(80, 80, 80, 0.18) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(80, 80, 80, 0.18) 1px, transparent 1px);
+  background-size: calc(100% / var(--grid-cols, 48)) calc(100% / var(--grid-rows, 24));
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.body-map-point {
+  align-items: center;
+  background: color-mix(in srgb, var(--point-color, var(--teal)) 88%, white);
+  border: 1px solid color-mix(in srgb, var(--point-color, var(--teal)) 55%, #222);
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  color: #111;
+  cursor: pointer;
+  display: grid;
+  font-size: 10px;
+  font-weight: 700;
+  height: 18px;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 3px;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+
+.body-map-point.out-group {
+  opacity: 0.45;
+}
+
+.body-map-point.is-selected {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  z-index: 3;
+}
+
+.body-map-loading {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-soft);
+  display: flex;
+  gap: 8px;
+  inset: 0;
+  justify-content: center;
+  position: absolute;
+  z-index: 4;
+}
+
+.body-map-hint,
+.body-map-unplaced {
+  align-items: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-soft);
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.body-map-unplaced {
+  flex-direction: column;
+}
+
+.body-map-unplaced-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.body-map-detail {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  gap: 14px;
+  min-height: 420px;
+  padding: 14px;
+}
+
+.body-map-detail-head {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.body-map-detail-head h4 {
+  margin: 4px 0;
+}
+
+.body-map-quality-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.body-map-quality-grid article {
+  background: color-mix(in srgb, var(--surface) 88%, var(--line));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.body-map-quality-grid article[data-judgement="FAIL"] {
+  border-color: color-mix(in srgb, var(--red) 45%, var(--line));
+}
+
+.body-map-quality-grid article[data-judgement="PASS"] {
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+}
+
+.body-map-quality-grid article[data-judgement="NO_STANDARD"] {
+  border-color: color-mix(in srgb, var(--amber) 45%, var(--line));
+}
+
+.body-map-quality-grid span {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.body-map-quality-grid strong {
+  font-size: 18px;
+}
+
+.body-map-brush-block {
+  display: grid;
+  gap: 10px;
+}
+
+.body-map-brush-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.body-map-brush-head {
+  display: grid;
+  gap: 2px;
+}
+
+.body-map-brush-head small,
+.body-map-detail small.muted,
+.program-subheading.compact h4 {
+  color: var(--text-soft);
+}
+
+.program-subheading.compact {
+  margin: 0;
+}
+
+.form-success {
+  background: color-mix(in srgb, var(--teal) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal) 35%, var(--line));
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+}
+
+.form-error {
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 35%, var(--line));
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+}
+
+@media (max-width: 1100px) {
+  .body-map-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .body-map-quality-grid {
+    grid-template-columns: 1fr;
+  }
+}

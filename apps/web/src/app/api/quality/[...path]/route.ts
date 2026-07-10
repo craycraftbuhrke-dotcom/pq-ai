@@ -16,6 +16,7 @@ async function proxy(request: Request, context: Context) {
       "standards",
       "metric-definitions",
       "governance",
+      "body-map",
     ].includes(path[0])
   ) {
     return NextResponse.json({ error: "不支持的质量数据接口" }, { status: 404 });

@@ -148,6 +148,7 @@ export const domainPortalCards: readonly DomainPortalCard[] = [
       { href: "/quality?tab=overview", label: "概览与 SPC" },
       { href: "/quality?tab=upload", label: "批量上传" },
       { href: "/quality?tab=measurements", label: "查看与判定" },
+      { href: "/quality?tab=body-map", label: "车身点位图" },
     ],
   },
   {

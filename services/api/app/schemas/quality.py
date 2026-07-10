@@ -418,3 +418,118 @@ class QualityAnalytics(BaseModel):
     data_quality: QualityDataQuality
     series: list[QualityAnalyticsSeriesPoint]
     point_risks: list[QualityPointRisk]
+
+
+class BodyMapLayoutUpsert(BaseModel):
+    body_view: str = Field(pattern="^(TOP|SIDE)$")
+    layout_x: float = Field(ge=0, le=1)
+    layout_y: float = Field(ge=0, le=1)
+    grid_col: int | None = Field(default=None, ge=0)
+    grid_row: int | None = Field(default=None, ge=0)
+
+
+class BodyMapLayoutRead(BodyMapLayoutUpsert, ResourceRead):
+    measurement_point_id: str
+    status: str
+
+
+class BodyMapPointCreate(BaseModel):
+    vehicle_model_id: str
+    body_view: str = Field(pattern="^(TOP|SIDE)$")
+    layout_x: float = Field(ge=0, le=1)
+    layout_y: float = Field(ge=0, le=1)
+    grid_col: int | None = Field(default=None, ge=0)
+    grid_row: int | None = Field(default=None, ge=0)
+    code: str = Field(min_length=1, max_length=48)
+    name: str = Field(min_length=1, max_length=120)
+    part_id: str
+    region: str | None = Field(default=None, max_length=80)
+    quality_types: list[str] = Field(
+        default_factory=lambda: ["ORANGE_PEEL", "COLOR_DIFFERENCE", "THICKNESS"]
+    )
+    measurement_group_id: str | None = None
+    point_type: str = Field(default="QUALITY", max_length=32)
+
+
+class BodyMapLayoutDeactivate(BaseModel):
+    body_view: str = Field(pattern="^(TOP|SIDE)$")
+
+
+class BodyMapQualitySummary(BaseModel):
+    quality_type: str
+    metric_code: str | None = None
+    metric_name: str | None = None
+    value: float | None = None
+    unit: str | None = None
+    measured_at: datetime | None = None
+    data_no: str | None = None
+    judgement: str | None = None
+
+
+class BodyMapPointItem(BaseModel):
+    measurement_point_id: str
+    layout_id: str | None = None
+    code: str
+    name: str
+    part_id: str
+    part_code: str | None = None
+    part_name: str | None = None
+    region: str | None = None
+    quality_types: list[str] = Field(default_factory=list)
+    layout_x: float | None = None
+    layout_y: float | None = None
+    grid_col: int | None = None
+    grid_row: int | None = None
+    in_group: bool = False
+    quality_summaries: list[BodyMapQualitySummary] = Field(default_factory=list)
+    risk_score: float = 0
+
+
+class BodyMapResponse(BaseModel):
+    vehicle_model_id: str
+    vehicle_model_code: str
+    vehicle_model_name: str
+    body_view: str
+    background_image_url: str
+    grid_cols: int
+    grid_rows: int
+    measurement_group_id: str | None = None
+    production_run_id: str | None = None
+    placed_count: int = 0
+    group_point_count: int = 0
+    fail_count: int = 0
+    points: list[BodyMapPointItem]
+
+
+class BodyMapBrushParameter(BaseModel):
+    parameter_code: str
+    parameter_name: str
+    configured_value: float
+    unit: str
+
+
+class BodyMapBrushContribution(BaseModel):
+    brush_id: str
+    brush_no: str
+    brush_table_no: str
+    process_stage: str
+    coating_system: str
+    overlap_ratio: float
+    contribution_weight: float
+    source: str
+    version: str
+    is_approved: bool
+    parameters: list[BodyMapBrushParameter] = Field(default_factory=list)
+
+
+class BodyMapPointDetail(BaseModel):
+    measurement_point_id: str
+    code: str
+    name: str
+    part_id: str
+    part_code: str | None = None
+    part_name: str | None = None
+    region: str | None = None
+    quality_types: list[str] = Field(default_factory=list)
+    quality_summaries: list[BodyMapQualitySummary] = Field(default_factory=list)
+    brush_contributions: list[BodyMapBrushContribution] = Field(default_factory=list)
