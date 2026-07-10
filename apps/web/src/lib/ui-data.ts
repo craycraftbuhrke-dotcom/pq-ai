@@ -118,10 +118,11 @@ export const domainPortalCards: readonly DomainPortalCard[] = [
     key: "process",
     href: "/process",
     title: "工艺管理",
-    description: "喷涂程序、刷子参数、贡献权重与生产实绩。",
+    description: "喷涂程序、虚拟产线、刷子参数、贡献权重与生产实绩。",
     icon: "program",
     links: [
       { href: "/process?tab=overview", label: "概览" },
+      { href: "/process?tab=simulation", label: "虚拟产线" },
       { href: "/process?tab=recipes", label: "配方与刷子" },
       { href: "/process?tab=runs", label: "生产实绩" },
     ],

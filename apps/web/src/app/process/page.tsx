@@ -2,19 +2,29 @@
 
 import Link from "next/link";
 import { Suspense } from "react";
-import { ArrowRight, Bot, GitCompareArrows, Activity } from "lucide-react";
+import { Activity, ArrowRight, Bot, Factory, GitCompareArrows } from "lucide-react";
 
 import { DomainHub } from "@/components/domain-hub";
+import { PaintLineSimulation } from "@/components/paint-line-simulation";
 import { ProductionWorkspace } from "@/components/production-workspace";
 import { ProgramWorkspace } from "@/components/program-workspace";
 
 const TABS = [
   { key: "overview", label: "概览" },
+  { key: "simulation", label: "虚拟产线" },
   { key: "recipes", label: "配方与刷子" },
   { key: "runs", label: "生产实绩" },
 ];
 
 const OVERVIEW_CARDS = [
+  {
+    key: "simulation",
+    href: "/process?tab=simulation",
+    icon: Factory,
+    title: "虚拟产线仿真",
+    description: "五站喷涂线可视化：工位装机、点击查看刷子设定参数，并仿真车身过线。",
+    action: "进入仿真",
+  },
   {
     key: "recipes",
     href: "/process?tab=recipes",
@@ -79,11 +89,12 @@ function ProcessHubInner() {
     <DomainHub
       kicker="工艺管理"
       title="工艺管理中心"
-      description="统一管理喷涂配方、刷子参数、贡献权重与生产实绩。工艺变更与受控试验在 AI 分析中心闭环。"
+      description="统一管理喷涂配方、虚拟产线仿真、刷子参数、贡献权重与生产实绩。工艺变更与受控试验在 AI 分析中心闭环。"
       tabs={TABS}
       defaultTab="overview"
     >
       {(tab) => {
+        if (tab === "simulation") return <PaintLineSimulation />;
         if (tab === "recipes") return <ProgramWorkspace mode="recipes" />;
         if (tab === "runs") return <ProductionWorkspace mode="runs" />;
         return <ProcessOverview />;
