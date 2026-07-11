@@ -7416,7 +7416,7 @@ button.message-banner {
 .paint-line-booths {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  grid-template-columns: repeat(5, minmax(210px, 1fr));
   padding: 42px 14px 96px;
   position: relative;
   transform-style: preserve-3d;
@@ -7428,7 +7428,7 @@ button.message-banner {
   border: 0;
   box-shadow: none;
   cursor: pointer;
-  min-height: 220px;
+  min-height: 380px;
   padding: 0;
   transform-style: preserve-3d;
   transition: transform 140ms ease;
@@ -7436,7 +7436,7 @@ button.message-banner {
 
 .paint-line-booth-3d {
   height: 100%;
-  min-height: 220px;
+  min-height: 380px;
   position: relative;
   transform-style: preserve-3d;
 }
@@ -7509,7 +7509,7 @@ button.message-banner {
   display: grid;
   gap: 8px;
   height: 100%;
-  min-height: 210px;
+  min-height: 360px;
   padding: 10px;
   position: relative;
   transform: translateZ(12px);
@@ -7571,7 +7571,7 @@ button.message-banner {
 
 .paint-line-booth-chamber {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 35%), rgb(19 39 44 / 4%)),
+    linear-gradient(180deg, rgb(255 255 255 / 40%), rgb(19 39 44 / 3%)),
     repeating-linear-gradient(
       90deg,
       transparent,
@@ -7582,16 +7582,168 @@ button.message-banner {
   border: 1px dashed color-mix(in srgb, var(--booth-tone) 25%, var(--line));
   border-radius: 8px;
   display: grid;
-  gap: 8px;
-  grid-template-columns: 1fr 1fr;
-  min-height: 140px;
+  gap: 6px;
+  min-height: 200px;
   padding: 8px;
   position: relative;
 }
 
+.paint-line-booth-brushes {
+  background: color-mix(in srgb, var(--booth-tone) 8%, white);
+  border: 1px solid color-mix(in srgb, var(--booth-tone) 22%, var(--line));
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  min-height: 72px;
+  padding: 6px 7px;
+}
+
+.paint-line-booth-brushes-head {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 9px;
+  font-weight: 700;
+  gap: 8px;
+  justify-content: space-between;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.paint-line-booth-slot-link {
+  background: transparent;
+  border: 0;
+  color: color-mix(in srgb, var(--booth-tone) 70%, #13272c);
+  cursor: pointer;
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0;
+  text-transform: none;
+}
+
+.paint-line-booth-slot-link:hover {
+  text-decoration: underline;
+}
+
+.paint-line-booth-brushes-empty {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 10px;
+  gap: 4px;
+  margin: 0;
+  min-height: 36px;
+}
+
+.paint-line-brush-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.paint-line-brush-chip {
+  align-items: baseline;
+  background: rgb(255 255 255 / 72%);
+  border: 1px solid color-mix(in srgb, var(--booth-tone) 24%, var(--line));
+  border-radius: 5px;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 6px;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.paint-line-brush-chip b {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.paint-line-brush-chip em {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.paint-line-brush-chip:hover,
+.paint-line-brush-chip.is-active {
+  background: color-mix(in srgb, var(--booth-tone) 16%, white);
+  border-color: color-mix(in srgb, var(--booth-tone) 55%, var(--line));
+}
+
+.paint-line-brush-param-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 52px;
+  overflow: auto;
+}
+
+.paint-line-brush-param-strip span {
+  background: rgb(255 255 255 / 78%);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 100%;
+  padding: 2px 5px;
+}
+
+.paint-line-brush-param-strip b {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paint-line-brush-param-strip i {
+  color: var(--text);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.paint-line-brush-param-strip small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.paint-line-slot-grid {
+  display: grid;
+  gap: 6px;
+  position: relative;
+  z-index: 2;
+}
+
+.paint-line-slot-row {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.paint-line-flow-arrow {
+  align-items: center;
+  color: var(--teal);
+  display: flex;
+  font-size: 16px;
+  font-weight: 800;
+  justify-content: center;
+  line-height: 1;
+  min-height: 14px;
+  opacity: 0.85;
+}
+
 .paint-line-booth-path-overlay {
   inset: 22px 10px 10px;
-  opacity: 0.55;
+  opacity: 0.45;
   pointer-events: none;
   position: absolute;
   z-index: 1;
@@ -7613,17 +7765,18 @@ button.message-banner {
 }
 
 .paint-line-robot-slot {
-  align-items: end;
-  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+  align-items: stretch;
+  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
   border: 1px solid var(--line);
   border-radius: 8px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
+  gap: 4px;
   justify-content: flex-end;
-  min-height: 118px;
+  min-height: 92px;
   overflow: hidden;
-  padding: 6px;
+  padding: 5px;
   position: relative;
   transition: border-color 120ms ease, background 120ms ease;
   z-index: 2;
@@ -7638,26 +7791,55 @@ button.message-banner {
   background: color-mix(in srgb, var(--booth-tone) 8%, var(--bg-elevated));
 }
 
+.paint-line-robot-photo {
+  display: block;
+  height: 48px;
+  margin: 0 auto;
+  object-fit: contain;
+  width: 100%;
+}
+
+.paint-line-robot-photo.is-ghost {
+  height: 36px;
+  opacity: 0.28;
+}
+
+.paint-line-robot-photo.is-spraying {
+  animation: paint-line-spray-arm 0.7s ease-in-out infinite;
+}
+
 .paint-line-slot-empty {
   align-items: center;
   color: var(--text-muted);
   display: flex;
+  flex: 1;
   flex-direction: column;
-  font-size: 11px;
-  gap: 4px;
-  height: 100%;
+  font-size: 10px;
+  gap: 2px;
   justify-content: center;
 }
 
+.paint-line-slot-empty strong {
+  color: var(--text);
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.paint-line-slot-empty small {
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
+}
+
 .paint-line-slot-empty svg {
-  height: 14px;
-  width: 14px;
+  height: 11px;
+  width: 11px;
 }
 
 .paint-line-robot-tag {
   align-items: baseline;
   display: flex;
-  gap: 6px;
+  gap: 4px;
   justify-content: space-between;
   width: 100%;
 }
@@ -7669,52 +7851,36 @@ button.message-banner {
 
 .paint-line-robot-tag small {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.paint-line-robot-slot.side-l .paint-line-arm-wrap {
-  transform: scaleX(-1);
+.paint-line-slot-flags {
+  display: flex;
+  gap: 4px;
+  justify-content: space-between;
+}
+
+.paint-line-slot-flags i {
+  background: color-mix(in srgb, var(--teal) 12%, white);
+  border-radius: 3px;
+  color: var(--teal-700);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 700;
+  padding: 1px 4px;
+}
+
+.paint-line-slot-summary.is-six {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .paint-line-arm-wrap {
   display: flex;
   justify-content: center;
   width: 100%;
-}
-
-.paint-line-arm {
-  height: 72px;
-  margin: 0 auto 2px;
-  overflow: visible;
-  width: 58px;
-}
-
-.paint-line-arm .arm-base {
-  fill: #4e676d;
-}
-
-.paint-line-arm .arm-link {
-  fill: none;
-  stroke: #2c3a3e;
-  stroke-linecap: round;
-  stroke-width: 4;
-}
-
-.paint-line-arm .arm-joint {
-  fill: #7a9197;
-}
-
-.paint-line-arm .arm-bell {
-  fill: #13272c;
-}
-
-.paint-line-arm .arm-bell-core {
-  fill: var(--booth-tone, var(--teal));
-}
-
-.paint-line-arm.is-spraying {
-  animation: paint-line-spray-arm 0.7s ease-in-out infinite;
-  transform-origin: 32px 58px;
 }
 
 .paint-line-mist {
@@ -7728,11 +7894,6 @@ button.message-banner {
   top: 10px;
   width: 36px;
   animation: paint-line-mist 0.8s ease-out infinite;
-}
-
-.paint-line-robot-slot.side-l .paint-line-mist {
-  left: 4px;
-  right: auto;
 }
 
 .paint-line-progress {

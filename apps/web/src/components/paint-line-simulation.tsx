@@ -134,7 +134,7 @@ type StageCode =
   | "CLEARCOAT_1"
   | "CLEARCOAT_2";
 
-type SlotSide = "L" | "R";
+type SlotCode = "R11" | "R12" | "R13" | "R21" | "R22" | "R23" | "R24";
 
 type SlotAssignment = {
   robotId: string;
@@ -143,11 +143,16 @@ type SlotAssignment = {
   programVersionId?: string;
 };
 
-type LineLayout = Record<StageCode, Partial<Record<SlotSide, SlotAssignment | null>>>;
+type LineLayout = Record<StageCode, Partial<Record<SlotCode, SlotAssignment | null>>>;
+
+type BrushPack = {
+  brushes: Brush[];
+  parametersByBrush: Record<string, BrushParameter[]>;
+};
 
 type Selection =
   | { kind: "stage"; stage: StageCode }
-  | { kind: "slot"; stage: StageCode; side: SlotSide }
+  | { kind: "slot"; stage: StageCode; side: SlotCode }
   | null;
 
 type Point2D = { x: number; y: number };
@@ -167,55 +172,82 @@ const STAGE_ORDER: StageCode[] = [
   "CLEARCOAT_2",
 ];
 
+/** 与现场 HMI 一致：每站上下两排各 3 台；中涂顶排为 R22–R24。 */
+const STAGE_SLOTS: Record<StageCode, { top: SlotCode[]; bottom: SlotCode[] }> = {
+  MIDCOAT_EXT: { top: ["R22", "R23", "R24"], bottom: ["R11", "R12", "R13"] },
+  BASECOAT_1: { top: ["R21", "R22", "R23"], bottom: ["R11", "R12", "R13"] },
+  BASECOAT_2: { top: ["R21", "R22", "R23"], bottom: ["R11", "R12", "R13"] },
+  CLEARCOAT_1: { top: ["R21", "R22", "R23"], bottom: ["R11", "R12", "R13"] },
+  CLEARCOAT_2: { top: ["R21", "R22", "R23"], bottom: ["R11", "R12", "R13"] },
+};
+
+const ROBOT_PHOTO_SRC = "/robot.jpg";
+
 const STAGE_META: Record<
   StageCode,
-  { coating: string; coatingLabel: string; tone: string; stationHint: string }
+  { coating: string; coatingLabel: string; displayName: string; tone: string; stationHint: string }
 > = {
   MIDCOAT_EXT: {
     coating: "MIDCOAT",
     coatingLabel: "中涂",
+    displayName: "中涂外喷",
     tone: "#1687a1",
-    stationHint: "中涂外喷工位 · 旋杯静电",
+    stationHint: "中涂外喷 · 6 台旋杯机器人",
   },
   BASECOAT_1: {
     coating: "BASECOAT",
     coatingLabel: "色漆",
+    displayName: "色漆外喷1",
     tone: "#0f9f83",
-    stationHint: "色漆一站 · 效果取向",
+    stationHint: "色漆外喷一站 · 6 台旋杯机器人",
   },
   BASECOAT_2: {
     coating: "BASECOAT",
     coatingLabel: "色漆",
+    displayName: "色漆外喷2",
     tone: "#0d8a72",
-    stationHint: "色漆二站 · 覆盖与均匀",
+    stationHint: "色漆外喷二站 · 6 台旋杯机器人",
   },
   CLEARCOAT_1: {
     coating: "CLEARCOAT",
     coatingLabel: "清漆",
+    displayName: "清漆外喷1",
     tone: "#b97918",
-    stationHint: "清漆一站 · 流平与 DOI",
+    stationHint: "清漆外喷一站 · 6 台旋杯机器人",
   },
   CLEARCOAT_2: {
     coating: "CLEARCOAT",
     coatingLabel: "清漆",
+    displayName: "清漆外喷2",
     tone: "#996516",
-    stationHint: "清漆二站 · 外观收口",
+    stationHint: "清漆外喷二站 · 6 台旋杯机器人",
   },
 };
 
-const LAYOUT_STORAGE_KEY = "pq-ai-paint-line-layout-v1";
+const LAYOUT_STORAGE_KEY = "pq-ai-paint-line-layout-v2";
 const PATH_VIEW_W = 320;
 const PATH_VIEW_H = 180;
 const PATH_PAD = 16;
 
+function stageSlotCodes(stage: StageCode): SlotCode[] {
+  const slots = STAGE_SLOTS[stage];
+  return [...slots.top, ...slots.bottom];
+}
+
 function emptyLayout(): LineLayout {
-  return {
-    MIDCOAT_EXT: { L: null, R: null },
-    BASECOAT_1: { L: null, R: null },
-    BASECOAT_2: { L: null, R: null },
-    CLEARCOAT_1: { L: null, R: null },
-    CLEARCOAT_2: { L: null, R: null },
-  };
+  const layout = {} as LineLayout;
+  for (const stage of STAGE_ORDER) {
+    const stageLayout: Partial<Record<SlotCode, SlotAssignment | null>> = {};
+    for (const code of stageSlotCodes(stage)) {
+      stageLayout[code] = null;
+    }
+    layout[stage] = stageLayout;
+  }
+  return layout;
+}
+
+function slotRowLabel(code: SlotCode): string {
+  return code.startsWith("R2") ? "外侧/顶排" : "内侧/底排";
 }
 
 function loadLayout(factoryId: string): LineLayout {
@@ -254,6 +286,43 @@ function formatDelta(delta: number | null): string {
   const sign = delta > 0 ? "+" : "";
   const text = Number.isInteger(delta) ? String(delta) : delta.toFixed(2);
   return `${sign}${text}`;
+}
+
+function collectProgramVersionIds(layout: LineLayout): string[] {
+  const ids = new Set<string>();
+  for (const stage of STAGE_ORDER) {
+    for (const side of stageSlotCodes(stage)) {
+      const versionId = layout[stage][side]?.programVersionId;
+      if (versionId) ids.add(versionId);
+    }
+  }
+  return [...ids];
+}
+
+function focusSlotForStage(
+  stage: StageCode,
+  layout: LineLayout,
+  selection: Selection,
+): SlotCode | null {
+  if (selection?.kind === "slot" && selection.stage === stage) return selection.side;
+  for (const side of stageSlotCodes(stage)) {
+    if (layout[stage][side]?.programVersionId) return side;
+  }
+  for (const side of stageSlotCodes(stage)) {
+    if (layout[stage][side]?.robotId) return side;
+  }
+  return null;
+}
+
+async function fetchBrushPack(programVersionId: string): Promise<BrushPack> {
+  const brushes = await request<Brush[]>(`/api/process/program-versions/${programVersionId}/brushes`);
+  const entries = await Promise.all(
+    brushes.map(async (brush) => {
+      const params = await request<BrushParameter[]>(`/api/process/brushes/${brush.id}/parameters`);
+      return [brush.id, params] as const;
+    }),
+  );
+  return { brushes, parametersByBrush: Object.fromEntries(entries) };
 }
 
 function matchesContextId(recordId?: string | null, contextId?: string): boolean {
@@ -402,15 +471,19 @@ export function PaintLineSimulation() {
   const [versionsByProgram, setVersionsByProgram] = useState<Record<string, ProgramVersion[]>>({});
   const [layout, setLayout] = useState<LineLayout>(() => emptyLayout());
   const [selection, setSelection] = useState<Selection>(null);
-  const [installTarget, setInstallTarget] = useState<{ stage: StageCode; side: SlotSide } | null>(null);
+  const [installTarget, setInstallTarget] = useState<{ stage: StageCode; side: SlotCode } | null>(null);
   const [installForm, setInstallForm] = useState({
     robotId: "",
     atomizerId: "",
     programId: "",
     programVersionId: "",
   });
-  const [brushes, setBrushes] = useState<Brush[]>([]);
-  const [parametersByBrush, setParametersByBrush] = useState<Record<string, BrushParameter[]>>({});
+  const [brushPackByVersion, setBrushPackByVersion] = useState<Record<string, BrushPack>>({});
+  const [brushPackLoadingIds, setBrushPackLoadingIds] = useState<Record<string, true>>({});
+  const [boothBrushByStage, setBoothBrushByStage] = useState<Partial<Record<StageCode, string>>>({});
+  const brushPackByVersionRef = useRef(brushPackByVersion);
+  const brushPackLoadingRef = useRef<Set<string>>(new Set());
+  brushPackByVersionRef.current = brushPackByVersion;
   const [productionRuns, setProductionRuns] = useState<ProductionRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState("");
   const [stageRuns, setStageRuns] = useState<StageRun[]>([]);
@@ -420,7 +493,6 @@ export function PaintLineSimulation() {
   const [deviceExecution, setDeviceExecution] = useState<DeviceExecution | null>(null);
   const [segmentExecutions, setSegmentExecutions] = useState<SegmentExecution[]>([]);
   const [loading, setLoading] = useState(true);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [pathLoading, setPathLoading] = useState(false);
   const [actualLoading, setActualLoading] = useState(false);
   const [error, setError] = useState("");
@@ -457,7 +529,7 @@ export function PaintLineSimulation() {
   const installedRobotIds = useMemo(() => {
     const ids = new Set<string>();
     for (const stage of STAGE_ORDER) {
-      for (const side of ["L", "R"] as SlotSide[]) {
+      for (const side of stageSlotCodes(stage)) {
         const slot = layout[stage][side];
         if (slot?.robotId) ids.add(slot.robotId);
       }
@@ -593,33 +665,77 @@ export function PaintLineSimulation() {
     };
   }, [pathPlaying, normalizedPath.length]);
 
-  const loadSlotDetail = useCallback(async (assignment: SlotAssignment | null) => {
-    setBrushes([]);
-    setParametersByBrush({});
-    if (!assignment?.programVersionId) return;
-    setDetailLoading(true);
-    try {
-      const nextBrushes = await request<Brush[]>(
-        `/api/process/program-versions/${assignment.programVersionId}/brushes`,
-      );
-      setBrushes(nextBrushes);
-      const entries = await Promise.all(
-        nextBrushes.map(async (brush) => {
-          const params = await request<BrushParameter[]>(`/api/process/brushes/${brush.id}/parameters`);
-          return [brush.id, params] as const;
-        }),
-      );
-      setParametersByBrush(Object.fromEntries(entries));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "加载刷子参数失败");
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
+  const selectedBrushPack = useMemo(() => {
+    const versionId = selectedAssignment?.programVersionId;
+    if (!versionId) return null;
+    return brushPackByVersion[versionId] ?? null;
+  }, [selectedAssignment?.programVersionId, brushPackByVersion]);
+
+  const brushes = selectedBrushPack?.brushes ?? [];
+  const parametersByBrush = selectedBrushPack?.parametersByBrush ?? {};
+  const detailLoading = Boolean(
+    selectedAssignment?.programVersionId &&
+      !selectedBrushPack &&
+      brushPackLoadingIds[selectedAssignment.programVersionId],
+  );
 
   useEffect(() => {
-    void loadSlotDetail(selectedAssignment);
-  }, [selectedAssignment, loadSlotDetail]);
+    const versionIds = collectProgramVersionIds(layout);
+    const missing = versionIds.filter(
+      (id) => !brushPackByVersionRef.current[id] && !brushPackLoadingRef.current.has(id),
+    );
+    if (!missing.length) return;
+    let cancelled = false;
+    for (const id of missing) brushPackLoadingRef.current.add(id);
+    setBrushPackLoadingIds((current) => {
+      const next = { ...current };
+      for (const id of missing) next[id] = true;
+      return next;
+    });
+    void (async () => {
+      const results = await Promise.allSettled(
+        missing.map(async (id) => [id, await fetchBrushPack(id)] as const),
+      );
+      if (cancelled) return;
+      setBrushPackByVersion((current) => {
+        const next = { ...current };
+        for (const result of results) {
+          if (result.status === "fulfilled") {
+            const [id, pack] = result.value;
+            next[id] = pack;
+          }
+        }
+        return next;
+      });
+      for (const id of missing) brushPackLoadingRef.current.delete(id);
+      setBrushPackLoadingIds((current) => {
+        const next = { ...current };
+        for (const id of missing) delete next[id];
+        return next;
+      });
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed && failed.status === "rejected") {
+        setError(
+          failed.reason instanceof Error ? failed.reason.message : "加载刷子参数失败",
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [layout]);
+
+  useEffect(() => {
+    if (!selection || selection.kind !== "slot") return;
+    const versionId = layout[selection.stage][selection.side]?.programVersionId;
+    const pack = versionId ? brushPackByVersion[versionId] : null;
+    if (!pack?.brushes.length) return;
+    setBoothBrushByStage((current) => {
+      const existing = current[selection.stage];
+      if (existing && pack.brushes.some((brush) => brush.id === existing)) return current;
+      return { ...current, [selection.stage]: pack.brushes[0].id };
+    });
+  }, [selection, layout, brushPackByVersion]);
 
   const loadTrajectory = useCallback(async (programVersionId?: string) => {
     setTrajectoryProgram(null);
@@ -738,7 +854,7 @@ export function PaintLineSimulation() {
     }
   }
 
-  function openInstall(stage: StageCode, side: SlotSide) {
+  function openInstall(stage: StageCode, side: SlotCode) {
     const existing = layout[stage][side];
     setInstallTarget({ stage, side });
     setInstallForm({
@@ -769,7 +885,7 @@ export function PaintLineSimulation() {
     setInstallTarget(null);
   }
 
-  function uninstallSlot(stage: StageCode, side: SlotSide) {
+  function uninstallSlot(stage: StageCode, side: SlotCode) {
     setLayout((current) => ({
       ...current,
       [stage]: { ...current[stage], [side]: null },
@@ -942,11 +1058,26 @@ export function PaintLineSimulation() {
                         <header className="paint-line-booth-head">
                           <span className="mono">{String(index + 1).padStart(2, "0")}</span>
                           <div>
-                            <strong>{stageLabel(stage)}</strong>
+                            <strong>{meta.displayName}</strong>
                             <small>{meta.stationHint}</small>
                           </div>
                           <em>{meta.coatingLabel}</em>
                         </header>
+
+                        <BoothBrushStrip
+                          stage={stage}
+                          layout={layout}
+                          selection={selection}
+                          robots={robots}
+                          brushPackByVersion={brushPackByVersion}
+                          brushPackLoadingIds={brushPackLoadingIds}
+                          selectedBrushId={boothBrushByStage[stage] ?? null}
+                          onSelectBrush={(brushId, side) => {
+                            setBoothBrushByStage((current) => ({ ...current, [stage]: brushId }));
+                            setSelection({ kind: "slot", stage, side });
+                          }}
+                          onSelectSlot={(side) => setSelection({ kind: "slot", stage, side })}
+                        />
 
                         <div className="paint-line-booth-chamber">
                           <div className="paint-line-booth-glass" />
@@ -959,57 +1090,57 @@ export function PaintLineSimulation() {
                               />
                             </div>
                           ) : null}
-                          {(["L", "R"] as SlotSide[]).map((side) => {
-                            const assignment = layout[stage][side];
-                            const robot = assignment
-                              ? robots.find((item) => item.id === assignment.robotId)
-                              : null;
-                            const spraying = isActive && Boolean(assignment);
-                            return (
-                              <button
-                                key={side}
-                                type="button"
-                                className={`paint-line-robot-slot side-${side.toLowerCase()} ${assignment ? "has-robot" : ""} ${
-                                  selection?.kind === "slot" &&
-                                  selection.stage === stage &&
-                                  selection.side === side
-                                    ? "is-selected"
-                                    : ""
-                                } ${spraying ? "is-spraying" : ""}`}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  if (!assignment) {
-                                    openInstall(stage, side);
-                                    return;
+                          <div className="paint-line-slot-grid">
+                            <div className="paint-line-slot-row is-top">
+                              {STAGE_SLOTS[stage].top.map((side) => (
+                                <RobotSlotButton
+                                  key={side}
+                                  stage={stage}
+                                  side={side}
+                                  assignment={layout[stage][side] ?? null}
+                                  robot={
+                                    layout[stage][side]?.robotId
+                                      ? robots.find((item) => item.id === layout[stage][side]?.robotId)
+                                      : null
                                   }
-                                  setSelection({ kind: "slot", stage, side });
-                                }}
-                                title={
-                                  robot
-                                    ? `${robot.code} / ${robot.name}`
-                                    : `安装${side === "L" ? "左侧" : "右侧"}机器人`
-                                }
-                              >
-                                {assignment && robot ? (
-                                  <>
-                                    <span className="paint-line-arm-wrap">
-                                      <RobotArmSvg spraying={spraying} />
-                                    </span>
-                                    <span className="paint-line-robot-tag">
-                                      <b>{robot.code}</b>
-                                      <small>{side === "L" ? "左" : "右"}</small>
-                                    </span>
-                                    {spraying ? <i className="paint-line-mist" aria-hidden="true" /> : null}
-                                  </>
-                                ) : (
-                                  <span className="paint-line-slot-empty">
-                                    <Plus />
-                                    安装
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })}
+                                  selected={
+                                    selection?.kind === "slot" &&
+                                    selection.stage === stage &&
+                                    selection.side === side
+                                  }
+                                  spraying={isActive && Boolean(layout[stage][side])}
+                                  onInstall={openInstall}
+                                  onSelect={(slot) => setSelection({ kind: "slot", stage, side: slot })}
+                                />
+                              ))}
+                            </div>
+                            <div className="paint-line-flow-arrow" aria-hidden="true">
+                              <span>→</span>
+                            </div>
+                            <div className="paint-line-slot-row is-bottom">
+                              {STAGE_SLOTS[stage].bottom.map((side) => (
+                                <RobotSlotButton
+                                  key={side}
+                                  stage={stage}
+                                  side={side}
+                                  assignment={layout[stage][side] ?? null}
+                                  robot={
+                                    layout[stage][side]?.robotId
+                                      ? robots.find((item) => item.id === layout[stage][side]?.robotId)
+                                      : null
+                                  }
+                                  selected={
+                                    selection?.kind === "slot" &&
+                                    selection.stage === stage &&
+                                    selection.side === side
+                                  }
+                                  spraying={isActive && Boolean(layout[stage][side])}
+                                  onInstall={openInstall}
+                                  onSelect={(slot) => setSelection({ kind: "slot", stage, side: slot })}
+                                />
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1065,7 +1196,8 @@ export function PaintLineSimulation() {
                       onClick={() => {
                         const stage = (selectedStage ?? STAGE_ORDER[activeStageIndex]) as StageCode;
                         const emptySide =
-                          (["L", "R"] as SlotSide[]).find((side) => !layout[stage][side]) ?? "L";
+                          stageSlotCodes(stage).find((side) => !layout[stage][side]) ??
+                          STAGE_SLOTS[stage].bottom[0];
                         openInstall(stage, emptySide);
                         setInstallForm((current) => ({ ...current, robotId: robot.id }));
                       }}
@@ -1143,8 +1275,8 @@ export function PaintLineSimulation() {
       {installTarget ? (
         <ModalShell
           eyebrow="工位装机"
-          title={`${stageLabel(installTarget.stage)} · ${installTarget.side === "L" ? "左侧" : "右侧"}槽位`}
-          description="从受控台账选择机器人与旋杯；可选绑定本工序喷涂程序版本，以便点击查看刷子设定参数。"
+          title={`${STAGE_META[installTarget.stage].displayName} · ${installTarget.side}`}
+          description="从受控台账选择机器人与旋杯；槽位编号与现场 HMI（R11–R13 / R21–R24）一致。可选绑定本工序喷涂程序版本，以便点击查看刷子设定参数。"
           onClose={() => setInstallTarget(null)}
         >
           <div className="form-grid">
@@ -1245,16 +1377,178 @@ export function PaintLineSimulation() {
   );
 }
 
-function RobotArmSvg({ spraying }: { spraying: boolean }) {
+function RobotSlotButton({
+  stage,
+  side,
+  assignment,
+  robot,
+  selected,
+  spraying,
+  onInstall,
+  onSelect,
+}: {
+  stage: StageCode;
+  side: SlotCode;
+  assignment: SlotAssignment | null;
+  robot?: Robot | null;
+  selected: boolean;
+  spraying: boolean;
+  onInstall: (stage: StageCode, side: SlotCode) => void;
+  onSelect: (side: SlotCode) => void;
+}) {
   return (
-    <svg className={`paint-line-arm ${spraying ? "is-spraying" : ""}`} viewBox="0 0 64 80" aria-hidden="true">
-      <rect x="26" y="58" width="12" height="16" rx="2" className="arm-base" />
-      <path d="M32 58 L32 38 L44 28" className="arm-link" />
-      <circle cx="32" cy="38" r="3.5" className="arm-joint" />
-      <circle cx="44" cy="28" r="3" className="arm-joint" />
-      <circle cx="50" cy="22" r="7" className="arm-bell" />
-      <circle cx="50" cy="22" r="3" className="arm-bell-core" />
-    </svg>
+    <button
+      type="button"
+      className={`paint-line-robot-slot ${assignment ? "has-robot" : ""} ${selected ? "is-selected" : ""} ${
+        spraying ? "is-spraying" : ""
+      } ${side.startsWith("R2") ? "is-outer" : "is-inner"}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (!assignment) {
+          onInstall(stage, side);
+          return;
+        }
+        onSelect(side);
+      }}
+      title={robot ? `${side} · ${robot.code} / ${robot.name}` : `安装 ${side}`}
+    >
+      {assignment && robot ? (
+        <>
+          <span className="paint-line-arm-wrap">
+            <img
+              className={`paint-line-robot-photo ${spraying ? "is-spraying" : ""}`}
+              src={ROBOT_PHOTO_SRC}
+              alt={`${side} ${robot.code}`}
+              draggable={false}
+            />
+          </span>
+          <span className="paint-line-robot-tag">
+            <b>{side}</b>
+            <small>{robot.code}</small>
+          </span>
+          <span className="paint-line-slot-flags">
+            <i>HOME</i>
+            <i>旁通</i>
+          </span>
+          {spraying ? <i className="paint-line-mist" aria-hidden="true" /> : null}
+        </>
+      ) : (
+        <span className="paint-line-slot-empty">
+          <img className="paint-line-robot-photo is-ghost" src={ROBOT_PHOTO_SRC} alt="" draggable={false} />
+          <strong>{side}</strong>
+          <small>
+            <Plus /> 安装
+          </small>
+        </span>
+      )}
+    </button>
+  );
+}
+
+function BoothBrushStrip({
+  stage,
+  layout,
+  selection,
+  robots,
+  brushPackByVersion,
+  brushPackLoadingIds,
+  selectedBrushId,
+  onSelectBrush,
+  onSelectSlot,
+}: {
+  stage: StageCode;
+  layout: LineLayout;
+  selection: Selection;
+  robots: Robot[];
+  brushPackByVersion: Record<string, BrushPack>;
+  brushPackLoadingIds: Record<string, true>;
+  selectedBrushId: string | null;
+  onSelectBrush: (brushId: string, side: SlotCode) => void;
+  onSelectSlot: (side: SlotCode) => void;
+}) {
+  const focusSide = focusSlotForStage(stage, layout, selection);
+  const assignment = focusSide ? layout[stage][focusSide] ?? null : null;
+  const robot = assignment?.robotId
+    ? robots.find((item) => item.id === assignment.robotId)
+    : null;
+  const versionId = assignment?.programVersionId;
+  const pack = versionId ? brushPackByVersion[versionId] : null;
+  const loading = Boolean(versionId && !pack && brushPackLoadingIds[versionId]);
+  const brushes = pack?.brushes ?? [];
+  const activeBrush =
+    brushes.find((brush) => brush.id === selectedBrushId) ?? brushes[0] ?? null;
+  const params = activeBrush ? pack?.parametersByBrush[activeBrush.id] ?? [] : [];
+
+  return (
+    <div
+      className="paint-line-booth-brushes"
+      aria-label="喷涂刷子与参数"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="paint-line-booth-brushes-head">
+        <span>喷涂刷子</span>
+        {focusSide ? (
+          <button
+            type="button"
+            className="paint-line-booth-slot-link"
+            onClick={() => onSelectSlot(focusSide)}
+            title="查看该槽位详情"
+          >
+            {focusSide}
+            {robot ? ` · ${robot.code}` : ""}
+          </button>
+        ) : (
+          <small>未安装</small>
+        )}
+      </div>
+
+      {!assignment ? (
+        <p className="paint-line-booth-brushes-empty">安装机器人后可查看刷子</p>
+      ) : !versionId ? (
+        <p className="paint-line-booth-brushes-empty">绑定程序版本后显示刷子号与参数</p>
+      ) : loading ? (
+        <p className="paint-line-booth-brushes-empty">
+          <LoaderCircle className="spin" /> 加载刷子参数…
+        </p>
+      ) : !brushes.length ? (
+        <p className="paint-line-booth-brushes-empty">该版本暂无刷子</p>
+      ) : (
+        <>
+          <div className="paint-line-brush-chips" role="list">
+            {brushes.map((brush) => {
+              const active = activeBrush?.id === brush.id;
+              return (
+                <button
+                  key={brush.id}
+                  type="button"
+                  role="listitem"
+                  className={`paint-line-brush-chip ${active ? "is-active" : ""}`}
+                  onClick={() => focusSide && onSelectBrush(brush.id, focusSide)}
+                  title={`刷子 ${brush.brush_no} · 表 ${brush.brush_table_no}`}
+                >
+                  <b>刷子 {brush.brush_no}</b>
+                  <em>表 {brush.brush_table_no}</em>
+                </button>
+              );
+            })}
+          </div>
+          {activeBrush ? (
+            <div className="paint-line-brush-param-strip" aria-label={`刷子 ${activeBrush.brush_no} 参数`}>
+              {params.length ? (
+                params.map((parameter) => (
+                  <span key={parameter.id} title={parameter.parameter_code}>
+                    <b>{parameter.parameter_name}</b>
+                    <i className="mono">{formatValue(parameter.configured_value, parameter.unit)}</i>
+                  </span>
+                ))
+              ) : (
+                <small>该刷子暂无配置参数</small>
+              )}
+            </div>
+          ) : null}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1333,8 +1627,8 @@ function StageSummary({
   robots: Robot[];
   matchedStageRun: StageRun | null;
   actualLoading: boolean;
-  onInstall: (stage: StageCode, side: SlotSide) => void;
-  onSelectSlot: (side: SlotSide) => void;
+  onInstall: (stage: StageCode, side: SlotCode) => void;
+  onSelectSlot: (side: SlotCode) => void;
 }) {
   const meta = STAGE_META[stage];
   return (
@@ -1342,12 +1636,12 @@ function StageSummary({
       <div className="body-map-detail-head">
         <div>
           <span className="eyebrow">{meta.coatingLabel}工位</span>
-          <h4>{stageLabel(stage)}</h4>
+          <h4>{meta.displayName}</h4>
           <small>{meta.stationHint}</small>
         </div>
       </div>
-      <div className="paint-line-slot-summary">
-        {(["L", "R"] as SlotSide[]).map((side) => {
+      <div className="paint-line-slot-summary is-six">
+        {[...STAGE_SLOTS[stage].top, ...STAGE_SLOTS[stage].bottom].map((side) => {
           const assignment = layout[stage][side];
           const robot = assignment ? robots.find((item) => item.id === assignment.robotId) : null;
           return (
@@ -1357,7 +1651,9 @@ function StageSummary({
               className="paint-line-slot-card"
               onClick={() => (assignment ? onSelectSlot(side) : onInstall(stage, side))}
             >
-              <span>{side === "L" ? "左侧槽位" : "右侧槽位"}</span>
+              <span>
+                {side} · {slotRowLabel(side)}
+              </span>
               <strong>{robot ? robot.code : "空闲"}</strong>
               <small>{robot ? robot.name : "点击安装机器人"}</small>
             </button>
@@ -1405,7 +1701,7 @@ function SlotInspector({
   onUninstall,
 }: {
   stage: StageCode;
-  side: SlotSide;
+  side: SlotCode;
   assignment: SlotAssignment | null;
   robot?: Robot | null;
   atomizer?: Atomizer | null;
@@ -1448,13 +1744,13 @@ function SlotInspector({
       <div className="body-map-detail-head">
         <div>
           <span className="eyebrow">
-            {stageLabel(stage)} · {side === "L" ? "左侧" : "右侧"}
+            {STAGE_META[stage].displayName} · {side}
           </span>
           <h4>
             {robot.code} · {robot.name}
           </h4>
           <small className="mono">
-            {robot.model ?? "型号待维护"} · SN {robot.serial_no ?? "—"}
+            {slotRowLabel(side)} · {robot.model ?? "型号待维护"} · SN {robot.serial_no ?? "—"}
           </small>
         </div>
         <div className="row-actions">
