@@ -230,7 +230,7 @@ class MeasurementPoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class MeasurementPointLayout(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Normalized body-map placement for a measurement point on TOP or SIDE view."""
+    """Normalized body-map placement for a measurement point on RIGHT/LEFT/TOP/REAR view."""
 
     __tablename__ = "measurement_point_layout"
     __table_args__ = (

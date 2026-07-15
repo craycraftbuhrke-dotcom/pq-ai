@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, MapPinned, Pencil, Plus, RefreshCw, X } from "lucide-react";
+import { Layers, Link2, ListTree, LoaderCircle, MapPinned, Pencil, Plus, RefreshCw, X } from "lucide-react";
 import {
   FormEvent,
   PointerEvent as ReactPointerEvent,
@@ -15,7 +15,33 @@ import {
 import { ModalShell } from "@/components/modal-shell";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
+type BodyView = "RIGHT" | "LEFT" | "TOP" | "REAR";
+type SideTab = "governance" | "detail";
+
 type Resource = { id: string; code: string; name: string; vehicle_model_id?: string; quality_type?: string };
+
+type MeasurementGroup = Resource & {
+  vehicle_model_id: string;
+  quality_type: string;
+  expected_point_count?: number | null;
+  remark?: string | null;
+};
+
+type MeasurementPoint = Resource & {
+  vehicle_model_id: string;
+  part_id: string;
+  region?: string | null;
+  quality_types: string[];
+  point_type?: string;
+};
+
+type GroupPointRelation = {
+  id: string;
+  measurement_group_id: string;
+  measurement_point_id: string;
+  sequence_no: number;
+};
+
 type ProductionRun = {
   id: string;
   run_no: string;
@@ -74,6 +100,24 @@ type BodyMapPayload = {
   points: MapPoint[];
 };
 
+type CanvasPayload = {
+  vehicle_model_id: string;
+  vehicle_model_code: string;
+  vehicle_model_name: string;
+  view_order: string[];
+  view_labels: Record<string, string>;
+  grid_cols: number;
+  grid_rows: number;
+  measurement_group_id?: string | null;
+  production_run_id?: string | null;
+  production_run_no?: string | null;
+  quality_scope?: string;
+  placed_count: number;
+  group_point_count: number;
+  fail_count: number;
+  views: BodyMapPayload[];
+};
+
 type BrushParameter = {
   parameter_code: string;
   parameter_name: string;
@@ -113,6 +157,7 @@ type PointDetail = {
 };
 
 type CreateDraft = {
+  body_view: BodyView;
   layout_x: number;
   layout_y: number;
   grid_col: number;
@@ -132,11 +177,46 @@ type LayoutRead = {
 
 type OverlayMode = "RISK" | "THICKNESS" | "COLOR_DIFFERENCE" | "ORANGE_PEEL";
 
+type GroupForm = {
+  code: string;
+  name: string;
+  quality_type: string;
+  expected_point_count: string;
+  remark: string;
+};
+
+type PointForm = {
+  code: string;
+  name: string;
+  part_id: string;
+  region: string;
+  quality_types: string[];
+  bind_to_group: boolean;
+};
+
+const BODY_VIEWS: BodyView[] = ["RIGHT", "LEFT", "TOP", "REAR"];
+
+const DEFAULT_VIEW_LABELS: Record<BodyView, string> = {
+  RIGHT: "右侧视图",
+  LEFT: "左侧视图",
+  TOP: "俯视图",
+  REAR: "后视图",
+};
+
+const DEFAULT_VIEW_IMAGES: Record<BodyView, string> = {
+  RIGHT: "/body-maps/side.jpg",
+  LEFT: "/body-maps/side.jpg",
+  TOP: "/body-maps/top.jpg",
+  REAR: "/ms11_back.jpg",
+};
+
 const qualityLabels: Record<string, string> = {
   THICKNESS: "膜厚",
   COLOR_DIFFERENCE: "色差",
   ORANGE_PEEL: "橘皮",
 };
+
+const QUALITY_TYPE_OPTIONS = ["THICKNESS", "COLOR_DIFFERENCE", "ORANGE_PEEL"] as const;
 
 const coatingLabels: Record<string, string> = {
   MIDCOAT: "中涂",
@@ -157,6 +237,23 @@ const reliabilityLabels: Record<string, string> = {
   UNVERIFIED: "未核验",
   FAILED: "核验失败",
 };
+
+const emptyGroupForm = (): GroupForm => ({
+  code: "",
+  name: "",
+  quality_type: "THICKNESS",
+  expected_point_count: "",
+  remark: "",
+});
+
+const emptyPointForm = (): PointForm => ({
+  code: "",
+  name: "",
+  part_id: "",
+  region: "",
+  quality_types: ["THICKNESS", "COLOR_DIFFERENCE", "ORANGE_PEEL"],
+  bind_to_group: true,
+});
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { cache: "no-store", ...init });
@@ -197,7 +294,6 @@ function pointColor(point: MapPoint, overlay: OverlayMode): string {
   if (summary.judgement === "INVALID") return "var(--amber)";
   if (summary.judgement === "PASS") return "var(--teal)";
   if (summary.judgement === "NO_STANDARD") return "var(--amber)";
-  // Unverified / empty values stay soft — never teal from raw presence alone.
   return "var(--text-soft)";
 }
 
@@ -217,47 +313,109 @@ function snapCoords(
   };
 }
 
+function isBodyView(value: string): value is BodyView {
+  return BODY_VIEWS.includes(value as BodyView);
+}
+
+function viewLabel(view: BodyView, labels?: Record<string, string> | null): string {
+  return labels?.[view] ?? DEFAULT_VIEW_LABELS[view];
+}
+
 export function BodyPointMap() {
   const { modelId, factoryId, colorId } = useWorkspaceContext();
   const [models, setModels] = useState<Resource[]>([]);
   const [parts, setParts] = useState<Resource[]>([]);
-  const [groups, setGroups] = useState<Resource[]>([]);
+  const [groups, setGroups] = useState<MeasurementGroup[]>([]);
+  const [masterPoints, setMasterPoints] = useState<MeasurementPoint[]>([]);
+  const [groupPointRelations, setGroupPointRelations] = useState<GroupPointRelation[]>([]);
   const [runs, setRuns] = useState<ProductionRun[]>([]);
   const [vehicleModelId, setVehicleModelId] = useState(modelId || "");
-  const [bodyView, setBodyView] = useState<"TOP" | "SIDE">("SIDE");
+  const [activeView, setActiveView] = useState<BodyView>("RIGHT");
   const [groupId, setGroupId] = useState("");
   const [runId, setRunId] = useState("");
   const [editMode, setEditMode] = useState(false);
   const [showUngrouped, setShowUngrouped] = useState(true);
   const [overlayMode, setOverlayMode] = useState<OverlayMode>("RISK");
-  const [mapData, setMapData] = useState<BodyMapPayload | null>(null);
+  const [canvas, setCanvas] = useState<CanvasPayload | null>(null);
   const [detail, setDetail] = useState<PointDetail | null>(null);
   const [selectedPointId, setSelectedPointId] = useState("");
   const [pendingPlaceId, setPendingPlaceId] = useState("");
+  const [sideTab, setSideTab] = useState<SideTab>("governance");
+  const [sideTabPinned, setSideTabPinned] = useState(false);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [createDraft, setCreateDraft] = useState<CreateDraft | null>(null);
-  const [createForm, setCreateForm] = useState({ code: "", name: "", part_id: "", region: "" });
+  const [createForm, setCreateForm] = useState({
+    code: "",
+    name: "",
+    part_id: "",
+    region: "",
+    quality_types: ["THICKNESS", "COLOR_DIFFERENCE", "ORANGE_PEEL"] as string[],
+  });
+  const [groupModal, setGroupModal] = useState<"create" | "edit" | null>(null);
+  const [groupForm, setGroupForm] = useState<GroupForm>(emptyGroupForm);
+  const [editingGroupId, setEditingGroupId] = useState("");
+  const [pointModal, setPointModal] = useState<"create" | "edit" | null>(null);
+  const [pointForm, setPointForm] = useState<PointForm>(emptyPointForm);
+  const [editingPointId, setEditingPointId] = useState("");
+  const [selectedGovPointId, setSelectedGovPointId] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const stageRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ pointId: string; pointerId: number; moved: boolean } | null>(null);
+  const stageRefs = useRef<Partial<Record<BodyView, HTMLDivElement | null>>>({});
+  const dragRef = useRef<{
+    pointId: string;
+    pointerId: number;
+    moved: boolean;
+    view: BodyView;
+  } | null>(null);
+  const paneRefs = useRef<Partial<Record<BodyView, HTMLElement | null>>>({});
 
   const closeCreateModal = useCallback(() => {
     if (submitting) return;
     setCreateDraft(null);
   }, [submitting]);
 
-  const gridCols = mapData?.grid_cols ?? 48;
-  const gridRows = mapData?.grid_rows ?? 24;
-  const backgroundUrl =
-    mapData?.background_image_url ?? (bodyView === "TOP" ? "/body-maps/top.jpg" : "/body-maps/side.jpg");
+  const closeGroupModal = useCallback(() => {
+    if (submitting) return;
+    setGroupModal(null);
+    setEditingGroupId("");
+  }, [submitting]);
+
+  const closePointModal = useCallback(() => {
+    if (submitting) return;
+    setPointModal(null);
+    setEditingPointId("");
+  }, [submitting]);
+
+  const gridCols = canvas?.grid_cols ?? 48;
+  const gridRows = canvas?.grid_rows ?? 24;
+  const viewOrder = useMemo(() => {
+    const fromApi = (canvas?.view_order ?? []).filter(isBodyView);
+    return fromApi.length ? fromApi : BODY_VIEWS;
+  }, [canvas?.view_order]);
+  const viewLabels = canvas?.view_labels ?? DEFAULT_VIEW_LABELS;
+
+  const viewsByKey = useMemo(() => {
+    const map = new Map<BodyView, BodyMapPayload>();
+    for (const view of canvas?.views ?? []) {
+      if (isBodyView(view.body_view)) map.set(view.body_view, view);
+    }
+    return map;
+  }, [canvas]);
+
+  const activeViewData = viewsByKey.get(activeView) ?? null;
 
   const filteredGroups = useMemo(
     () => groups.filter((item) => !vehicleModelId || item.vehicle_model_id === vehicleModelId),
     [groups, vehicleModelId],
   );
+
+  const filteredMasterPoints = useMemo(
+    () => masterPoints.filter((item) => !vehicleModelId || item.vehicle_model_id === vehicleModelId),
+    [masterPoints, vehicleModelId],
+  );
+
   const filteredRuns = useMemo(
     () =>
       runs.filter(
@@ -269,61 +427,81 @@ export function BodyPointMap() {
     [runs, vehicleModelId, factoryId, colorId],
   );
 
-  const visiblePoints = useMemo(() => {
-    const points = mapData?.points ?? [];
-    return points.filter((point) => {
-      if (point.layout_x == null || point.layout_y == null) return false;
-      if (groupId && !point.in_group && !showUngrouped) return false;
-      return true;
-    });
-  }, [mapData, groupId, showUngrouped]);
+  const boundPointIds = useMemo(() => {
+    if (!groupId) return new Set<string>();
+    return new Set(
+      groupPointRelations
+        .filter((item) => item.measurement_group_id === groupId)
+        .map((item) => item.measurement_point_id),
+    );
+  }, [groupPointRelations, groupId]);
 
-  const unplaced = useMemo(
-    () => (mapData?.points ?? []).filter((point) => point.layout_x == null || point.layout_y == null),
-    [mapData],
+  const visiblePointsForView = useCallback(
+    (view: BodyView) => {
+      const payload = viewsByKey.get(view);
+      const points = payload?.points ?? [];
+      return points.filter((point) => {
+        if (point.layout_x == null || point.layout_y == null) return false;
+        if (groupId && !point.in_group && !showUngrouped) return false;
+        return true;
+      });
+    },
+    [viewsByKey, groupId, showUngrouped],
   );
 
+  const unplaced = useMemo(() => {
+    const points = activeViewData?.points ?? [];
+    return points.filter((point) => point.layout_x == null || point.layout_y == null);
+  }, [activeViewData]);
+
   const loadRefs = useCallback(async () => {
-    const [nextModels, nextParts, nextGroups, nextRuns] = await Promise.all([
+    const [nextModels, nextParts, nextGroups, nextPoints, nextRelations, nextRuns] = await Promise.all([
       request<Resource[]>("/api/master-data/vehicle-models"),
       request<Resource[]>("/api/master-data/parts"),
-      request<Resource[]>("/api/master-data/measurement-groups"),
+      request<MeasurementGroup[]>("/api/master-data/measurement-groups"),
+      request<MeasurementPoint[]>("/api/master-data/measurement-points"),
+      request<GroupPointRelation[]>("/api/master-data/measurement-group-points"),
       request<ProductionRun[]>("/api/process/production-runs"),
     ]);
     setModels(nextModels);
     setParts(nextParts);
     setGroups(nextGroups);
+    setMasterPoints(nextPoints);
+    setGroupPointRelations(nextRelations);
     setRuns(nextRuns);
     setVehicleModelId((current) => current || modelId || nextModels[0]?.id || "");
   }, [modelId]);
 
-  const loadMap = useCallback(async () => {
+  const loadCanvas = useCallback(async () => {
     if (!vehicleModelId) {
-      setMapData(null);
+      setCanvas(null);
       return;
     }
     setLoading(true);
     setError("");
     try {
-      const params = new URLSearchParams({
-        vehicle_model_id: vehicleModelId,
-        body_view: bodyView,
-      });
+      const params = new URLSearchParams({ vehicle_model_id: vehicleModelId });
       if (groupId) params.set("measurement_group_id", groupId);
       if (runId) params.set("production_run_id", runId);
-      const payload = await request<BodyMapPayload>(`/api/quality/body-map?${params}`);
-      setMapData(payload);
+      const payload = await request<CanvasPayload>(`/api/quality/body-map/canvas?${params}`);
+      setCanvas(payload);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载车身点位图失败");
-      setMapData(null);
+      setCanvas(null);
     } finally {
       setLoading(false);
     }
-  }, [vehicleModelId, bodyView, groupId, runId]);
+  }, [vehicleModelId, groupId, runId]);
+
+  const reloadAll = useCallback(async () => {
+    await loadRefs();
+    await loadCanvas();
+  }, [loadRefs, loadCanvas]);
 
   const loadDetail = useCallback(
     async (pointId: string, scopedRunId?: string) => {
       setSelectedPointId(pointId);
+      if (!sideTabPinned) setSideTab("detail");
       setDetailLoading(true);
       try {
         const params = new URLSearchParams();
@@ -340,7 +518,7 @@ export function BodyPointMap() {
         setDetailLoading(false);
       }
     },
-    [runId],
+    [runId, sideTabPinned],
   );
 
   useEffect(() => {
@@ -352,8 +530,8 @@ export function BodyPointMap() {
   }, [modelId]);
 
   useEffect(() => {
-    void loadMap();
-  }, [loadMap]);
+    void loadCanvas();
+  }, [loadCanvas]);
 
   useEffect(() => {
     if (!message) return;
@@ -367,10 +545,19 @@ export function BodyPointMap() {
     setSelectedPointId("");
     setDetail(null);
     setPendingPlaceId("");
+    setSelectedGovPointId("");
+    setSideTab("governance");
+    setSideTabPinned(false);
   }, [vehicleModelId]);
 
-  function clientToNormalized(clientX: number, clientY: number) {
-    const stage = stageRef.current;
+  useEffect(() => {
+    if (!selectedPointId && !sideTabPinned) {
+      setSideTab("governance");
+    }
+  }, [selectedPointId, sideTabPinned]);
+
+  function clientToNormalized(view: BodyView, clientX: number, clientY: number) {
+    const stage = stageRefs.current[view];
     if (!stage) return null;
     const rect = stage.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
@@ -379,37 +566,43 @@ export function BodyPointMap() {
     return snapCoords(rawX, rawY, gridCols, gridRows);
   }
 
-  async function saveLayout(pointId: string, x: number, y: number, col: number, row: number) {
+  function updateCanvasPoint(view: BodyView, pointId: string, patch: Partial<MapPoint>) {
+    setCanvas((current) => {
+      if (!current) return current;
+      const views = current.views.map((item) => {
+        if (item.body_view !== view) return item;
+        const points = item.points.map((point) =>
+          point.measurement_point_id === pointId ? { ...point, ...patch } : point,
+        );
+        const placed_count = points.filter((p) => p.layout_x != null).length;
+        return { ...item, points, placed_count };
+      });
+      return {
+        ...current,
+        views,
+        placed_count: views.reduce((sum, item) => sum + (item.placed_count ?? 0), 0),
+      };
+    });
+  }
+
+  async function saveLayout(view: BodyView, pointId: string, x: number, y: number, col: number, row: number) {
     const layout = await request<LayoutRead>(`/api/quality/body-map/layouts/${pointId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        body_view: bodyView,
+        body_view: view,
         layout_x: x,
         layout_y: y,
         grid_col: col,
         grid_row: row,
       }),
     });
-    setMapData((current) => {
-      if (!current) return current;
-      const points = current.points.map((point) =>
-        point.measurement_point_id === pointId
-          ? {
-              ...point,
-              layout_id: layout.id,
-              layout_x: layout.layout_x,
-              layout_y: layout.layout_y,
-              grid_col: layout.grid_col,
-              grid_row: layout.grid_row,
-            }
-          : point,
-      );
-      return {
-        ...current,
-        placed_count: points.filter((item) => item.layout_x != null).length,
-        points,
-      };
+    updateCanvasPoint(view, pointId, {
+      layout_id: layout.id,
+      layout_x: layout.layout_x,
+      layout_y: layout.layout_y,
+      grid_col: layout.grid_col,
+      grid_row: layout.grid_row,
     });
     return layout;
   }
@@ -419,7 +612,8 @@ export function BodyPointMap() {
       setMessage("该点尚未落在当前视图，无需移除");
       return;
     }
-    if (!window.confirm(`从${bodyView === "TOP" ? "俯视" : "侧视"}图移除 ${point.code}？测量点主数据不会删除。`)) {
+    const label = viewLabel(activeView, viewLabels);
+    if (!window.confirm(`从${label}移除 ${point.code}？测量点主数据不会删除。`)) {
       return;
     }
     setSubmitting(true);
@@ -428,14 +622,14 @@ export function BodyPointMap() {
       await request(`/api/quality/body-map/layouts/${point.layout_id}/deactivate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body_view: bodyView }),
+        body: JSON.stringify({ body_view: activeView }),
       });
-      setMessage(`已从${bodyView === "TOP" ? "俯视" : "侧视"}图移除 ${point.code}`);
+      setMessage(`已从${label}移除 ${point.code}`);
       if (selectedPointId === point.measurement_point_id) {
         setSelectedPointId("");
         setDetail(null);
       }
-      await loadMap();
+      await loadCanvas();
     } catch (err) {
       setError(err instanceof Error ? err.message : "移除点位失败");
     } finally {
@@ -454,7 +648,7 @@ export function BodyPointMap() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           vehicle_model_id: vehicleModelId,
-          body_view: bodyView,
+          body_view: createDraft.body_view,
           layout_x: createDraft.layout_x,
           layout_y: createDraft.layout_y,
           grid_col: createDraft.grid_col,
@@ -463,13 +657,20 @@ export function BodyPointMap() {
           name: createForm.name.trim(),
           part_id: createForm.part_id,
           region: createForm.region.trim() || null,
+          quality_types: createForm.quality_types,
           measurement_group_id: groupId || null,
         }),
       });
       setCreateDraft(null);
-      setCreateForm({ code: "", name: "", part_id: "", region: "" });
+      setCreateForm({
+        code: "",
+        name: "",
+        part_id: "",
+        region: "",
+        quality_types: ["THICKNESS", "COLOR_DIFFERENCE", "ORANGE_PEEL"],
+      });
       setMessage(`已创建测量点 ${created.code}`);
-      await loadMap();
+      await reloadAll();
       await loadDetail(created.measurement_point_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建测量点失败");
@@ -478,15 +679,203 @@ export function BodyPointMap() {
     }
   }
 
-  function onStagePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+  async function submitGroupForm(event: FormEvent) {
+    event.preventDefault();
+    if (!vehicleModelId) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const body = {
+        code: groupForm.code.trim(),
+        name: groupForm.name.trim(),
+        vehicle_model_id: vehicleModelId,
+        quality_type: groupForm.quality_type,
+        expected_point_count: groupForm.expected_point_count.trim()
+          ? Number(groupForm.expected_point_count)
+          : null,
+        remark: groupForm.remark.trim() || null,
+      };
+      if (groupModal === "edit" && editingGroupId) {
+        await request(`/api/master-data/measurement-groups/${editingGroupId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        setMessage(`已更新测量编组 ${body.code}`);
+      } else {
+        const created = await request<MeasurementGroup>("/api/master-data/measurement-groups", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        setGroupId(created.id);
+        setMessage(`已创建测量编组 ${created.code}`);
+      }
+      setGroupModal(null);
+      setEditingGroupId("");
+      await reloadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存测量编组失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitPointForm(event: FormEvent) {
+    event.preventDefault();
+    if (!vehicleModelId) return;
+    if (!pointForm.quality_types.length) {
+      setError("请至少选择一种质量类型");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      const body = {
+        code: pointForm.code.trim(),
+        name: pointForm.name.trim(),
+        vehicle_model_id: vehicleModelId,
+        part_id: pointForm.part_id,
+        region: pointForm.region.trim() || null,
+        quality_types: pointForm.quality_types,
+        point_type: "QUALITY",
+      };
+      let pointId = editingPointId;
+      if (pointModal === "edit" && editingPointId) {
+        await request(`/api/master-data/measurement-points/${editingPointId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        setMessage(`已更新测量点 ${body.code}`);
+      } else {
+        const created = await request<MeasurementPoint>("/api/master-data/measurement-points", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        pointId = created.id;
+        setMessage(`已创建测量点 ${created.code}`);
+        if (pointForm.bind_to_group && groupId) {
+          await request("/api/master-data/measurement-group-points", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              measurement_group_id: groupId,
+              measurement_point_id: created.id,
+              sequence_no: 0,
+            }),
+          });
+        }
+      }
+      setPointModal(null);
+      setEditingPointId("");
+      setSelectedGovPointId(pointId);
+      await reloadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存测量点失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function bindPointToGroup(pointId: string) {
+    if (!groupId) {
+      setMessage("请先选择测量编组");
+      return;
+    }
+    if (boundPointIds.has(pointId)) {
+      setMessage("该点已绑定到当前编组");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await request("/api/master-data/measurement-group-points", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          measurement_group_id: groupId,
+          measurement_point_id: pointId,
+          sequence_no: 0,
+        }),
+      });
+      setMessage("已绑定到当前编组");
+      await reloadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "绑定失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function openCreateGroup() {
+    setGroupForm(emptyGroupForm());
+    setEditingGroupId("");
+    setGroupModal("create");
+  }
+
+  function openEditGroup() {
+    const group = filteredGroups.find((item) => item.id === groupId);
+    if (!group) {
+      setMessage("请先选择要编辑的编组");
+      return;
+    }
+    setGroupForm({
+      code: group.code,
+      name: group.name,
+      quality_type: group.quality_type,
+      expected_point_count: group.expected_point_count != null ? String(group.expected_point_count) : "",
+      remark: group.remark ?? "",
+    });
+    setEditingGroupId(group.id);
+    setGroupModal("edit");
+  }
+
+  function openCreatePoint() {
+    setPointForm({
+      ...emptyPointForm(),
+      part_id: parts[0]?.id || "",
+      bind_to_group: Boolean(groupId),
+    });
+    setEditingPointId("");
+    setPointModal("create");
+  }
+
+  function openEditPoint(pointId?: string) {
+    const id = pointId || selectedGovPointId;
+    const point = filteredMasterPoints.find((item) => item.id === id);
+    if (!point) {
+      setMessage("请先选择要编辑的测量点");
+      return;
+    }
+    setPointForm({
+      code: point.code,
+      name: point.name,
+      part_id: point.part_id,
+      region: point.region ?? "",
+      quality_types: point.quality_types?.length ? [...point.quality_types] : ["THICKNESS"],
+      bind_to_group: false,
+    });
+    setEditingPointId(point.id);
+    setPointModal("edit");
+  }
+
+  function focusPane(view: BodyView) {
+    setActiveView(view);
+    paneRefs.current[view]?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+  }
+
+  function onStagePointerDown(view: BodyView, event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
+    setActiveView(view);
     if ((event.target as HTMLElement).closest(".body-map-point")) return;
-    const coords = clientToNormalized(event.clientX, event.clientY);
+    const coords = clientToNormalized(view, event.clientX, event.clientY);
     if (!coords) return;
 
     if (pendingPlaceId) {
-      const point = mapData?.points.find((item) => item.measurement_point_id === pendingPlaceId);
-      void saveLayout(pendingPlaceId, coords.x, coords.y, coords.col, coords.row)
+      const point = viewsByKey.get(view)?.points.find((item) => item.measurement_point_id === pendingPlaceId);
+      void saveLayout(view, pendingPlaceId, coords.x, coords.y, coords.col, coords.row)
         .then(() => {
           setMessage(`已放置 ${point?.code ?? "点位"}，可继续拖拽微调`);
           setPendingPlaceId("");
@@ -497,6 +886,7 @@ export function BodyPointMap() {
 
     if (!editMode) return;
     setCreateDraft({
+      body_view: view,
       layout_x: coords.x,
       layout_y: coords.y,
       grid_col: coords.col,
@@ -510,36 +900,31 @@ export function BodyPointMap() {
     }));
   }
 
-  function onPointPointerDown(event: ReactPointerEvent<HTMLButtonElement>, point: MapPoint) {
+  function onPointPointerDown(view: BodyView, event: ReactPointerEvent<HTMLButtonElement>, point: MapPoint) {
     event.stopPropagation();
-    void loadDetail(point.measurement_point_id, runId || mapData?.production_run_id || undefined);
+    setActiveView(view);
+    void loadDetail(point.measurement_point_id, runId || canvas?.production_run_id || undefined);
     if (!editMode) return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { pointId: point.measurement_point_id, pointerId: event.pointerId, moved: false };
+    dragRef.current = {
+      pointId: point.measurement_point_id,
+      pointerId: event.pointerId,
+      moved: false,
+      view,
+    };
   }
 
   function onPointPointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId || !editMode) return;
-    const coords = clientToNormalized(event.clientX, event.clientY);
+    const coords = clientToNormalized(drag.view, event.clientX, event.clientY);
     if (!coords) return;
     drag.moved = true;
-    setMapData((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        points: current.points.map((point) =>
-          point.measurement_point_id === drag.pointId
-            ? {
-                ...point,
-                layout_x: coords.x,
-                layout_y: coords.y,
-                grid_col: coords.col,
-                grid_row: coords.row,
-              }
-            : point,
-        ),
-      };
+    updateCanvasPoint(drag.view, drag.pointId, {
+      layout_x: coords.x,
+      layout_y: coords.y,
+      grid_col: coords.col,
+      grid_row: coords.row,
     });
   }
 
@@ -548,16 +933,22 @@ export function BodyPointMap() {
     if (!drag || drag.pointerId !== event.pointerId) return;
     dragRef.current = null;
     if (!editMode || !drag.moved) return;
-    const coords = clientToNormalized(event.clientX, event.clientY);
+    const coords = clientToNormalized(drag.view, event.clientX, event.clientY);
     if (!coords) return;
     try {
-      await saveLayout(drag.pointId, coords.x, coords.y, coords.col, coords.row);
+      await saveLayout(drag.view, drag.pointId, coords.x, coords.y, coords.col, coords.row);
       setMessage("点位坐标已更新");
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存坐标失败");
-      await loadMap();
+      await loadCanvas();
     }
   }
+
+  function toggleQualityType(list: string[], value: string): string[] {
+    return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
+  }
+
+  const selectedGroup = filteredGroups.find((item) => item.id === groupId) ?? null;
 
   return (
     <section className="panel body-map-panel">
@@ -565,12 +956,15 @@ export function BodyPointMap() {
         <div>
           <span className="eyebrow">车身点位图</span>
           <h3>白车身网格与质量分布</h3>
-          <small>
-            按测量编组映射点位；点击查看膜厚 / 色差 / 橘皮与关联刷子参数。编辑模式可拖拽、新增或从图移除（仅停用布局）。
-          </small>
+          <small>四视图 canvas + 测量编组/点位一站式治理（主数据测量体系已迁入此页）。</small>
         </div>
         <div className="row-actions">
-          <button className="button button-secondary" type="button" onClick={() => void loadMap()} disabled={loading}>
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={() => void loadCanvas()}
+            disabled={loading}
+          >
             {loading ? <LoaderCircle className="spin" /> : <RefreshCw />}
             刷新
           </button>
@@ -589,34 +983,32 @@ export function BodyPointMap() {
       </div>
 
       <div className="body-map-shell">
-        {mapData ? (
+        {canvas ? (
           <section className="quality-analytics-stat-grid body-map-stat-grid">
             <article>
               <span>已落图</span>
-              <strong>{mapData.placed_count ?? visiblePoints.length}</strong>
-              <small>当前视图 ACTIVE 布局</small>
+              <strong>{canvas.placed_count}</strong>
+              <small>四视图 ACTIVE 布局合计</small>
             </article>
             <article>
               <span>编组内</span>
-              <strong>{mapData.group_point_count ?? mapData.points.length}</strong>
+              <strong>{canvas.group_point_count}</strong>
               <small>{groupId ? "所选测量编组" : "全部质量点位"}</small>
             </article>
-            <article className={(mapData.fail_count ?? 0) > 0 ? "stat-alert" : ""}>
+            <article className={canvas.fail_count > 0 ? "stat-alert" : ""}>
               <span>超差（已落图）</span>
-              <strong>{mapData.fail_count ?? 0}</strong>
+              <strong>{canvas.fail_count}</strong>
               <small>仅统计 VERIFIED 判定</small>
             </article>
             <article>
               <span>未落图</span>
               <strong>{unplaced.length}</strong>
-              <small>可进入编辑后放置</small>
+              <small>当前活动视图 · {viewLabel(activeView, viewLabels)}</small>
             </article>
             <article className="body-map-stat-scope">
               <span>质量范围</span>
-              <strong className="mono">
-                {mapData.production_run_no ?? "无生产事件"}
-              </strong>
-              <small>{mapData.quality_scope ?? "VERIFIED"} · 自动/指定生产事件</small>
+              <strong className="mono">{canvas.production_run_no ?? "无生产事件"}</strong>
+              <small>{canvas.quality_scope ?? "VERIFIED"} · 自动/指定生产事件</small>
             </article>
           </section>
         ) : null}
@@ -624,7 +1016,7 @@ export function BodyPointMap() {
         <div className="governance-scope-bar body-map-scope-bar">
           <div>
             <strong>工作范围</strong>
-            <span>先选车型与视图，再按编组 / 生产事件过滤；着色仅基于已核验质量数据。</span>
+            <span>四视图同屏；先选车型与编组 / 生产事件，再点击视图进行编辑落图。着色仅基于已核验质量数据。</span>
           </div>
           <div className="governance-scope-fields body-map-scope-fields">
             <label className="form-field">
@@ -639,22 +1031,18 @@ export function BodyPointMap() {
               </select>
             </label>
             <div className="form-field">
-              <span>车身视图</span>
-              <div className="body-map-view-toggle" role="group" aria-label="车身视图">
-                <button
-                  type="button"
-                  className={bodyView === "SIDE" ? "is-active" : ""}
-                  onClick={() => setBodyView("SIDE")}
-                >
-                  侧视
-                </button>
-                <button
-                  type="button"
-                  className={bodyView === "TOP" ? "is-active" : ""}
-                  onClick={() => setBodyView("TOP")}
-                >
-                  俯视
-                </button>
+              <span>聚焦视图</span>
+              <div className="body-map-view-toggle" role="group" aria-label="聚焦视图">
+                {BODY_VIEWS.map((view) => (
+                  <button
+                    key={view}
+                    type="button"
+                    className={activeView === view ? "is-active" : ""}
+                    onClick={() => focusPane(view)}
+                  >
+                    {viewLabel(view, viewLabels).replace("视图", "")}
+                  </button>
+                ))}
               </div>
             </div>
             <label className="form-field">
@@ -727,7 +1115,9 @@ export function BodyPointMap() {
           <div className="body-map-hint is-active">
             <div className="body-map-hint-copy">
               <MapPinned />
-              <span>放置模式：在白车身上点击目标网格，将未落图点位放到该位置。</span>
+              <span>
+                放置模式：在「{viewLabel(activeView, viewLabels)}」点击目标网格，将未落图点位放到该位置。
+              </span>
             </div>
             <button type="button" className="button button-secondary" onClick={() => setPendingPlaceId("")}>
               取消
@@ -743,68 +1133,94 @@ export function BodyPointMap() {
         ) : (
           <div className="body-map-layout">
             <div className="body-map-stage-wrap">
-              <div className="body-map-stage-card">
-                <div className="body-map-stage-meta">
-                  <div>
-                    <span className="eyebrow">{bodyView === "TOP" ? "俯视" : "侧视"}白车身</span>
-                    <strong>
-                      {mapData?.vehicle_model_code ?? "—"} · {mapData?.vehicle_model_name ?? "加载中"}
-                    </strong>
-                  </div>
-                  <small className="mono">
-                    网格 {gridCols}×{gridRows}
-                    {editMode ? " · 编辑中" : ""}
-                  </small>
-                </div>
-                <div
-                  ref={stageRef}
-                  className={`body-map-stage ${editMode || pendingPlaceId ? "is-editing" : ""}`}
-                  style={{ "--grid-cols": String(gridCols), "--grid-rows": String(gridRows) } as CSSProperties}
-                  onPointerDown={onStagePointerDown}
-                >
-                  <img
-                    className="body-map-bg"
-                    src={backgroundUrl}
-                    alt={`${bodyView === "TOP" ? "俯视" : "侧视"}白车身`}
-                    draggable={false}
-                  />
-                  <div className="body-map-grid" aria-hidden="true" />
-                  {visiblePoints.map((point) => (
-                    <button
-                      key={point.measurement_point_id}
-                      type="button"
-                      className={`body-map-point ${selectedPointId === point.measurement_point_id ? "is-selected" : ""} ${point.in_group ? "in-group" : "out-group"}`}
-                      style={{
-                        left: `${(point.layout_x ?? 0) * 100}%`,
-                        top: `${(point.layout_y ?? 0) * 100}%`,
-                        ["--point-color" as string]: pointColor(point, overlayMode),
+              <div
+                className="body-map-canvas"
+                style={{ "--grid-cols": String(gridCols), "--grid-rows": String(gridRows) } as CSSProperties}
+              >
+                {viewOrder.map((view) => {
+                  const payload = viewsByKey.get(view);
+                  const backgroundUrl =
+                    payload?.background_image_url ?? DEFAULT_VIEW_IMAGES[view];
+                  const points = visiblePointsForView(view);
+                  const isActive = activeView === view;
+                  return (
+                    <article
+                      key={view}
+                      ref={(node) => {
+                        paneRefs.current[view] = node;
                       }}
-                      title={`${point.code} / ${point.name}`}
-                      onPointerDown={(event) => onPointPointerDown(event, point)}
-                      onPointerMove={onPointPointerMove}
-                      onPointerUp={(event) => void onPointPointerUp(event)}
+                      className={`body-map-pane ${isActive ? "is-active-pane" : ""}`}
+                      onClick={() => setActiveView(view)}
                     >
-                      <span>{point.code}</span>
-                    </button>
-                  ))}
-                  {loading ? (
-                    <div className="body-map-loading">
-                      <LoaderCircle className="spin" />
-                      正在加载点位…
-                    </div>
-                  ) : null}
-                </div>
+                      <div className="body-map-stage-meta">
+                        <div>
+                          <span className="eyebrow">{viewLabel(view, viewLabels)}</span>
+                          <strong>
+                            {canvas?.vehicle_model_code ?? "—"} · {canvas?.vehicle_model_name ?? "加载中"}
+                          </strong>
+                        </div>
+                        <small className="mono">
+                          {payload?.placed_count ?? points.length} 点
+                          {isActive && editMode ? " · 编辑中" : ""}
+                        </small>
+                      </div>
+                      <div
+                        ref={(node) => {
+                          stageRefs.current[view] = node;
+                        }}
+                        className={`body-map-stage ${editMode || pendingPlaceId ? "is-editing" : ""}`}
+                        onPointerDown={(event) => onStagePointerDown(view, event)}
+                      >
+                        <img
+                          className="body-map-bg"
+                          src={backgroundUrl}
+                          alt={viewLabel(view, viewLabels)}
+                          draggable={false}
+                        />
+                        <div className="body-map-grid" aria-hidden="true" />
+                        {points.map((point) => (
+                          <button
+                            key={point.measurement_point_id}
+                            type="button"
+                            className={`body-map-point ${selectedPointId === point.measurement_point_id ? "is-selected" : ""} ${point.in_group ? "in-group" : "out-group"}`}
+                            style={{
+                              left: `${(point.layout_x ?? 0) * 100}%`,
+                              top: `${(point.layout_y ?? 0) * 100}%`,
+                              ["--point-color" as string]: pointColor(point, overlayMode),
+                            }}
+                            title={`${point.code} / ${point.name}`}
+                            onPointerDown={(event) => onPointPointerDown(view, event, point)}
+                            onPointerMove={onPointPointerMove}
+                            onPointerUp={(event) => void onPointPointerUp(event)}
+                          >
+                            <span>{point.code}</span>
+                          </button>
+                        ))}
+                        {loading ? (
+                          <div className="body-map-loading">
+                            <LoaderCircle className="spin" />
+                            正在加载点位…
+                          </div>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
+
               {editMode ? (
                 <div className="body-map-hint">
                   <Plus />
-                  <span>编辑模式：拖拽点位吸附到网格；点击空白格新建测量点。图上「移除」仅停用当前视图布局。</span>
+                  <span>
+                    编辑模式：先点击激活视图，再拖拽点位吸附到网格；点击空白格新建测量点。图上「移除」仅停用当前活动视图布局。
+                  </span>
                 </div>
               ) : null}
+
               {(editMode || unplaced.length > 0) && unplaced.length ? (
                 <div className="body-map-unplaced">
                   <div className="body-map-unplaced-head">
-                    <strong>未落图点位</strong>
+                    <strong>未落图点位 · {viewLabel(activeView, viewLabels)}</strong>
                     <span>{unplaced.length}</span>
                   </div>
                   <div className="body-map-unplaced-list">
@@ -816,7 +1232,7 @@ export function BodyPointMap() {
                         onClick={() => {
                           setEditMode(true);
                           setPendingPlaceId(point.measurement_point_id);
-                          setMessage(`请在图上点击放置 ${point.code}`);
+                          setMessage(`请在「${viewLabel(activeView, viewLabels)}」点击放置 ${point.code}`);
                         }}
                       >
                         放置 {point.code}
@@ -828,7 +1244,155 @@ export function BodyPointMap() {
             </div>
 
             <aside className="body-map-detail">
-              {!selectedPointId ? (
+              <div className="body-map-side-tabs" role="tablist" aria-label="侧栏">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={sideTab === "governance"}
+                  className={sideTab === "governance" ? "is-active" : ""}
+                  onClick={() => {
+                    setSideTab("governance");
+                    setSideTabPinned(true);
+                  }}
+                >
+                  <ListTree />
+                  测量治理
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={sideTab === "detail"}
+                  className={sideTab === "detail" ? "is-active" : ""}
+                  onClick={() => {
+                    setSideTab("detail");
+                    setSideTabPinned(true);
+                  }}
+                >
+                  <Layers />
+                  点位详情
+                </button>
+              </div>
+
+              {sideTab === "governance" ? (
+                <div className="body-map-governance">
+                  <div className="body-map-detail-head">
+                    <div>
+                      <span className="eyebrow">测量编组</span>
+                      <h4>{selectedGroup ? `${selectedGroup.code} · ${selectedGroup.name}` : "未选择编组"}</h4>
+                      <small>
+                        {selectedGroup
+                          ? `${qualityLabels[selectedGroup.quality_type] ?? selectedGroup.quality_type}${selectedGroup.expected_point_count != null ? ` · 预期 ${selectedGroup.expected_point_count} 点` : ""}`
+                          : "选择或新建编组后可绑定点位"}
+                      </small>
+                    </div>
+                    <div className="row-actions">
+                      <button className="button button-secondary" type="button" onClick={openCreateGroup}>
+                        <Plus />
+                        新建
+                      </button>
+                      <button
+                        className="button button-secondary"
+                        type="button"
+                        disabled={!groupId}
+                        onClick={openEditGroup}
+                      >
+                        <Pencil />
+                        编辑
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="body-map-gov-list">
+                    {filteredGroups.length ? (
+                      filteredGroups.map((group) => (
+                        <button
+                          key={group.id}
+                          type="button"
+                          className={`body-map-gov-item ${groupId === group.id ? "is-selected" : ""}`}
+                          onClick={() => setGroupId(group.id)}
+                        >
+                          <strong>
+                            {group.code} / {group.name}
+                          </strong>
+                          <small>
+                            {qualityLabels[group.quality_type] ?? group.quality_type}
+                            {group.expected_point_count != null ? ` · 预期 ${group.expected_point_count}` : ""}
+                          </small>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="program-empty">当前车型暂无测量编组</div>
+                    )}
+                  </div>
+
+                  <div className="program-subheading compact">
+                    <div>
+                      <span className="eyebrow">测量点</span>
+                      <h4>车型点位主数据</h4>
+                    </div>
+                    <div className="row-actions">
+                      <button className="button button-secondary" type="button" onClick={openCreatePoint}>
+                        <Plus />
+                        新建点
+                      </button>
+                      <button
+                        className="button button-secondary"
+                        type="button"
+                        disabled={!selectedGovPointId}
+                        onClick={() => openEditPoint()}
+                      >
+                        <Pencil />
+                        编辑
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="body-map-gov-list body-map-gov-points">
+                    {filteredMasterPoints.length ? (
+                      filteredMasterPoints.map((point) => {
+                        const bound = boundPointIds.has(point.id);
+                        return (
+                          <div
+                            key={point.id}
+                            className={`body-map-gov-item ${selectedGovPointId === point.id ? "is-selected" : ""}`}
+                          >
+                            <button
+                              type="button"
+                              className="body-map-gov-point-main"
+                              onClick={() => {
+                                setSelectedGovPointId(point.id);
+                                void loadDetail(point.id, runId || canvas?.production_run_id || undefined);
+                              }}
+                            >
+                              <strong>
+                                {point.code} / {point.name}
+                              </strong>
+                              <small>
+                                {(point.quality_types ?? [])
+                                  .map((item) => qualityLabels[item] ?? item)
+                                  .join(" · ") || "未设质量类型"}
+                                {point.region ? ` · ${point.region}` : ""}
+                              </small>
+                            </button>
+                            <button
+                              type="button"
+                              className={`button button-secondary body-map-bind-btn ${bound ? "is-bound" : ""}`}
+                              disabled={!groupId || bound || submitting}
+                              title={bound ? "已绑定" : "绑定到当前编组"}
+                              onClick={() => void bindPointToGroup(point.id)}
+                            >
+                              <Link2 />
+                              {bound ? "已绑" : "绑定"}
+                            </button>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="program-empty">当前车型暂无测量点</div>
+                    )}
+                  </div>
+                </div>
+              ) : !selectedPointId ? (
                 <div className="program-empty body-map-detail-empty">
                   <MapPinned />
                   点击图上点位查看质量与刷子参数。
@@ -857,7 +1421,7 @@ export function BodyPointMap() {
                         type="button"
                         disabled={submitting}
                         onClick={() => {
-                          const point = mapData?.points.find(
+                          const point = activeViewData?.points.find(
                             (item) => item.measurement_point_id === detail.measurement_point_id,
                           );
                           if (point) void deactivatePoint(point);
@@ -972,7 +1536,7 @@ export function BodyPointMap() {
         <ModalShell
           eyebrow="新建测量点"
           title="在网格上创建点位"
-          description="将同步写入测量点主数据，并在当前视图落图；若已选测量编组会自动绑定。"
+          description={`将同步写入测量点主数据，并在${viewLabel(createDraft.body_view, viewLabels)}落图；若已选测量编组会自动绑定。`}
           onClose={closeCreateModal}
           busy={submitting}
         >
@@ -1022,21 +1586,239 @@ export function BodyPointMap() {
                   onChange={(event) => setCreateForm({ ...createForm, region: event.target.value })}
                 />
               </label>
+              <div className="form-field form-field-wide">
+                <span>质量类型</span>
+                <div className="body-map-multiselect">
+                  {QUALITY_TYPE_OPTIONS.map((type) => (
+                    <label key={type} className="governance-chip">
+                      <input
+                        type="checkbox"
+                        checked={createForm.quality_types.includes(type)}
+                        onChange={() =>
+                          setCreateForm({
+                            ...createForm,
+                            quality_types: toggleQualityType(createForm.quality_types, type),
+                          })
+                        }
+                      />
+                      {qualityLabels[type]}
+                    </label>
+                  ))}
+                </div>
+              </div>
               <div className="form-field">
                 <span>落点</span>
                 <div className="mono">
-                  视图 {bodyView} · 格 ({createDraft.grid_col}, {createDraft.grid_row}) · (
+                  视图 {createDraft.body_view} · 格 ({createDraft.grid_col}, {createDraft.grid_row}) · (
                   {createDraft.layout_x.toFixed(3)}, {createDraft.layout_y.toFixed(3)})
                 </div>
               </div>
             </div>
             <div className="modal-actions">
-              <button className="button button-secondary" type="button" onClick={() => setCreateDraft(null)} disabled={submitting}>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={() => setCreateDraft(null)}
+                disabled={submitting}
+              >
                 取消
               </button>
               <button className="button button-primary" type="submit" disabled={submitting}>
                 {submitting ? <LoaderCircle className="spin" /> : null}
                 创建并落图
+              </button>
+            </div>
+          </form>
+        </ModalShell>
+      ) : null}
+
+      {groupModal ? (
+        <ModalShell
+          eyebrow={groupModal === "create" ? "新建编组" : "编辑编组"}
+          title={groupModal === "create" ? "创建测量编组" : "更新测量编组"}
+          description="编组用于质量录入与车身点位图过滤；质量类型取自系统目录，不写入设备极限。"
+          onClose={closeGroupModal}
+          busy={submitting}
+        >
+          <form onSubmit={(event) => void submitGroupForm(event)}>
+            <div className="form-grid">
+              <label className="form-field">
+                <span>
+                  编组代码<b>*</b>
+                </span>
+                <input
+                  required
+                  value={groupForm.code}
+                  onChange={(event) => setGroupForm({ ...groupForm, code: event.target.value })}
+                />
+              </label>
+              <label className="form-field">
+                <span>
+                  编组名称<b>*</b>
+                </span>
+                <input
+                  required
+                  value={groupForm.name}
+                  onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })}
+                />
+              </label>
+              <label className="form-field">
+                <span>
+                  质量类型<b>*</b>
+                </span>
+                <select
+                  required
+                  value={groupForm.quality_type}
+                  onChange={(event) => setGroupForm({ ...groupForm, quality_type: event.target.value })}
+                >
+                  {QUALITY_TYPE_OPTIONS.map((type) => (
+                    <option key={type} value={type}>
+                      {qualityLabels[type]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>预期点位数</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={groupForm.expected_point_count}
+                  onChange={(event) =>
+                    setGroupForm({ ...groupForm, expected_point_count: event.target.value })
+                  }
+                />
+              </label>
+              <label className="form-field form-field-wide">
+                <span>备注</span>
+                <input
+                  value={groupForm.remark}
+                  onChange={(event) => setGroupForm({ ...groupForm, remark: event.target.value })}
+                />
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={closeGroupModal}
+                disabled={submitting}
+              >
+                取消
+              </button>
+              <button className="button button-primary" type="submit" disabled={submitting}>
+                {submitting ? <LoaderCircle className="spin" /> : null}
+                保存
+              </button>
+            </div>
+          </form>
+        </ModalShell>
+      ) : null}
+
+      {pointModal ? (
+        <ModalShell
+          eyebrow={pointModal === "create" ? "新建测量点" : "编辑测量点"}
+          title={pointModal === "create" ? "创建测量点主数据" : "更新测量点主数据"}
+          description="质量类型多选；创建时可选择绑定到当前测量编组。落图请在左侧四视图编辑模式中操作。"
+          onClose={closePointModal}
+          busy={submitting}
+        >
+          <form onSubmit={(event) => void submitPointForm(event)}>
+            <div className="form-grid">
+              <label className="form-field">
+                <span>
+                  点位代码<b>*</b>
+                </span>
+                <input
+                  required
+                  value={pointForm.code}
+                  onChange={(event) => setPointForm({ ...pointForm, code: event.target.value })}
+                />
+              </label>
+              <label className="form-field">
+                <span>
+                  点位名称<b>*</b>
+                </span>
+                <input
+                  required
+                  value={pointForm.name}
+                  onChange={(event) => setPointForm({ ...pointForm, name: event.target.value })}
+                />
+              </label>
+              <label className="form-field">
+                <span>
+                  零件<b>*</b>
+                </span>
+                <select
+                  required
+                  value={pointForm.part_id}
+                  onChange={(event) => setPointForm({ ...pointForm, part_id: event.target.value })}
+                >
+                  <option value="">请选择</option>
+                  {parts.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.code} / {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>区域</span>
+                <input
+                  value={pointForm.region}
+                  onChange={(event) => setPointForm({ ...pointForm, region: event.target.value })}
+                />
+              </label>
+              <div className="form-field form-field-wide">
+                <span>
+                  质量类型<b>*</b>
+                </span>
+                <div className="body-map-multiselect">
+                  {QUALITY_TYPE_OPTIONS.map((type) => (
+                    <label key={type} className="governance-chip">
+                      <input
+                        type="checkbox"
+                        checked={pointForm.quality_types.includes(type)}
+                        onChange={() =>
+                          setPointForm({
+                            ...pointForm,
+                            quality_types: toggleQualityType(pointForm.quality_types, type),
+                          })
+                        }
+                      />
+                      {qualityLabels[type]}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {pointModal === "create" ? (
+                <label className="governance-chip form-field-wide">
+                  <input
+                    type="checkbox"
+                    checked={pointForm.bind_to_group && Boolean(groupId)}
+                    disabled={!groupId}
+                    onChange={(event) =>
+                      setPointForm({ ...pointForm, bind_to_group: event.target.checked })
+                    }
+                  />
+                  {groupId
+                    ? `创建后绑定到编组 ${selectedGroup?.code ?? groupId}`
+                    : "创建后绑定到当前编组（请先选择编组）"}
+                </label>
+              ) : null}
+            </div>
+            <div className="modal-actions">
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={closePointModal}
+                disabled={submitting}
+              >
+                取消
+              </button>
+              <button className="button button-primary" type="submit" disabled={submitting}>
+                {submitting ? <LoaderCircle className="spin" /> : null}
+                保存
               </button>
             </div>
           </form>

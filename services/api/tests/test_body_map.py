@@ -177,6 +177,7 @@ def test_body_map_layout_upsert_and_deactivate() -> None:
         db,
     )
     assert layout.status == "ACTIVE"
+    assert layout.body_view == "RIGHT"
     assert layout.grid_col == int(0.42 * 48)
     assert layout.grid_row == int(0.55 * 24)
     assert abs(layout.layout_x - ((layout.grid_col + 0.5) / 48)) < 1e-9
@@ -189,12 +190,13 @@ def test_body_map_layout_upsert_and_deactivate() -> None:
     mapped = next(item for item in body_map.points if item.measurement_point_id == point.id)
     assert mapped.layout_x == layout.layout_x
     assert mapped.layout_y == layout.layout_y
+    assert body_map.body_view == "RIGHT"
     assert body_map.background_image_url == "/body-maps/side.jpg"
     assert body_map.placed_count == 1
 
     deactivated = deactivate_body_map_layout(
         layout.id,
-        BodyMapLayoutDeactivate(body_view="SIDE"),
+        BodyMapLayoutDeactivate(body_view="RIGHT"),
         db,
     )
     assert deactivated.status == "INACTIVE"
@@ -563,4 +565,49 @@ def test_body_map_detail_prefers_governed_contribution_and_actuals() -> None:
     assert item.validation_score == 0.9
     assert item.parameters[0].configured_value == 300
     assert item.parameters[0].actual_value == 312.5
+    db.close()
+
+
+def test_body_map_canvas_returns_four_views_and_model_images() -> None:
+    from app.api.routes.body_map import get_body_map_canvas
+
+    db = build_session()
+    context = build_body_map_context(db)
+    kunlun = create_vehicle_model(VehicleModelCreate(code="kunlun", name="昆仑"), db)
+    part = create_part(
+        PartCreate(code="KL-HOOD", name="Kunlun Hood", material="钢", region="外覆盖件"),
+        db,
+    )
+    upsert_body_map_layout(
+        context["point"].id,
+        BodyMapLayoutUpsert(body_view="RIGHT", layout_x=0.2, layout_y=0.3),
+        db,
+    )
+    canvas = get_body_map_canvas(vehicle_model_id=context["model"].id, db=db)
+    assert canvas.view_order == ["RIGHT", "LEFT", "TOP", "REAR"]
+    assert len(canvas.views) == 4
+    assert {view.body_view for view in canvas.views} == {"RIGHT", "LEFT", "TOP", "REAR"}
+    right = next(view for view in canvas.views if view.body_view == "RIGHT")
+    assert right.placed_count == 1
+    assert right.background_image_url == "/body-maps/side.jpg"
+
+    create_body_map_point(
+        BodyMapPointCreate(
+            vehicle_model_id=kunlun.id,
+            body_view="LEFT",
+            layout_x=0.4,
+            layout_y=0.5,
+            code="KL-1",
+            name="Kunlun Point",
+            part_id=part.id,
+        ),
+        db,
+    )
+    kunlun_canvas = get_body_map_canvas(vehicle_model_id=kunlun.id, db=db)
+    by_view = {view.body_view: view for view in kunlun_canvas.views}
+    assert by_view["RIGHT"].background_image_url == "/kunlun_rightside.jpg"
+    assert by_view["LEFT"].background_image_url == "/kunlun_leftside.jpg"
+    assert by_view["TOP"].background_image_url == "/kunlun_top.jpg"
+    assert by_view["REAR"].background_image_url == "/kunlun_trunk.jpg"
+    assert by_view["LEFT"].placed_count == 1
     db.close()

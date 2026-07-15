@@ -421,7 +421,7 @@ class QualityAnalytics(BaseModel):
 
 
 class BodyMapLayoutUpsert(BaseModel):
-    body_view: str = Field(pattern="^(TOP|SIDE)$")
+    body_view: str = Field(pattern="^(TOP|SIDE|LEFT|RIGHT|REAR)$")
     layout_x: float = Field(ge=0, le=1)
     layout_y: float = Field(ge=0, le=1)
     grid_col: int | None = Field(default=None, ge=0)
@@ -435,7 +435,7 @@ class BodyMapLayoutRead(BodyMapLayoutUpsert, ResourceRead):
 
 class BodyMapPointCreate(BaseModel):
     vehicle_model_id: str
-    body_view: str = Field(pattern="^(TOP|SIDE)$")
+    body_view: str = Field(pattern="^(TOP|SIDE|LEFT|RIGHT|REAR)$")
     layout_x: float = Field(ge=0, le=1)
     layout_y: float = Field(ge=0, le=1)
     grid_col: int | None = Field(default=None, ge=0)
@@ -452,7 +452,7 @@ class BodyMapPointCreate(BaseModel):
 
 
 class BodyMapLayoutDeactivate(BaseModel):
-    body_view: str = Field(pattern="^(TOP|SIDE)$")
+    body_view: str = Field(pattern="^(TOP|SIDE|LEFT|RIGHT|REAR)$")
 
 
 class BodyMapQualitySummary(BaseModel):
@@ -502,6 +502,24 @@ class BodyMapResponse(BaseModel):
     group_point_count: int = 0
     fail_count: int = 0
     points: list[BodyMapPointItem]
+
+
+class BodyMapCanvasResponse(BaseModel):
+    vehicle_model_id: str
+    vehicle_model_code: str
+    vehicle_model_name: str
+    view_order: list[str]
+    view_labels: dict[str, str]
+    grid_cols: int
+    grid_rows: int
+    measurement_group_id: str | None = None
+    production_run_id: str | None = None
+    production_run_no: str | None = None
+    quality_scope: str = "VERIFIED"
+    placed_count: int = 0
+    group_point_count: int = 0
+    fail_count: int = 0
+    views: list[BodyMapResponse]
 
 
 class BodyMapBrushParameter(BaseModel):

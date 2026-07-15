@@ -22,7 +22,7 @@ function QualityHubInner() {
     <DomainHub
       kicker="质量管理"
       title="质量管理中心"
-      description="统一完成质量概览、批量上传、判定、车身点位图、标准、SPC 与仪器可靠性。日常上数从「批量上传」开始。"
+      description="统一完成质量概览、批量上传、判定、车身点位图（含测量编组/点位治理）、标准、SPC 与仪器可靠性。日常上数从「批量上传」开始。"
       tabs={TABS}
       defaultTab="overview"
     >

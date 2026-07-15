@@ -39,6 +39,7 @@ from app.schemas.master_data import MeasurementGroupPointCreate, MeasurementPoin
 from app.schemas.quality import (
     BodyMapBrushContribution,
     BodyMapBrushParameter,
+    BodyMapCanvasResponse,
     BodyMapLayoutDeactivate,
     BodyMapLayoutRead,
     BodyMapLayoutUpsert,
@@ -53,10 +54,46 @@ from app.services.quality_evaluation import evaluate_quality_measurement
 
 router = APIRouter(prefix="/quality/body-map", tags=["quality-body-map"])
 
-BODY_VIEW_IMAGES = {
-    "TOP": "/body-maps/top.jpg",
-    "SIDE": "/body-maps/side.jpg",
+# Canonical BIW views. Legacy SIDE is accepted as an alias of RIGHT.
+BODY_VIEWS = ("RIGHT", "LEFT", "TOP", "REAR")
+BODY_VIEW_ORDER = list(BODY_VIEWS)
+BODY_VIEW_LABELS = {
+    "RIGHT": "右侧视图",
+    "LEFT": "左侧视图",
+    "TOP": "俯视图",
+    "REAR": "后视图",
 }
+LEGACY_BODY_VIEW_ALIASES = {"SIDE": "RIGHT"}
+
+DEFAULT_BODY_VIEW_IMAGES = {
+    "RIGHT": "/body-maps/side.jpg",
+    "LEFT": "/body-maps/side.jpg",
+    "TOP": "/body-maps/top.jpg",
+    "REAR": "/ms11_back.jpg",
+}
+
+# Per-model assets under apps/web/public (matched by vehicle_model.code, case-insensitive).
+MODEL_BODY_VIEW_IMAGES: dict[str, dict[str, str]] = {
+    "kunlun": {
+        "RIGHT": "/kunlun_rightside.jpg",
+        "LEFT": "/kunlun_leftside.jpg",
+        "TOP": "/kunlun_top.jpg",
+        "REAR": "/kunlun_trunk.jpg",
+    },
+    "昆仑": {
+        "RIGHT": "/kunlun_rightside.jpg",
+        "LEFT": "/kunlun_leftside.jpg",
+        "TOP": "/kunlun_top.jpg",
+        "REAR": "/kunlun_trunk.jpg",
+    },
+    "ms11": {
+        "RIGHT": "/ms11_rightside.jpg",
+        "LEFT": "/ms11_rightside.jpg",
+        "TOP": "/body-maps/top.jpg",
+        "REAR": "/ms11_back.jpg",
+    },
+}
+
 DEFAULT_GRID_COLS = 48
 DEFAULT_GRID_ROWS = 24
 
@@ -88,9 +125,29 @@ def _coating_system(process_stage: str) -> str:
 
 def _validate_body_view(body_view: str) -> str:
     normalized = body_view.strip().upper()
-    if normalized not in BODY_VIEW_IMAGES:
-        raise HTTPException(status_code=422, detail="body_view 仅支持 TOP 或 SIDE")
+    normalized = LEGACY_BODY_VIEW_ALIASES.get(normalized, normalized)
+    if normalized not in BODY_VIEWS:
+        raise HTTPException(
+            status_code=422,
+            detail="body_view 仅支持 RIGHT / LEFT / TOP / REAR（SIDE 视为 RIGHT）",
+        )
     return normalized
+
+
+def _layout_view_keys(body_view: str) -> tuple[str, ...]:
+    """Canonical view plus legacy aliases that may still exist in stored layouts."""
+    if body_view == "RIGHT":
+        return ("RIGHT", "SIDE")
+    return (body_view,)
+
+
+def _resolve_body_view_image(vehicle_model_code: str, body_view: str) -> str:
+    code = (vehicle_model_code or "").strip()
+    lowered = code.lower()
+    for key, images in MODEL_BODY_VIEW_IMAGES.items():
+        if lowered == key.lower() or key.lower() in lowered:
+            return images.get(body_view) or DEFAULT_BODY_VIEW_IMAGES[body_view]
+    return DEFAULT_BODY_VIEW_IMAGES[body_view]
 
 
 def _snap_grid(layout_x: float, layout_y: float) -> tuple[int, int]:
@@ -501,13 +558,26 @@ def _upsert_layout(
     layout_x, layout_y, grid_col, grid_row = _normalize_layout_coords(
         layout_x, layout_y, grid_col, grid_row
     )
-    layout = db.scalar(
-        select(MeasurementPointLayout).where(
-            MeasurementPointLayout.measurement_point_id == measurement_point_id,
-            MeasurementPointLayout.body_view == body_view,
+    view_keys = _layout_view_keys(body_view)
+    layouts = list(
+        db.scalars(
+            select(MeasurementPointLayout).where(
+                MeasurementPointLayout.measurement_point_id == measurement_point_id,
+                MeasurementPointLayout.body_view.in_(view_keys),
+            )
         )
     )
+    layout = next((item for item in layouts if item.body_view == body_view), None)
+    if layout is None and layouts:
+        layout = layouts[0]
+    # Soft-retire legacy alias rows when migrating SIDE → RIGHT.
+    for item in layouts:
+        if item is layout:
+            continue
+        if item.body_view != body_view and item.status == "ACTIVE":
+            item.status = "INACTIVE"
     if layout:
+        layout.body_view = body_view
         layout.layout_x = layout_x
         layout.layout_y = layout_y
         layout.grid_col = grid_col
@@ -529,65 +599,82 @@ def _upsert_layout(
     return layout
 
 
-@router.get("", response_model=BodyMapResponse)
-def get_body_map(
-    vehicle_model_id: str,
-    body_view: str = "SIDE",
-    measurement_group_id: str | None = None,
-    production_run_id: str | None = None,
-    db: Session = Depends(get_db),
+def _build_body_map_response(
+    db: Session,
+    *,
+    model: VehicleModel,
+    body_view: str,
+    measurement_group_id: str | None,
+    production_run_id: str | None,
+    points: list[MeasurementPoint] | None = None,
+    group_point_ids: set[str] | None = None,
+    layouts_by_point: dict[str, MeasurementPointLayout] | None = None,
+    parts: dict[str, Part] | None = None,
+    summaries: dict[str, list[BodyMapQualitySummary]] | None = None,
+    resolved_run: ProductionRun | None = None,
 ) -> BodyMapResponse:
     view = _validate_body_view(body_view)
-    model = _required(db, VehicleModel, vehicle_model_id, "车型")
-    resolved_run = _resolve_production_run(db, vehicle_model_id, production_run_id)
+    if resolved_run is None:
+        resolved_run = _resolve_production_run(db, model.id, production_run_id)
     resolved_run_id = resolved_run.id if resolved_run else None
-    group_point_ids: set[str] = set()
-    if measurement_group_id:
-        group = _required(db, MeasurementGroup, measurement_group_id, "测量编组")
-        if group.vehicle_model_id != vehicle_model_id:
-            raise HTTPException(status_code=422, detail="测量编组不属于所选车型")
-        group_point_ids = set(
-            db.scalars(
-                select(MeasurementGroupPoint.measurement_point_id).where(
-                    MeasurementGroupPoint.measurement_group_id == measurement_group_id
+
+    if group_point_ids is None:
+        group_point_ids = set()
+        if measurement_group_id:
+            group = _required(db, MeasurementGroup, measurement_group_id, "测量编组")
+            if group.vehicle_model_id != model.id:
+                raise HTTPException(status_code=422, detail="测量编组不属于所选车型")
+            group_point_ids = set(
+                db.scalars(
+                    select(MeasurementGroupPoint.measurement_point_id).where(
+                        MeasurementGroupPoint.measurement_group_id == measurement_group_id
+                    )
                 )
             )
-        )
 
-    points = list(
-        db.scalars(
-            select(MeasurementPoint)
-            .where(
-                MeasurementPoint.vehicle_model_id == vehicle_model_id,
-                MeasurementPoint.point_type == "QUALITY",
+    if points is None:
+        points = list(
+            db.scalars(
+                select(MeasurementPoint)
+                .where(
+                    MeasurementPoint.vehicle_model_id == model.id,
+                    MeasurementPoint.point_type == "QUALITY",
+                )
+                .order_by(MeasurementPoint.code)
             )
-            .order_by(MeasurementPoint.code)
         )
-    )
     point_ids = {point.id for point in points}
-    layouts = {
-        item.measurement_point_id: item
+
+    if layouts_by_point is None:
+        view_keys = _layout_view_keys(view)
+        layouts_by_point = {}
         for item in db.scalars(
             select(MeasurementPointLayout).where(
                 MeasurementPointLayout.measurement_point_id.in_(point_ids or {"__none__"}),
-                MeasurementPointLayout.body_view == view,
+                MeasurementPointLayout.body_view.in_(view_keys),
                 MeasurementPointLayout.status == "ACTIVE",
             )
+        ):
+            existing = layouts_by_point.get(item.measurement_point_id)
+            if existing is None or item.body_view == view:
+                layouts_by_point[item.measurement_point_id] = item
+
+    if parts is None:
+        parts = {
+            item.id: item
+            for item in db.scalars(
+                select(Part).where(Part.id.in_({point.part_id for point in points} or {"__none__"}))
+            )
+        }
+
+    if summaries is None:
+        summaries = _latest_quality_summaries(
+            db, point_ids, production_run_id=resolved_run_id
         )
-    }
-    parts = {
-        item.id: item
-        for item in db.scalars(
-            select(Part).where(Part.id.in_({point.part_id for point in points} or {"__none__"}))
-        )
-    }
-    summaries = _latest_quality_summaries(
-        db, point_ids, production_run_id=resolved_run_id
-    )
 
     items: list[BodyMapPointItem] = []
     for point in points:
-        layout = layouts.get(point.id)
+        layout = layouts_by_point.get(point.id)
         part = parts.get(point.part_id)
         point_summaries = summaries.get(point.id, [])
         items.append(
@@ -615,7 +702,6 @@ def get_body_map(
     group_point_count = (
         sum(1 for item in items if item.in_group) if measurement_group_id else len(items)
     )
-    # Fail count only for placed points — unplaced FAIL must not inflate map stats.
     fail_count = sum(
         1
         for item in items
@@ -628,7 +714,7 @@ def get_body_map(
         vehicle_model_code=model.code,
         vehicle_model_name=model.name,
         body_view=view,
-        background_image_url=BODY_VIEW_IMAGES[view],
+        background_image_url=_resolve_body_view_image(model.code, view),
         grid_cols=DEFAULT_GRID_COLS,
         grid_rows=DEFAULT_GRID_ROWS,
         measurement_group_id=measurement_group_id,
@@ -639,6 +725,136 @@ def get_body_map(
         group_point_count=group_point_count,
         fail_count=fail_count,
         points=items,
+    )
+
+
+@router.get("", response_model=BodyMapResponse)
+def get_body_map(
+    vehicle_model_id: str,
+    body_view: str = "RIGHT",
+    measurement_group_id: str | None = None,
+    production_run_id: str | None = None,
+    db: Session = Depends(get_db),
+) -> BodyMapResponse:
+    model = _required(db, VehicleModel, vehicle_model_id, "车型")
+    return _build_body_map_response(
+        db,
+        model=model,
+        body_view=body_view,
+        measurement_group_id=measurement_group_id,
+        production_run_id=production_run_id,
+    )
+
+
+@router.get("/canvas", response_model=BodyMapCanvasResponse)
+def get_body_map_canvas(
+    vehicle_model_id: str,
+    measurement_group_id: str | None = None,
+    production_run_id: str | None = None,
+    db: Session = Depends(get_db),
+) -> BodyMapCanvasResponse:
+    model = _required(db, VehicleModel, vehicle_model_id, "车型")
+    resolved_run = _resolve_production_run(db, model.id, production_run_id)
+    resolved_run_id = resolved_run.id if resolved_run else None
+
+    group_point_ids: set[str] = set()
+    if measurement_group_id:
+        group = _required(db, MeasurementGroup, measurement_group_id, "测量编组")
+        if group.vehicle_model_id != model.id:
+            raise HTTPException(status_code=422, detail="测量编组不属于所选车型")
+        group_point_ids = set(
+            db.scalars(
+                select(MeasurementGroupPoint.measurement_point_id).where(
+                    MeasurementGroupPoint.measurement_group_id == measurement_group_id
+                )
+            )
+        )
+
+    points = list(
+        db.scalars(
+            select(MeasurementPoint)
+            .where(
+                MeasurementPoint.vehicle_model_id == model.id,
+                MeasurementPoint.point_type == "QUALITY",
+            )
+            .order_by(MeasurementPoint.code)
+        )
+    )
+    point_ids = {point.id for point in points}
+    parts = {
+        item.id: item
+        for item in db.scalars(
+            select(Part).where(Part.id.in_({point.part_id for point in points} or {"__none__"}))
+        )
+    }
+    summaries = _latest_quality_summaries(db, point_ids, production_run_id=resolved_run_id)
+
+    all_view_keys = tuple({key for view in BODY_VIEW_ORDER for key in _layout_view_keys(view)})
+    layouts_rows = list(
+        db.scalars(
+            select(MeasurementPointLayout).where(
+                MeasurementPointLayout.measurement_point_id.in_(point_ids or {"__none__"}),
+                MeasurementPointLayout.body_view.in_(all_view_keys),
+                MeasurementPointLayout.status == "ACTIVE",
+            )
+        )
+    )
+
+    views: list[BodyMapResponse] = []
+    for view in BODY_VIEW_ORDER:
+        view_keys = set(_layout_view_keys(view))
+        layouts_by_point: dict[str, MeasurementPointLayout] = {}
+        for item in layouts_rows:
+            if item.body_view not in view_keys:
+                continue
+            existing = layouts_by_point.get(item.measurement_point_id)
+            if existing is None or item.body_view == view:
+                layouts_by_point[item.measurement_point_id] = item
+        views.append(
+            _build_body_map_response(
+                db,
+                model=model,
+                body_view=view,
+                measurement_group_id=measurement_group_id,
+                production_run_id=resolved_run_id,
+                points=points,
+                group_point_ids=group_point_ids,
+                layouts_by_point=layouts_by_point,
+                parts=parts,
+                summaries=summaries,
+                resolved_run=resolved_run,
+            )
+        )
+
+    total_placed = sum(view.placed_count for view in views)
+    # Fail once per point if any placed view shows FAIL.
+    fail_point_ids = {
+        item.measurement_point_id
+        for view in views
+        for item in view.points
+        if item.layout_x is not None
+        and any(summary.judgement == "FAIL" for summary in item.quality_summaries)
+    }
+    group_point_count = (
+        len(group_point_ids) if measurement_group_id else len(points)
+    )
+
+    return BodyMapCanvasResponse(
+        vehicle_model_id=model.id,
+        vehicle_model_code=model.code,
+        vehicle_model_name=model.name,
+        view_order=list(BODY_VIEW_ORDER),
+        view_labels=dict(BODY_VIEW_LABELS),
+        grid_cols=DEFAULT_GRID_COLS,
+        grid_rows=DEFAULT_GRID_ROWS,
+        measurement_group_id=measurement_group_id,
+        production_run_id=resolved_run_id,
+        production_run_no=resolved_run.run_no if resolved_run else None,
+        quality_scope="VERIFIED",
+        placed_count=total_placed,
+        group_point_count=group_point_count,
+        fail_count=len(fail_point_ids),
+        views=views,
     )
 
 
@@ -746,7 +962,8 @@ def deactivate_body_map_layout(
     layout = _required(db, MeasurementPointLayout, layout_id, "点位布局")
     if payload and payload.body_view:
         view = _validate_body_view(payload.body_view)
-        if layout.body_view != view:
+        layout_view = LEGACY_BODY_VIEW_ALIASES.get(layout.body_view.upper(), layout.body_view.upper())
+        if layout_view != view:
             raise HTTPException(status_code=422, detail="布局视图与请求不一致")
     layout.status = "INACTIVE"
     db.commit()
