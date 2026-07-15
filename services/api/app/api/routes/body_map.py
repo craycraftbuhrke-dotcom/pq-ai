@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -67,7 +69,7 @@ LEGACY_BODY_VIEW_ALIASES = {"SIDE": "RIGHT"}
 
 DEFAULT_BODY_VIEW_IMAGES = {
     "RIGHT": "/body-maps/side.jpg",
-    "LEFT": "/body-maps/side.jpg",
+    "LEFT": "/body-maps/side-left.jpg",
     "TOP": "/body-maps/top.jpg",
     "REAR": "/ms11_back.jpg",
 }
@@ -88,7 +90,7 @@ MODEL_BODY_VIEW_IMAGES: dict[str, dict[str, str]] = {
     },
     "ms11": {
         "RIGHT": "/ms11_rightside.jpg",
-        "LEFT": "/ms11_rightside.jpg",
+        "LEFT": "/ms11_leftside.jpg",
         "TOP": "/body-maps/top.jpg",
         "REAR": "/ms11_back.jpg",
     },
@@ -141,13 +143,54 @@ def _layout_view_keys(body_view: str) -> tuple[str, ...]:
     return (body_view,)
 
 
-def _resolve_body_view_image(vehicle_model_code: str, body_view: str) -> str:
+def _web_public_dir() -> Path:
+    """Monorepo apps/web/public — body-map photos and view-images.json live here."""
+    return Path(__file__).resolve().parents[5] / "apps" / "web" / "public"
+
+
+def _builtin_body_view_image(vehicle_model_code: str, body_view: str) -> str:
     code = (vehicle_model_code or "").strip()
     lowered = code.lower()
     for key, images in MODEL_BODY_VIEW_IMAGES.items():
         if lowered == key.lower() or key.lower() in lowered:
             return images.get(body_view) or DEFAULT_BODY_VIEW_IMAGES[body_view]
     return DEFAULT_BODY_VIEW_IMAGES[body_view]
+
+
+def _load_view_image_overrides() -> dict[str, dict[str, str]]:
+    """Optional per-model overrides written by the web body-map image editor."""
+    path = _web_public_dir() / "body-maps" / "view-images.json"
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, dict):
+        return {}
+    result: dict[str, dict[str, str]] = {}
+    for model_key, views in models.items():
+        if not isinstance(model_key, str) or not isinstance(views, dict):
+            continue
+        cleaned: dict[str, str] = {}
+        for view, url in views.items():
+            if view in BODY_VIEWS and isinstance(url, str) and url.strip():
+                cleaned[view] = url.strip()
+        if cleaned:
+            result[model_key.strip().lower()] = cleaned
+    return result
+
+
+def _resolve_body_view_image(vehicle_model_code: str, body_view: str) -> str:
+    code = (vehicle_model_code or "").strip()
+    lowered = code.lower()
+    overrides = _load_view_image_overrides()
+    for key, images in overrides.items():
+        if lowered == key or (key and key in lowered):
+            if body_view in images:
+                return images[body_view]
+    return _builtin_body_view_image(code, body_view)
 
 
 def _snap_grid(layout_x: float, layout_y: float) -> tuple[int, int]:

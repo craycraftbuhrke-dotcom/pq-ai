@@ -1,6 +1,6 @@
 "use client";
 
-import { Layers, Link2, ListTree, LoaderCircle, MapPinned, Pencil, Plus, RefreshCw, X } from "lucide-react";
+import { Image as ImageIcon, Layers, Link2, ListTree, LoaderCircle, MapPinned, Pencil, Plus, RefreshCw, X } from "lucide-react";
 import {
   FormEvent,
   PointerEvent as ReactPointerEvent,
@@ -14,7 +14,9 @@ import {
 
 import Link from "next/link";
 
+import { BodyMapImageEditor } from "@/components/body-map-image-editor";
 import { ModalShell } from "@/components/modal-shell";
+import { DEFAULT_BODY_MAP_IMAGES } from "@/lib/body-map-images";
 import { stageLabel } from "@/lib/display-labels";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
@@ -206,12 +208,7 @@ const DEFAULT_VIEW_LABELS: Record<BodyView, string> = {
   REAR: "后视图",
 };
 
-const DEFAULT_VIEW_IMAGES: Record<BodyView, string> = {
-  RIGHT: "/body-maps/side.jpg",
-  LEFT: "/body-maps/side.jpg",
-  TOP: "/body-maps/top.jpg",
-  REAR: "/ms11_back.jpg",
-};
+const DEFAULT_VIEW_IMAGES = DEFAULT_BODY_MAP_IMAGES;
 
 const qualityLabels: Record<string, string> = {
   THICKNESS: "膜厚",
@@ -337,6 +334,8 @@ export function BodyPointMap() {
   const [groupId, setGroupId] = useState("");
   const [runId, setRunId] = useState("");
   const [editMode, setEditMode] = useState(false);
+  const [imageEditorOpen, setImageEditorOpen] = useState(false);
+  const [imageRevision, setImageRevision] = useState(0);
   const [showUngrouped, setShowUngrouped] = useState(true);
   const [overlayMode, setOverlayMode] = useState<OverlayMode>("RISK");
   const [canvas, setCanvas] = useState<CanvasPayload | null>(null);
@@ -972,6 +971,15 @@ export function BodyPointMap() {
             刷新
           </button>
           <button
+            className="button button-secondary"
+            type="button"
+            disabled={!vehicleModelId || !canvas?.vehicle_model_code}
+            onClick={() => setImageEditorOpen(true)}
+          >
+            <ImageIcon />
+            底图管理
+          </button>
+          <button
             className={`button ${editMode ? "button-primary" : "button-secondary"}`}
             type="button"
             onClick={() => {
@@ -1142,8 +1150,10 @@ export function BodyPointMap() {
               >
                 {viewOrder.map((view) => {
                   const payload = viewsByKey.get(view);
-                  const backgroundUrl =
-                    payload?.background_image_url ?? DEFAULT_VIEW_IMAGES[view];
+                  const baseUrl = payload?.background_image_url ?? DEFAULT_VIEW_IMAGES[view];
+                  const backgroundUrl = imageRevision
+                    ? `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}v=${imageRevision}`
+                    : baseUrl;
                   const points = visiblePointsForView(view);
                   const isActive = activeView === view;
                   return (
@@ -1830,6 +1840,17 @@ export function BodyPointMap() {
           </form>
         </ModalShell>
       ) : null}
+
+      <BodyMapImageEditor
+        open={imageEditorOpen}
+        modelCode={canvas?.vehicle_model_code ?? ""}
+        modelName={canvas?.vehicle_model_name}
+        onClose={() => setImageEditorOpen(false)}
+        onChanged={() => {
+          setImageRevision(Date.now());
+          void loadCanvas();
+        }}
+      />
     </section>
   );
 }

@@ -590,6 +590,8 @@ def test_body_map_canvas_returns_four_views_and_model_images() -> None:
     right = next(view for view in canvas.views if view.body_view == "RIGHT")
     assert right.placed_count == 1
     assert right.background_image_url == "/body-maps/side.jpg"
+    left = next(view for view in canvas.views if view.body_view == "LEFT")
+    assert left.background_image_url == "/body-maps/side-left.jpg"
 
     create_body_map_point(
         BodyMapPointCreate(
