@@ -2,10 +2,15 @@
 
 import { KeyRound, LoaderCircle, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { useAuth } from "@/lib/auth-context";
 import { roleLabel } from "@/lib/display-labels";
+
+function getApiKey(): string {
+  const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -20,16 +25,18 @@ export default function ProfilePage() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
+  const closeNotice = useCallback(() => setNotice(""), []);
+  const closeError = useCallback(() => setError(""), []);
+
   useEffect(() => {
     if (!actor.isAuthenticated) {
       router.push("/login");
     }
   }, [actor.isAuthenticated, router]);
 
-  function getApiKey(): string {
-    const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
-    return match ? decodeURIComponent(match[1]) : "";
-  }
+  useEffect(() => {
+    setDisplayName(actor.displayName);
+  }, [actor.displayName]);
 
   async function updateProfile(event: FormEvent) {
     event.preventDefault();
@@ -44,7 +51,11 @@ export default function ProfilePage() {
           "Content-Type": "application/json",
           "x-api-key": getApiKey(),
         },
-        body: JSON.stringify({ display_name: displayName, email: email || null, department: department || null }),
+        body: JSON.stringify({
+          display_name: displayName,
+          email: email || null,
+          department: department || null,
+        }),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { detail?: string };
@@ -65,7 +76,7 @@ export default function ProfilePage() {
     setError("");
     setNotice("");
     if (newPassword !== newPasswordConfirm) {
-      setError("两次输入的密码不一致");
+      setError("两次输入的新密码不一致");
       return;
     }
     if (newPassword.length < 6) {
@@ -81,7 +92,10 @@ export default function ProfilePage() {
           "Content-Type": "application/json",
           "x-api-key": getApiKey(),
         },
-        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { detail?: string };
@@ -103,126 +117,147 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="page-stack">
+    <div className="page-stack profile-page">
       <header className="page-header">
         <div>
-          <span className="page-kicker">个人中心</span>
+          <span className="page-kicker">账号</span>
           <h1>个人中心</h1>
-          <p>管理您的个人信息与安全设置。</p>
+          <p>查看与更新显示名称、联系方式，以及登录密码。</p>
         </div>
       </header>
+
       {notice ? (
-        <button className="message-banner message-success" onClick={() => setNotice("")}>
+        <button type="button" className="message-banner message-success" onClick={closeNotice}>
           {notice}
         </button>
       ) : null}
       {error ? (
-        <button className="message-banner message-error" onClick={() => setError("")}>
+        <button type="button" className="message-banner message-error" onClick={closeError}>
           {error}
         </button>
       ) : null}
+
       <div className="profile-grid">
-        <section className="panel">
+        <section className="panel profile-panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">账号信息</span>
+              <span className="eyebrow">基本资料</span>
               <h2>账号信息</h2>
+              <p className="section-description">用户名与角色由管理员分配，此处可维护对外显示信息。</p>
             </div>
           </div>
-          <form className="auth-form" onSubmit={updateProfile}>
-            <label className="form-field">
-              <span>用户名</span>
-              <input disabled value={actor.username} />
-            </label>
-            <label className="form-field">
-              <span>显示名称</span>
-              <input
-                required
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-              />
-            </label>
-            <label className="form-field">
-              <span>邮箱</span>
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="选填"
-              />
-            </label>
-            <label className="form-field">
-              <span>部门</span>
-              <input
-                value={department}
-                onChange={(event) => setDepartment(event.target.value)}
-                placeholder="选填"
-              />
-            </label>
-            <label className="form-field">
-              <span>角色</span>
-              <input
-                disabled
-                value={
-                  actor.roles.length
-                    ? actor.roles.map((role) => roleLabel(role)).join(" / ")
-                    : "无角色"
-                }
-                className="readonly-input"
-              />
-            </label>
-            <button className="button button-primary" type="submit" disabled={loading}>
-              {loading ? <LoaderCircle className="spin" /> : <Save />}
-              {loading ? "保存中..." : "保存个人信息"}
-            </button>
+          <form className="profile-form" onSubmit={(event) => void updateProfile(event)}>
+            <div className="form-grid">
+              <label className="form-field">
+                <span>用户名</span>
+                <input disabled value={actor.username} className="readonly-input" />
+              </label>
+              <label className="form-field">
+                <span>角色</span>
+                <input
+                  disabled
+                  className="readonly-input"
+                  value={
+                    actor.roles.length
+                      ? actor.roles.map((role) => roleLabel(role)).join(" / ")
+                      : "无角色"
+                  }
+                />
+              </label>
+              <label className="form-field form-field-wide">
+                <span>
+                  显示名称<b>*</b>
+                </span>
+                <input
+                  required
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                />
+              </label>
+              <label className="form-field">
+                <span>邮箱</span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="选填"
+                />
+              </label>
+              <label className="form-field">
+                <span>部门</span>
+                <input
+                  value={department}
+                  onChange={(event) => setDepartment(event.target.value)}
+                  placeholder="选填"
+                />
+              </label>
+            </div>
+            <div className="profile-form-actions">
+              <button className="button button-primary" type="submit" disabled={loading}>
+                {loading ? <LoaderCircle className="spin" /> : <Save />}
+                {loading ? "保存中…" : "保存个人信息"}
+              </button>
+            </div>
           </form>
         </section>
-        <section className="panel">
+
+        <section className="panel profile-panel">
           <div className="panel-heading">
             <div>
               <span className="eyebrow">登录安全</span>
               <h2>修改密码</h2>
+              <p className="section-description">修改后需使用新密码重新登录。</p>
             </div>
           </div>
-          <form className="auth-form" onSubmit={changePassword}>
-            <label className="form-field">
-              <span>当前密码</span>
-              <input
-                required
-                type="password"
-                autoComplete="current-password"
-                value={currentPassword}
-                onChange={(event) => setCurrentPassword(event.target.value)}
-              />
-            </label>
-            <label className="form-field">
-              <span>新密码</span>
-              <input
-                required
-                type="password"
-                autoComplete="new-password"
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                placeholder="至少 6 位"
-                minLength={6}
-              />
-            </label>
-            <label className="form-field">
-              <span>确认新密码</span>
-              <input
-                required
-                type="password"
-                autoComplete="new-password"
-                value={newPasswordConfirm}
-                onChange={(event) => setNewPasswordConfirm(event.target.value)}
-                placeholder="再次输入新密码"
-                minLength={6}
-              />
-            </label>
-            <button className="button button-primary" type="submit" disabled={loading}>
-              {loading ? <LoaderCircle className="spin" /> : <KeyRound />}
-              {loading ? "修改中..." : "修改密码"}
-            </button>
+          <form className="profile-form" onSubmit={(event) => void changePassword(event)}>
+            <div className="form-grid">
+              <label className="form-field form-field-wide">
+                <span>
+                  当前密码<b>*</b>
+                </span>
+                <input
+                  required
+                  type="password"
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                />
+              </label>
+              <label className="form-field">
+                <span>
+                  新密码<b>*</b>
+                </span>
+                <input
+                  required
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  placeholder="至少 6 位"
+                  minLength={6}
+                />
+              </label>
+              <label className="form-field">
+                <span>
+                  确认新密码<b>*</b>
+                </span>
+                <input
+                  required
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPasswordConfirm}
+                  onChange={(event) => setNewPasswordConfirm(event.target.value)}
+                  placeholder="再次输入"
+                  minLength={6}
+                />
+              </label>
+            </div>
+            <div className="profile-form-actions">
+              <button className="button button-primary" type="submit" disabled={loading}>
+                {loading ? <LoaderCircle className="spin" /> : <KeyRound />}
+                {loading ? "修改中…" : "修改密码"}
+              </button>
+            </div>
           </form>
         </section>
       </div>

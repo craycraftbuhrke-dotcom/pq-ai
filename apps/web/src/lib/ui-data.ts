@@ -146,10 +146,12 @@ export const domainPortalCards: readonly DomainPortalCard[] = [
     description: "橘皮/色差/膜厚上传、判定、标准与仪器可靠性。",
     icon: "quality",
     links: [
-      { href: "/quality?tab=overview", label: "概览与 SPC" },
+      { href: "/quality?tab=overview", label: "数据可靠性" },
       { href: "/quality?tab=upload", label: "批量上传" },
       { href: "/quality?tab=measurements", label: "查看与判定" },
       { href: "/quality?tab=body-map", label: "车身点位图" },
+      { href: "/quality?tab=analytics", label: "SPC 与趋势" },
+      { href: "/quality?tab=governance", label: "仪器可靠性" },
     ],
   },
   {

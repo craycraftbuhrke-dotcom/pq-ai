@@ -15,6 +15,8 @@ type DomainHubProps = {
   tabs: DomainTab[];
   defaultTab: string;
   actions?: ReactNode;
+  /** Optional row between page header and tab panel (e.g. role shortcuts). */
+  toolbar?: ReactNode;
   children: (tab: string) => ReactNode;
 };
 
@@ -25,6 +27,7 @@ export function DomainHub({
   tabs,
   defaultTab,
   actions,
+  toolbar,
   children,
 }: DomainHubProps) {
   const router = useRouter();
@@ -55,6 +58,7 @@ export function DomainHub({
         </div>
         {actions ? <div className="page-actions">{actions}</div> : null}
       </header>
+      {toolbar ? <div className="domain-hub-toolbar">{toolbar}</div> : null}
       <section className="panel domain-hub">
         <div className="master-tabs" role="tablist" aria-label={title}>
           {tabs.map((item) => (

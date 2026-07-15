@@ -1,40 +1,69 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-import QualityMonitorPage from "@/app/quality-monitor/page";
+import { QualityMonitorPanel } from "@/components/quality-monitor-panel";
 import { BodyPointMap } from "@/components/body-point-map";
 import { DomainHub } from "@/components/domain-hub";
 import { QualityWorkspace } from "@/components/quality-workspace";
-
-const TABS = [
-  { key: "overview", label: "概览与 SPC" },
-  { key: "upload", label: "批量上传" },
-  { key: "measurements", label: "查看与判定" },
-  { key: "body-map", label: "车身点位图" },
-  { key: "standards", label: "质量标准" },
-  { key: "analytics", label: "SPC 与趋势" },
-  { key: "governance", label: "仪器可靠性" },
-];
+import { useAuth } from "@/lib/auth-context";
+import {
+  QUALITY_HUB_TABS,
+  qualityHomeTab,
+  qualityShortcuts,
+  type QualityHubTab,
+} from "@/lib/quality-hub";
 
 function QualityHubInner() {
+  const { actor } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const defaultTab = useMemo(() => qualityHomeTab(actor.roles), [actor.roles]);
+  const shortcuts = useMemo(() => qualityShortcuts(actor.roles), [actor.roles]);
+  const activeTab = (searchParams.get("tab") as QualityHubTab | null) ?? defaultTab;
+
+  function goTab(tab: QualityHubTab) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === defaultTab) params.delete("tab");
+    else params.set("tab", tab);
+    if (tab !== "measurements") params.delete("filter");
+    const query = params.toString();
+    router.replace(query ? `/quality?${query}` : "/quality", { scroll: false });
+  }
+
   return (
     <DomainHub
       kicker="质量管理"
       title="质量管理中心"
-      description="统一完成质量概览、批量上传、判定、车身点位图（含测量编组/点位治理）、标准、SPC 与仪器可靠性。日常上数从「批量上传」开始。"
-      tabs={TABS}
-      defaultTab="overview"
+      description="按角色走最短路径：质量上数与判定、工艺看点位与刷子、管理层看 SPC 与数据可靠性。真·SPC 在「SPC 与趋势」。"
+      tabs={QUALITY_HUB_TABS}
+      defaultTab={defaultTab}
+      toolbar={
+        <div className="quality-role-shortcuts" role="navigation" aria-label="角色快捷入口">
+          <span className="quality-role-shortcuts-label">常用</span>
+          {shortcuts.map((item) => (
+            <button
+              key={item.tab}
+              type="button"
+              className={`quality-role-chip ${activeTab === item.tab ? "is-active" : ""}`}
+              onClick={() => goTab(item.tab)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      }
     >
       {(tab) => {
-        if (tab === "overview") return <QualityMonitorPage embedded />;
+        if (tab === "overview") return <QualityMonitorPanel embedded />;
         if (tab === "upload") return <QualityWorkspace mode="embed" lockedTab="upload" />;
         if (tab === "measurements") return <QualityWorkspace mode="embed" lockedTab="measurements" />;
         if (tab === "body-map") return <BodyPointMap />;
         if (tab === "standards") return <QualityWorkspace mode="embed" lockedTab="standards" />;
         if (tab === "analytics") return <QualityWorkspace mode="embed" lockedTab="analytics" />;
         if (tab === "governance") return <QualityWorkspace mode="embed" lockedTab="governance" />;
-        return <QualityMonitorPage embedded />;
+        return <QualityMonitorPanel embedded />;
       }}
     </DomainHub>
   );
@@ -42,7 +71,13 @@ function QualityHubInner() {
 
 export default function QualityPage() {
   return (
-    <Suspense fallback={<div className="page-stack"><div className="master-empty">正在加载质量管理中心…</div></div>}>
+    <Suspense
+      fallback={
+        <div className="page-stack">
+          <div className="master-empty">正在加载质量管理中心…</div>
+        </div>
+      }
+    >
       <QualityHubInner />
     </Suspense>
   );

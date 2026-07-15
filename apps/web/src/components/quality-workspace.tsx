@@ -11,6 +11,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CSSProperties, FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -19,6 +20,11 @@ import { ModalShell } from "@/components/modal-shell";
 import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
 import { QualityImportPanel } from "@/components/quality-import-panel";
 import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
+import {
+  MEASUREMENT_STATUS_FILTERS,
+  QUALITY_ANALYTICS_TYPE_KEY,
+  type MeasurementStatusFilter,
+} from "@/lib/quality-hub";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type Resource = {
@@ -345,6 +351,7 @@ export function QualityWorkspace({
   const [importProfiles, setImportProfiles] = useState<ImportProfile[]>([]);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
+  const statusFilter = (searchParams.get("filter") as MeasurementStatusFilter | null) ?? "";
   const [modal, setModal] = useState<{ kind: "measurement" | "standard"; record?: Measurement | Standard } | null>(null);
   const [form, setForm] = useState<FormState>({});
   const [metricRows, setMetricRows] = useState<MetricRow[]>([]);
@@ -365,14 +372,31 @@ export function QualityWorkspace({
     (next: Tab) => {
       // DomainHub owns ?tab= when embedded; navigate to the hub tab instead of rewriting local state.
       if (lockedTab) {
-        router.replace(`/quality?tab=${next}`, { scroll: false });
+        const params = new URLSearchParams();
+        params.set("tab", next);
+        router.replace(`/quality?${params}`, { scroll: false });
         return;
       }
       const params = new URLSearchParams(searchParams.toString());
       if (next === "upload") params.delete("tab");
       else params.set("tab", next);
+      params.delete("filter");
       const query = params.toString();
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [lockedTab, pathname, router, searchParams],
+  );
+
+  const setStatusFilter = useCallback(
+    (next: MeasurementStatusFilter) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (lockedTab) params.set("tab", "measurements");
+      if (!next) params.delete("filter");
+      else params.set("filter", next);
+      const query = params.toString();
+      router.replace(query ? (lockedTab ? `/quality?${query}` : `${pathname}?${query}`) : pathname, {
+        scroll: false,
+      });
     },
     [lockedTab, pathname, router, searchParams],
   );
@@ -464,6 +488,27 @@ export function QualityWorkspace({
 
   useEffect(() => {
     if (tab !== "analytics") return;
+    try {
+      const saved = window.localStorage.getItem(QUALITY_ANALYTICS_TYPE_KEY);
+      if (saved && ["ORANGE_PEEL", "COLOR_DIFFERENCE", "THICKNESS"].includes(saved)) {
+        setTypeFilter((current) => current || saved);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [tab]);
+
+  useEffect(() => {
+    if (tab !== "analytics" || !typeFilter) return;
+    try {
+      window.localStorage.setItem(QUALITY_ANALYTICS_TYPE_KEY, typeFilter);
+    } catch {
+      /* ignore */
+    }
+  }, [tab, typeFilter]);
+
+  useEffect(() => {
+    if (tab !== "analytics") return;
     const timer = window.setTimeout(() => void loadAnalytics(), 0);
     return () => window.clearTimeout(timer);
   }, [loadAnalytics, tab]);
@@ -475,6 +520,11 @@ export function QualityWorkspace({
     const normalized = query.trim().toLowerCase();
     return measurements.filter((item) => {
       if (typeFilter && item.quality_type !== typeFilter) return false;
+      if (statusFilter === "fail" && item.judgement !== "FAIL") return false;
+      if (statusFilter === "pass" && item.judgement !== "PASS") return false;
+      if (statusFilter === "no_standard" && item.judgement !== "NO_STANDARD") return false;
+      if (statusFilter === "unverified" && item.reliability_status !== "UNVERIFIED") return false;
+      if (statusFilter === "reliability_failed" && item.reliability_status !== "FAILED") return false;
       if (
         normalized &&
         ![item.data_no, item.measurement_point_code, item.measurement_point_name, item.measured_by, item.judgement].some(
@@ -490,7 +540,7 @@ export function QualityWorkspace({
       if (!matchesContextId(run?.color_id, colorId)) return false;
       return true;
     });
-  }, [colorId, factoryId, measurements, modelId, pointById, query, runById, typeFilter]);
+  }, [colorId, factoryId, measurements, modelId, pointById, query, runById, statusFilter, typeFilter]);
 
   const filteredStandards = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -835,6 +885,20 @@ export function QualityWorkspace({
           <select value={tab === "analytics" ? typeFilter || "ORANGE_PEEL" : typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>{tab !== "analytics" ? <option value="">全部质量类型</option> : null}{Object.entries(qualityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
           {tab === "analytics" ? <select value={resolvedAnalyticsMetric} onChange={(event) => setAnalyticsMetric(event.target.value)}>{analyticsDefinitions.map((item) => <option value={item.code} key={item.code}>{item.name} · {item.code}</option>)}</select> : null}
           {tab === "measurements" ? (
+            <div className="quality-status-filters" role="group" aria-label="判定与可靠性筛选">
+              {MEASUREMENT_STATUS_FILTERS.map((item) => (
+                <button
+                  key={item.key || "all"}
+                  type="button"
+                  className={`quality-status-chip ${statusFilter === item.key ? "is-active" : ""}`}
+                  onClick={() => setStatusFilter(item.key)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {tab === "measurements" ? (
             <button className="button button-secondary" type="button" onClick={() => setTab("upload")}>
               <Upload /> 去批量上传
             </button>
@@ -922,6 +986,13 @@ function QualityAnalyticsPanel({ analytics, loading }: { analytics: Analytics | 
   ] as const;
   return (
     <div className="quality-analytics">
+      <div className="quality-escalation-strip">
+        <span>发现风险后可继续：</span>
+        <Link className="button button-secondary" href="/quality?tab=body-map">车身点位图</Link>
+        <Link className="button button-secondary" href="/quality?tab=measurements&filter=fail">超差判定</Link>
+        <Link className="button button-secondary" href="/ai?tab=predictions">AI 预测诊断</Link>
+        <Link className="button button-secondary" href="/ai?tab=issues">问题与调试</Link>
+      </div>
       <section className="quality-analytics-stat-grid">
         <article><span>样本 / 失控点</span><strong>{statistics.samples} / {statistics.out_of_control_count}</strong><small>控制界限采用均值 ± 3σ</small></article>
         <article><span>均值 / σ</span><strong>{analyticsNumber(statistics.mean)} / {analyticsNumber(statistics.sigma)}</strong><small>{analytics.metric_name} · {analytics.unit ?? "无单位"}</small></article>

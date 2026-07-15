@@ -12,7 +12,10 @@ import {
   type CSSProperties,
 } from "react";
 
+import Link from "next/link";
+
 import { ModalShell } from "@/components/modal-shell";
+import { stageLabel } from "@/lib/display-labels";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type BodyView = "RIGHT" | "LEFT" | "TOP" | "REAR";
@@ -340,7 +343,7 @@ export function BodyPointMap() {
   const [detail, setDetail] = useState<PointDetail | null>(null);
   const [selectedPointId, setSelectedPointId] = useState("");
   const [pendingPlaceId, setPendingPlaceId] = useState("");
-  const [sideTab, setSideTab] = useState<SideTab>("governance");
+  const [sideTab, setSideTab] = useState<SideTab>("detail");
   const [sideTabPinned, setSideTabPinned] = useState(false);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -546,13 +549,13 @@ export function BodyPointMap() {
     setDetail(null);
     setPendingPlaceId("");
     setSelectedGovPointId("");
-    setSideTab("governance");
+    setSideTab("detail");
     setSideTabPinned(false);
   }, [vehicleModelId]);
 
   useEffect(() => {
     if (!selectedPointId && !sideTabPinned) {
-      setSideTab("governance");
+      setSideTab("detail");
     }
   }, [selectedPointId, sideTabPinned]);
 
@@ -1466,6 +1469,9 @@ export function BodyPointMap() {
                         <span className="eyebrow">喷涂关联</span>
                         <h4>刷子号与参数</h4>
                       </div>
+                      <Link className="button button-secondary" href="/process?tab=recipes">
+                        去工艺配方
+                      </Link>
                     </div>
                     {!detail.brush_contributions.length ? (
                       <div className="program-empty">
@@ -1489,7 +1495,7 @@ export function BodyPointMap() {
                               </span>
                             </div>
                             <small>
-                              {brush.process_stage} · 表 {brush.brush_table_no} · 重叠{" "}
+                              {stageLabel(brush.process_stage)} · 表 {brush.brush_table_no} · 重叠{" "}
                               {(brush.overlap_ratio * 100).toFixed(0)}% · 权重{" "}
                               {(brush.contribution_weight * 100).toFixed(0)}%
                               {brush.target_family
