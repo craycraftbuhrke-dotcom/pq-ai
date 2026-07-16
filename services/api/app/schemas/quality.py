@@ -559,3 +559,69 @@ class BodyMapPointDetail(BaseModel):
     quality_types: list[str] = Field(default_factory=list)
     quality_summaries: list[BodyMapQualitySummary] = Field(default_factory=list)
     brush_contributions: list[BodyMapBrushContribution] = Field(default_factory=list)
+
+
+class BodyMap3DLayoutUpsert(BaseModel):
+    pos_x: float
+    pos_y: float
+    pos_z: float
+    normal_x: float | None = None
+    normal_y: float | None = None
+    normal_z: float | None = None
+    model_asset_key: str | None = Field(default=None, max_length=120)
+    project_to_2d: bool = True
+
+
+class BodyMap3DLayoutRead(ResourceRead):
+    measurement_point_id: str
+    pos_x: float
+    pos_y: float
+    pos_z: float
+    normal_x: float | None = None
+    normal_y: float | None = None
+    normal_z: float | None = None
+    model_asset_key: str | None = None
+    status: str
+    projected_views: dict[str, dict[str, float | bool]] = Field(default_factory=dict)
+    projected_clamped: bool = False
+
+
+class BodyMap3DPointItem(BaseModel):
+    measurement_point_id: str
+    layout_3d_id: str | None = None
+    code: str
+    name: str
+    part_id: str
+    part_code: str | None = None
+    part_name: str | None = None
+    region: str | None = None
+    quality_types: list[str] = Field(default_factory=list)
+    pos_x: float | None = None
+    pos_y: float | None = None
+    pos_z: float | None = None
+    normal_x: float | None = None
+    normal_y: float | None = None
+    normal_z: float | None = None
+    in_group: bool = False
+    has_2d_only: bool = False
+    quality_summaries: list[BodyMapQualitySummary] = Field(default_factory=list)
+    risk_score: float = 0
+
+
+class BodyMap3DSceneResponse(BaseModel):
+    vehicle_model_id: str
+    vehicle_model_code: str
+    vehicle_model_name: str
+    model_url: str | None = None
+    model_asset_key: str | None = None
+    up_axis: str = "Y"
+    unit_scale: float = 1.0
+    bounds: dict[str, float] = Field(default_factory=dict)
+    measurement_group_id: str | None = None
+    production_run_id: str | None = None
+    production_run_no: str | None = None
+    quality_scope: str = "VERIFIED"
+    placed_count: int = 0
+    group_point_count: int = 0
+    fail_count: int = 0
+    points: list[BodyMap3DPointItem] = Field(default_factory=list)

@@ -6915,6 +6915,168 @@ a.calibration-alert-row:hover {
   gap: 8px;
 }
 
+/* 3D body-map view */
+.body-map-3d-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.body-map-3d-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 15px 15px;
+}
+
+.body-map-3d-scope-bar {
+  align-items: flex-start;
+}
+
+.body-map-3d-scope-fields {
+  align-items: end;
+  min-width: min(760px, 100%);
+}
+
+.body-map-3d-empty {
+  min-height: 400px;
+}
+
+.body-map-3d-layout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.body-map-3d-canvas-wrap {
+  background: #1a1a2e;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  height: 560px;
+  min-height: 400px;
+  overflow: hidden;
+}
+
+.body-map-3d-loading {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  gap: 8px;
+  height: 100%;
+  justify-content: center;
+}
+
+.body-map-3d-sidebar {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 560px;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.body-map-3d-detail-loading {
+  color: var(--text-muted);
+  display: flex;
+  gap: 8px;
+  padding: 24px;
+}
+
+.body-map-3d-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.body-map-3d-pick-panel {
+  background: color-mix(in srgb, var(--teal) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--teal) 30%, var(--line));
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.body-map-3d-pick-head {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.body-map-3d-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* Model editor modal */
+.body-map-model-editor-modal {
+  max-width: min(700px, 96vw);
+  width: min(700px, 96vw);
+}
+
+.body-map-model-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.body-map-model-editor-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.body-map-model-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.body-map-model-info-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.body-map-model-info-row span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.body-map-model-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.body-map-model-form .form-field-wide {
+  flex: 1 1 100%;
+}
+
+.body-map-model-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 960px) {
+  .body-map-3d-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .body-map-3d-canvas-wrap {
+    height: 400px;
+  }
+}
+
 .body-map-panel > .program-subheading {
   padding: 14px 15px 12px;
 }

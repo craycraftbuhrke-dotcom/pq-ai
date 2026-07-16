@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { QualityMonitorPanel } from "@/components/quality-monitor-panel";
 import { BodyPointMap } from "@/components/body-point-map";
+import { BodyPointMap3D } from "@/components/body-point-map-3d";
 import { DomainHub } from "@/components/domain-hub";
 import { QualityWorkspace } from "@/components/quality-workspace";
 import { useAuth } from "@/lib/auth-context";
@@ -60,6 +61,7 @@ function QualityHubInner() {
         if (tab === "upload") return <QualityWorkspace mode="embed" lockedTab="upload" />;
         if (tab === "measurements") return <QualityWorkspace mode="embed" lockedTab="measurements" />;
         if (tab === "body-map") return <BodyPointMap />;
+        if (tab === "3d-view") return <BodyPointMap3D />;
         if (tab === "standards") return <QualityWorkspace mode="embed" lockedTab="standards" />;
         if (tab === "analytics") return <QualityWorkspace mode="embed" lockedTab="analytics" />;
         if (tab === "governance") return <QualityWorkspace mode="embed" lockedTab="governance" />;

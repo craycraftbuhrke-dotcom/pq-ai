@@ -5,6 +5,7 @@ export type QualityHubTab =
   | "upload"
   | "measurements"
   | "body-map"
+  | "3d-view"
   | "standards"
   | "analytics"
   | "governance";
@@ -14,6 +15,7 @@ export const QUALITY_HUB_TABS: Array<{ key: QualityHubTab; label: string }> = [
   { key: "upload", label: "批量上传" },
   { key: "measurements", label: "查看与判定" },
   { key: "body-map", label: "车身点位图" },
+  { key: "3d-view", label: "3D 车身" },
   { key: "standards", label: "质量标准" },
   { key: "analytics", label: "SPC 与趋势" },
   { key: "governance", label: "仪器可靠性" },

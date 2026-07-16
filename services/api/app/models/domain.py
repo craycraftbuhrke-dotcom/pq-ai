@@ -247,6 +247,26 @@ class MeasurementPointLayout(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
 
 
+class MeasurementPoint3DLayout(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """World-space placement for a measurement point on the vehicle GLB mesh."""
+
+    __tablename__ = "measurement_point_3d_layout"
+    __table_args__ = (
+        UniqueConstraint("measurement_point_id", name="uk_point_3d_layout_point"),
+        Index("idx_point_3d_layout_status", "row_status"),
+    )
+
+    measurement_point_id: Mapped[str] = logical_fk("measurement_point.id", nullable=False)
+    pos_x: Mapped[float] = mapped_column(Float, nullable=False)
+    pos_y: Mapped[float] = mapped_column(Float, nullable=False)
+    pos_z: Mapped[float] = mapped_column(Float, nullable=False)
+    normal_x: Mapped[float | None] = mapped_column(Float)
+    normal_y: Mapped[float | None] = mapped_column(Float)
+    normal_z: Mapped[float | None] = mapped_column(Float)
+    model_asset_key: Mapped[str | None] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
+
+
 class MeasurementGroup(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "measurement_group"
     __table_args__ = (

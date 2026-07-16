@@ -20,6 +20,7 @@ from app.models.domain import (
     MeasurementGroup,
     MeasurementGroupPoint,
     MeasurementPoint,
+    MeasurementPoint3DLayout,
     MeasurementPointLayout,
     Part,
     PointContributionEntry,
@@ -39,6 +40,10 @@ from app.api.routes.master_data import (
 )
 from app.schemas.master_data import MeasurementGroupPointCreate, MeasurementPointCreate
 from app.schemas.quality import (
+    BodyMap3DLayoutRead,
+    BodyMap3DLayoutUpsert,
+    BodyMap3DPointItem,
+    BodyMap3DSceneResponse,
     BodyMapBrushContribution,
     BodyMapBrushParameter,
     BodyMapCanvasResponse,
@@ -50,6 +55,12 @@ from app.schemas.quality import (
     BodyMapPointItem,
     BodyMapQualitySummary,
     BodyMapResponse,
+)
+from app.services.body_map_3d_projection import (
+    AxisAlignedBounds,
+    bounds_from_dict,
+    project_point_to_all_views,
+    project_point_to_view,
 )
 from app.services.measurement_reliability import VERIFIED
 from app.services.quality_evaluation import evaluate_quality_measurement
@@ -1045,4 +1056,385 @@ def get_body_map_point_detail(
         quality_types=list(point.quality_types or []),
         quality_summaries=summaries,
         brush_contributions=brush_items,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3D body-map scene (GLB + world-space point placement with 2D projection)
+# ---------------------------------------------------------------------------
+
+DEFAULT_3D_MODEL_ENTRY: dict[str, object] = {
+    "url": None,
+    "up_axis": "Y",
+    "unit_scale": 1.0,
+    "bounds": None,
+}
+
+# Per-model built-in GLB assets under apps/web/public/body-models (matched by code).
+MODEL_3D_ASSETS: dict[str, dict[str, object]] = {
+    # e.g. "ms11": {"url": "/body-models/ms11.glb", "up_axis": "Y", "unit_scale": 1.0},
+}
+
+
+def _load_3d_model_overrides() -> dict[str, dict[str, object]]:
+    """Optional per-model 3D model overrides from public/body-models/view-models.json."""
+    path = _web_public_dir() / "body-models" / "view-models.json"
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, dict):
+        return {}
+    result: dict[str, dict[str, object]] = {}
+    for model_key, entry in models.items():
+        if not isinstance(model_key, str) or not isinstance(entry, dict):
+            continue
+        result[model_key.strip().lower()] = {
+            "url": entry.get("url") if isinstance(entry.get("url"), str) else None,
+            "up_axis": entry.get("up_axis", "Y") if isinstance(entry.get("up_axis"), str) else "Y",
+            "unit_scale": float(entry.get("unit_scale", 1.0))
+            if isinstance(entry.get("unit_scale"), (int, float))
+            else 1.0,
+            "bounds": entry.get("bounds") if isinstance(entry.get("bounds"), dict) else None,
+            "model_asset_key": entry.get("model_asset_key")
+            if isinstance(entry.get("model_asset_key"), str)
+            else None,
+        }
+    return result
+
+
+def _resolve_3d_model(vehicle_model_code: str) -> dict[str, object]:
+    code = (vehicle_model_code or "").strip()
+    lowered = code.lower()
+    overrides = _load_3d_model_overrides()
+    for key, entry in overrides.items():
+        if lowered == key or (key and key in lowered):
+            return entry
+    for key, entry in MODEL_3D_ASSETS.items():
+        if lowered == key or (key and key in lowered):
+            return entry
+    return dict(DEFAULT_3D_MODEL_ENTRY)
+
+
+def _build_3d_point_item(
+    point: MeasurementPoint,
+    *,
+    part: Part | None,
+    layout_3d: MeasurementPoint3DLayout | None,
+    has_2d: bool,
+    in_group: bool,
+    summaries: list[BodyMapQualitySummary],
+) -> BodyMap3DPointItem:
+    return BodyMap3DPointItem(
+        measurement_point_id=point.id,
+        layout_3d_id=layout_3d.id if layout_3d else None,
+        code=point.code,
+        name=point.name,
+        part_id=point.part_id,
+        part_code=part.code if part else None,
+        part_name=part.name if part else None,
+        region=point.region,
+        quality_types=list(point.quality_types or []),
+        pos_x=layout_3d.pos_x if layout_3d else None,
+        pos_y=layout_3d.pos_y if layout_3d else None,
+        pos_z=layout_3d.pos_z if layout_3d else None,
+        normal_x=layout_3d.normal_x if layout_3d else None,
+        normal_y=layout_3d.normal_y if layout_3d else None,
+        normal_z=layout_3d.normal_z if layout_3d else None,
+        in_group=in_group,
+        has_2d_only=has_2d and layout_3d is None,
+        quality_summaries=summaries,
+        risk_score=_risk_score(summaries),
+    )
+
+
+@router.get("/3d-scene", response_model=BodyMap3DSceneResponse)
+def get_body_map_3d_scene(
+    vehicle_model_id: str,
+    measurement_group_id: str | None = None,
+    production_run_id: str | None = None,
+    db: Session = Depends(get_db),
+) -> BodyMap3DSceneResponse:
+    model = _required(db, VehicleModel, vehicle_model_id, "车型")
+    resolved_run = _resolve_production_run(db, model.id, production_run_id)
+    resolved_run_id = resolved_run.id if resolved_run else None
+
+    group_point_ids: set[str] = set()
+    if measurement_group_id:
+        group = _required(db, MeasurementGroup, measurement_group_id, "测量编组")
+        if group.vehicle_model_id != model.id:
+            raise HTTPException(status_code=422, detail="测量编组不属于所选车型")
+        group_point_ids = set(
+            db.scalars(
+                select(MeasurementGroupPoint.measurement_point_id).where(
+                    MeasurementGroupPoint.measurement_group_id == measurement_group_id
+                )
+            )
+        )
+
+    points = list(
+        db.scalars(
+            select(MeasurementPoint)
+            .where(
+                MeasurementPoint.vehicle_model_id == model.id,
+                MeasurementPoint.point_type == "QUALITY",
+            )
+            .order_by(MeasurementPoint.code)
+        )
+    )
+    point_ids = {point.id for point in points}
+    parts = {
+        item.id: item
+        for item in db.scalars(
+            select(Part).where(Part.id.in_({point.part_id for point in points} or {"__none__"}))
+        )
+    }
+    summaries = _latest_quality_summaries(db, point_ids, production_run_id=resolved_run_id)
+
+    layouts_3d = {
+        item.measurement_point_id: item
+        for item in db.scalars(
+            select(MeasurementPoint3DLayout).where(
+                MeasurementPoint3DLayout.measurement_point_id.in_(point_ids or {"__none__"}),
+                MeasurementPoint3DLayout.status == "ACTIVE",
+            )
+        )
+    }
+    has_2d_point_ids = set(
+        db.scalars(
+            select(MeasurementPointLayout.measurement_point_id)
+            .where(
+                MeasurementPointLayout.measurement_point_id.in_(point_ids or {"__none__"}),
+                MeasurementPointLayout.status == "ACTIVE",
+            )
+            .distinct()
+        )
+    ) if point_ids else set()
+
+    model_entry = _resolve_3d_model(model.code)
+    bounds = bounds_from_dict(model_entry.get("bounds") if isinstance(model_entry.get("bounds"), dict) else None)
+
+    items = [
+        _build_3d_point_item(
+            point,
+            part=parts.get(point.part_id),
+            layout_3d=layouts_3d.get(point.id),
+            has_2d=point.id in has_2d_point_ids,
+            in_group=(point.id in group_point_ids) if group_point_ids else True,
+            summaries=summaries.get(point.id, []),
+        )
+        for point in points
+    ]
+    placed = sum(1 for item in items if item.pos_x is not None)
+    fail_count = sum(
+        1
+        for item in items
+        if item.pos_x is not None
+        and any(s.judgement == "FAIL" for s in item.quality_summaries)
+    )
+    group_point_count = len(group_point_ids) if measurement_group_id else len(points)
+
+    return BodyMap3DSceneResponse(
+        vehicle_model_id=model.id,
+        vehicle_model_code=model.code,
+        vehicle_model_name=model.name,
+        model_url=model_entry.get("url"),
+        model_asset_key=model_entry.get("model_asset_key"),
+        up_axis=model_entry.get("up_axis", "Y"),
+        unit_scale=model_entry.get("unit_scale", 1.0),
+        bounds={
+            "min_x": bounds.min_x,
+            "max_x": bounds.max_x,
+            "min_y": bounds.min_y,
+            "max_y": bounds.max_y,
+            "min_z": bounds.min_z,
+            "max_z": bounds.max_z,
+        },
+        measurement_group_id=measurement_group_id,
+        production_run_id=resolved_run_id,
+        production_run_no=resolved_run.run_no if resolved_run else None,
+        quality_scope="VERIFIED",
+        placed_count=placed,
+        group_point_count=group_point_count,
+        fail_count=fail_count,
+        points=items,
+    )
+
+
+def _upsert_3d_layout(
+    db: Session,
+    *,
+    measurement_point_id: str,
+    pos_x: float,
+    pos_y: float,
+    pos_z: float,
+    normal_x: float | None,
+    normal_y: float | None,
+    normal_z: float | None,
+    model_asset_key: str | None,
+) -> MeasurementPoint3DLayout:
+    layout = db.scalar(
+        select(MeasurementPoint3DLayout).where(
+            MeasurementPoint3DLayout.measurement_point_id == measurement_point_id,
+            MeasurementPoint3DLayout.status == "ACTIVE",
+        )
+    )
+    if layout:
+        layout.pos_x = pos_x
+        layout.pos_y = pos_y
+        layout.pos_z = pos_z
+        layout.normal_x = normal_x
+        layout.normal_y = normal_y
+        layout.normal_z = normal_z
+        layout.model_asset_key = model_asset_key
+        layout.status = "ACTIVE"
+    else:
+        # Soft-retire any stale ACTIVE rows (unique constraint guard).
+        stale = list(
+            db.scalars(
+                select(MeasurementPoint3DLayout).where(
+                    MeasurementPoint3DLayout.measurement_point_id == measurement_point_id,
+                )
+            )
+        )
+        for item in stale:
+            item.status = "INACTIVE"
+        layout = MeasurementPoint3DLayout(
+            measurement_point_id=measurement_point_id,
+            pos_x=pos_x,
+            pos_y=pos_y,
+            pos_z=pos_z,
+            normal_x=normal_x,
+            normal_y=normal_y,
+            normal_z=normal_z,
+            model_asset_key=model_asset_key,
+            status="ACTIVE",
+        )
+        db.add(layout)
+    db.commit()
+    db.refresh(layout)
+    return layout
+
+
+@router.put(
+    "/3d-layouts/{measurement_point_id}",
+    response_model=BodyMap3DLayoutRead,
+)
+def upsert_body_map_3d_layout(
+    measurement_point_id: str,
+    payload: BodyMap3DLayoutUpsert,
+    db: Session = Depends(get_db),
+) -> BodyMap3DLayoutRead:
+    point = _required(db, MeasurementPoint, measurement_point_id, "测量点")
+    layout = _upsert_3d_layout(
+        db,
+        measurement_point_id=point.id,
+        pos_x=payload.pos_x,
+        pos_y=payload.pos_y,
+        pos_z=payload.pos_z,
+        normal_x=payload.normal_x,
+        normal_y=payload.normal_y,
+        normal_z=payload.normal_z,
+        model_asset_key=payload.model_asset_key,
+    )
+
+    projected: dict[str, dict[str, float | bool]] = {}
+    any_clamped = False
+    if payload.project_to_2d:
+        model_entry = _resolve_3d_model(
+            db.get(VehicleModel, point.vehicle_model_id).code
+            if db.get(VehicleModel, point.vehicle_model_id)
+            else ""
+        )
+        bounds = bounds_from_dict(
+            model_entry.get("bounds") if isinstance(model_entry.get("bounds"), dict) else None
+        )
+        projections = project_point_to_all_views(
+            pos_x=payload.pos_x,
+            pos_y=payload.pos_y,
+            pos_z=payload.pos_z,
+            bounds=bounds,
+        )
+        for view, proj in projections.items():
+            layout_x = proj["layout_x"]
+            layout_y = proj["layout_y"]
+            clamped = proj["projected_clamped"]
+            if clamped:
+                any_clamped = True
+            grid_col, grid_row = _snap_grid(layout_x, layout_y)
+            _upsert_layout(
+                db,
+                measurement_point_id=point.id,
+                body_view=view,
+                layout_x=layout_x,
+                layout_y=layout_y,
+                grid_col=grid_col,
+                grid_row=grid_row,
+            )
+            projected[view] = {
+                "layout_x": layout_x,
+                "layout_y": layout_y,
+                "projected_clamped": clamped,
+            }
+
+    return BodyMap3DLayoutRead(
+        id=layout.id,
+        created_at=layout.created_at,
+        updated_at=layout.updated_at,
+        measurement_point_id=layout.measurement_point_id,
+        pos_x=layout.pos_x,
+        pos_y=layout.pos_y,
+        pos_z=layout.pos_z,
+        normal_x=layout.normal_x,
+        normal_y=layout.normal_y,
+        normal_z=layout.normal_z,
+        model_asset_key=layout.model_asset_key,
+        status=layout.status,
+        projected_views=projected,
+        projected_clamped=any_clamped,
+    )
+
+
+@router.post(
+    "/3d-layouts/{layout_id}/deactivate",
+    response_model=BodyMap3DLayoutRead,
+)
+def deactivate_body_map_3d_layout(
+    layout_id: str,
+    db: Session = Depends(get_db),
+) -> BodyMap3DLayoutRead:
+    layout = _required(db, MeasurementPoint3DLayout, layout_id, "3D点位布局")
+    layout.status = "INACTIVE"
+    db.commit()
+    db.refresh(layout)
+
+    # Sync-deactivate 2D layouts for the same point (3D is the master).
+    point_id = layout.measurement_point_id
+    for item in db.scalars(
+        select(MeasurementPointLayout).where(
+            MeasurementPointLayout.measurement_point_id == point_id,
+            MeasurementPointLayout.status == "ACTIVE",
+        )
+    ):
+        item.status = "INACTIVE"
+    db.commit()
+
+    return BodyMap3DLayoutRead(
+        id=layout.id,
+        created_at=layout.created_at,
+        updated_at=layout.updated_at,
+        measurement_point_id=layout.measurement_point_id,
+        pos_x=layout.pos_x,
+        pos_y=layout.pos_y,
+        pos_z=layout.pos_z,
+        normal_x=layout.normal_x,
+        normal_y=layout.normal_y,
+        normal_z=layout.normal_z,
+        model_asset_key=layout.model_asset_key,
+        status=layout.status,
+        projected_views={},
+        projected_clamped=False,
     )
