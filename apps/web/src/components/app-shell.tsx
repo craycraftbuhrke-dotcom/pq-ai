@@ -156,7 +156,6 @@ export function AppShell({ children }: AppShellProps) {
               <span>今天</span>
               <strong>{todayLabel}</strong>
             </div>
-            <p className="topbar-hint">先选好工厂、车型、颜色和工位，再进入下方页面操作</p>
           </header>
           <ContextSelector />
           <main>{children}</main>

@@ -32,15 +32,6 @@ export function Dashboard({ snapshot }: DashboardProps) {
   return (
     <div className="page-stack">
       <header className="page-header">
-        <div>
-          <span className="page-kicker">
-            {[snapshot.context.factory, snapshot.context.vehicleModel, snapshot.context.color]
-              .filter(Boolean)
-              .join(" · ") || "未选择生产上下文"}
-          </span>
-          <h1>今日总览</h1>
-          <p>先看五站喷涂状态与风险点位，再进入质量录入、问题处理或智能推荐。</p>
-        </div>
         <div className="page-actions">
           <div className="context-button" role="status" aria-label={`当前车型与颜色：${contextLabel}`}>
             当前车型与颜色

@@ -426,11 +426,6 @@ export function MaterialTrendsPanel({ embedded = false }: { embedded?: boolean }
     <div className={embedded ? "embedded-stack" : "page-stack"}>
       {!embedded ? (
       <header className="page-header">
-        <div>
-          <span className="page-kicker">材料批次趋势</span>
-          <h1>材料批次质量趋势</h1>
-          <p>追踪材料批次检测结果的可靠性与趋势变化。</p>
-        </div>
         <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
           <RefreshCw className={loading ? "spin" : ""} /> 刷新
         </button>

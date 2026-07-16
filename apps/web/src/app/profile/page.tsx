@@ -118,14 +118,6 @@ export default function ProfilePage() {
 
   return (
     <div className="page-stack profile-page">
-      <header className="page-header">
-        <div>
-          <span className="page-kicker">账号</span>
-          <h1>个人中心</h1>
-          <p>查看与更新显示名称、联系方式，以及登录密码。</p>
-        </div>
-      </header>
-
       {notice ? (
         <button type="button" className="message-banner message-success" onClick={closeNotice}>
           {notice}

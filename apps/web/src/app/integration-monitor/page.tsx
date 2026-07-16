@@ -81,7 +81,7 @@ export default function IntegrationMonitorPage({ embedded = false }: { embedded?
   return (
     <div className={embedded ? "embedded-stack" : "page-stack"}>
       {!embedded ? (
-      <header className="page-header"><div><span className="page-kicker">对接监控</span><h1>集成监控</h1><p>实时监控 MES、QMS、机器人、材料系统集成端点的连接状态与事件处理情况。</p></div><button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> 刷新</button></header>
+      <header className="page-header"><button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> 刷新</button></header>
       ) : (
         <div className="embedded-toolbar">
           <button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> 刷新</button>

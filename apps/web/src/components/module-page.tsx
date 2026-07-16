@@ -17,9 +17,7 @@ type ModulePageProps = {
 };
 
 export function ModulePage({
-  kicker,
   title,
-  description,
   stats,
   columns,
   rows,
@@ -65,11 +63,6 @@ export function ModulePage({
   return (
     <div className="page-stack">
       <header className="page-header">
-        <div>
-          <span className="page-kicker">{kicker}</span>
-          <h1>{title}</h1>
-          <p>{description}</p>
-        </div>
         <button className="button button-primary" onClick={handlePrimaryAction}>
           <Plus aria-hidden="true" />
           {primaryAction}

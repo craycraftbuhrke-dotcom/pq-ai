@@ -315,13 +315,6 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
   return (
     <div className="page-stack">
       <header className="page-header">
-        <div>
-          <span className="page-kicker">生产车身记录</span>
-          <h1>生产实绩中心</h1>
-          <p>
-            查看已导入的生产事件，并补录五段工序实绩、材料批次与实际参数。日常上数请走质量管理「批量上传」——上传质量数据时可自动创建生产事件。
-          </p>
-        </div>
         <div className="page-actions">
           <Link className="button button-secondary" href="/quality?tab=upload">
             <Upload /> 批量上传质量

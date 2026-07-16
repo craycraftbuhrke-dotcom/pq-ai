@@ -398,11 +398,6 @@ export function IntegrationWorkspace({ embedded = false }: { embedded?: boolean 
     <div className={embedded ? "embedded-stack" : "page-stack"}>
       {!embedded ? (
       <header className="page-header">
-        <div>
-          <span className="page-kicker">系统对接</span>
-          <h1>集成与任务中心</h1>
-          <p>系统对接任务：接收外部数据、自动映射、失败重试与人工处理</p>
-        </div>
         <div className="page-actions">
           <BulkDataActions
             resourceKey={tab === "events" ? "integrations.events" : "integrations.endpoints"}

@@ -443,13 +443,6 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
     <div className={embedded ? "quality-import-embedded" : "page-stack"}>
       {embedded ? null : (
         <header className="page-header">
-          <div>
-            <span className="page-kicker">质量数据中心</span>
-            <h1>批量上传质量</h1>
-            <p>
-              一次上传即可带上车号、工厂、车型、颜色与质量指标。生产事件不存在时会自动创建，无需先去生产实绩中心建档。
-            </p>
-          </div>
           <div className="page-actions">
             <Link className="button button-secondary" href="/quality?tab=measurements">
               查看已导入质量

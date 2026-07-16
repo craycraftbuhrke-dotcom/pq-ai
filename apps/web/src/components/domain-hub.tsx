@@ -21,9 +21,7 @@ type DomainHubProps = {
 };
 
 export function DomainHub({
-  kicker,
   title,
-  description,
   tabs,
   defaultTab,
   actions,
@@ -50,14 +48,11 @@ export function DomainHub({
 
   return (
     <div className="page-stack">
-      <header className="page-header">
-        <div>
-          <span className="page-kicker">{kicker}</span>
-          <h1>{title}</h1>
-          <p>{description}</p>
-        </div>
-        {actions ? <div className="page-actions">{actions}</div> : null}
-      </header>
+      {actions ? (
+        <header className="page-header">
+          <div className="page-actions">{actions}</div>
+        </header>
+      ) : null}
       {toolbar ? <div className="domain-hub-toolbar">{toolbar}</div> : null}
       <section className="panel domain-hub">
         <div className="master-tabs" role="tablist" aria-label={title}>

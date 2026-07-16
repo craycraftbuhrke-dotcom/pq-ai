@@ -788,11 +788,6 @@ export function EngineeringWorkspace({
     <div className={showChrome ? "page-stack engineering-workspace" : "embedded-stack engineering-workspace"}>
       {showChrome ? (
       <header className="page-header">
-        <div>
-          <span className="page-kicker">问题与调试</span>
-          <h1>工程问题处理与 3C3B 闭环中心</h1>
-          <p>把异常复核、Dürr 执行、材料批次、测量可靠性、AI 推荐、受控试验与经验沉淀连接成可审计任务流。</p>
-        </div>
         <div className="page-actions">
           <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
             <RefreshCw className={loading ? "spin" : ""} />

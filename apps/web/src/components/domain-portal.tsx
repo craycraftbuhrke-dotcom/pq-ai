@@ -27,11 +27,6 @@ export function DomainPortal() {
   return (
     <div className="page-stack">
       <header className="page-header">
-        <div>
-          <span className="page-kicker">工作台</span>
-          <h1>各域概览</h1>
-          <p>按工艺、材料、质量、主数据、AI 与系统设置进入对应工作台；日常上数从质量管理「批量上传」开始。</p>
-        </div>
         <div className="page-actions">
           <button
             className="icon-button icon-button-bordered"

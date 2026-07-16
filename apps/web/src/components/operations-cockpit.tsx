@@ -227,11 +227,6 @@ export function OperationsCockpit() {
   return (
     <div className="page-stack">
       <header className="page-header">
-        <div>
-          <span className="page-kicker">工作台</span>
-          <h1>运营总览</h1>
-          <p>按角色聚合的质量、工艺、材料与 AI 闭环 KPI；从异常卡片直接进入对应工作流。</p>
-        </div>
         <div className="page-actions">
           <button
             className="icon-button icon-button-bordered"

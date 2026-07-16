@@ -190,13 +190,6 @@ function SecurityAdminInner() {
   if (!isAdmin) {
     return (
       <div className="page-stack">
-        <header className="page-header">
-          <div>
-            <span className="page-kicker">账号权限</span>
-            <h1>安全管理</h1>
-            <p>需要管理员权限才能访问此页面。</p>
-          </div>
-        </header>
         <section className="panel">
           <div className="master-empty security-empty">
             <Shield />

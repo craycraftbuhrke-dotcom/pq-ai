@@ -168,11 +168,6 @@ export function QualityMonitorPanel({ embedded = false }: { embedded?: boolean }
     <div className={embedded ? "embedded-stack" : "page-stack"}>
       {!embedded ? (
       <header className="page-header">
-        <div>
-          <span className="page-kicker">数据可靠性</span>
-          <h1>数据可靠性</h1>
-          <p>核验率、校准健康度与标准覆盖。真·SPC 请到「SPC 与趋势」。</p>
-        </div>
         <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
           <RefreshCw className={loading ? "spin" : ""} /> 刷新
         </button>

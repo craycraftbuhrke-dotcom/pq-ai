@@ -1279,15 +1279,6 @@ export function AiWorkbench({
     <div className={showChrome ? "page-stack" : "embedded-stack"}>
       {showChrome ? (
       <header className="page-header">
-        <div>
-          <span className="page-kicker">智能分析与推荐</span>
-          <h1>智能分析与推荐</h1>
-          <p>
-            {canManageModels
-              ? "现场可直接查看预测、诊断与参数推荐；模型训练与验收仅对数据分析人员开放。"
-              : "根据当前车身与测量点，查看质量预测、原因提示，并按目标质量获取工艺参数推荐。"}
-          </p>
-        </div>
         <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
           <RefreshCw className={loading ? "spin" : ""} /> 刷新
         </button>

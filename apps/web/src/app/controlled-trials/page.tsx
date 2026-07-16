@@ -201,11 +201,6 @@ export default function ControlledTrialsPage({ embedded = false }: { embedded?: 
     <div className={embedded ? "embedded-stack" : "page-stack"}>
       {!embedded ? (
       <header className="page-header">
-        <div>
-          <span className="page-kicker">受控试验</span>
-          <h1>受控试验中心</h1>
-          <p>管理工艺参数调整的受控试验计划、审批、执行、复测评价与回滚的全流程闭环。</p>
-        </div>
         <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
           <RefreshCw className={loading ? "spin" : ""} /> 刷新
         </button>

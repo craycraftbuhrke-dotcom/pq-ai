@@ -811,13 +811,6 @@ export function QualityWorkspace({
     <>
       {showChrome ? (
       <header className="page-header">
-        <div>
-          <span className="page-kicker">查看与判定</span>
-          <h1>质量数据中心</h1>
-          <p>
-            批量上传质量数据、查看判定结果、维护标准与仪器可靠性。日常上数请用「批量上传」；本页其余 Tab 负责查看、补录与治理。
-          </p>
-        </div>
         <div className="page-actions">
           {tab !== "upload" ? (
             <button className="button button-secondary" onClick={() => { void reload(); if (tab === "analytics") void loadAnalytics(); }} disabled={loading || analyticsLoading}>

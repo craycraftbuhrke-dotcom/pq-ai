@@ -455,11 +455,6 @@ export function ProgramWorkspace({
     <div className={showChrome ? "page-stack" : "embedded-stack"}>
       {showChrome ? (
       <header className="page-header">
-        <div>
-          <span className="page-kicker">程序与刷子</span>
-          <h1>喷涂程序中心</h1>
-          <p>按程序版本管理五段工艺、刷子参数和测量点贡献权重，所有变更写入业务数据并进入审计。</p>
-        </div>
         <div className="page-actions">
           <button className="button button-secondary" onClick={() => void reload()} disabled={loading}>
             <RefreshCw className={loading ? "spin" : ""} aria-hidden="true" />

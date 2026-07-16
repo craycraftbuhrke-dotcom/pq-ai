@@ -543,11 +543,6 @@ export function MasterDataWorkspace({ mode = "full" }: { mode?: MasterMode } = {
     <div className={showChrome ? "page-stack" : "embedded-stack"}>
       {showChrome ? (
       <header className="page-header">
-        <div>
-          <span className="page-kicker">工厂与测量点</span>
-          <h1>主数据中心</h1>
-          <p>维护工厂、车型、颜色、零件和测量点等基础资料，供生产与质量录入选用。</p>
-        </div>
         <button className="button button-primary" onClick={() => openModal("create")}>
           <Plus aria-hidden="true" />
           新建{config.singular}
