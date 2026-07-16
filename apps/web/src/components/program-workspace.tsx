@@ -1,18 +1,15 @@
 "use client";
 
 import {
-  CheckCircle2,
-  ChevronRight,
-  CircleDot,
   LoaderCircle,
   Pencil,
   Plus,
   RefreshCw,
-  Send,
   Settings2,
+  Upload,
   X,
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BrushConfigForm } from "@/components/brush-config-form";
 import { BulkDataActions } from "@/components/bulk-data-actions";
@@ -20,8 +17,6 @@ import { DurrTrajectoryPanel } from "@/components/durr-trajectory-panel";
 import { ModalShell } from "@/components/modal-shell";
 import { VersionDiffPanel } from "@/components/version-diff-panel";
 import { useAuth } from "@/lib/auth-context";
-import { stageLabel } from "@/lib/display-labels";
-import { definitionsForProcessStage } from "@/lib/parameter-stage-scope";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type Resource = { id: string; code: string; name: string };
@@ -129,11 +124,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload;
 }
 
-function relationName(resources: Resource[], id?: string | null): string {
-  const resource = resources.find((item) => item.id === id);
-  return resource ? `${resource.code} / ${resource.name}` : "未关联";
-}
-
 /** Soft context match: missing record ids stay visible; conflicting ids are hidden. */
 function matchesContextId(recordId?: string | null, contextId?: string): boolean {
   if (!contextId) return true;
@@ -145,6 +135,28 @@ function matchesContextIdList(recordIds?: string[] | null, contextId?: string): 
   if (!contextId) return true;
   if (!recordIds?.length) return true;
   return recordIds.includes(contextId);
+}
+
+const STAGE_PARAM_PREFIX: Record<string, string> = {
+  MIDCOAT_EXT: "midcoat",
+  BASECOAT_1: "basecoat_1",
+  BASECOAT_2: "basecoat_2",
+  CLEARCOAT_1: "clearcoat_1",
+  CLEARCOAT_2: "clearcoat_2",
+};
+
+const PARAM_SUFFIXES: Array<[string, string]> = [
+  ["spray_flow", "喷涂流量"],
+  ["outer_air", "外成型空气流量"],
+  ["inner_air", "内成型空气流量"],
+  ["bell_speed", "旋杯转速"],
+  ["voltage", "静电高压"],
+];
+
+function stageParamCodes(processStage: string): Array<[string, string]> {
+  const prefix = STAGE_PARAM_PREFIX[processStage];
+  if (!prefix) return [];
+  return PARAM_SUFFIXES.map(([suffix, label]) => [`${prefix}_${suffix}`, label] as [string, string]);
 }
 
 export function ProgramWorkspace({
@@ -182,6 +194,15 @@ export function ProgramWorkspace({
   const [modal, setModal] = useState<ModalState | null>(null);
   const [form, setForm] = useState<FormState>({});
   const [brushConfig, setBrushConfig] = useState<BrushConfigState>(null);
+  const [selectedBrushTableNo, setSelectedBrushTableNo] = useState("");
+  const [allBrushData, setAllBrushData] = useState<
+    Record<string, { parameters: BrushParameter[]; contributions: Contribution[] }>
+  >({});
+  const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
+  const [rowDraft, setRowDraft] = useState<Record<string, string>>({});
+  const [wideUploading, setWideUploading] = useState(false);
+  const [wideFormat, setWideFormat] = useState<"xlsx" | "csv">("xlsx");
+  const wideInputRef = useRef<HTMLInputElement>(null);
 
   const closeModal = useCallback(() => {
     if (submitting) return;
@@ -192,11 +213,6 @@ export function ProgramWorkspace({
   }, []);
   const selectedProgram = programs.find((item) => item.id === selectedProgramId);
   const selectedVersion = versions.find((item) => item.id === selectedVersionId);
-  const selectedBrush = brushes.find((item) => item.id === selectedBrushId);
-  const stageDefinitions = useMemo(
-    () => definitionsForProcessStage(definitions, selectedProgram?.process_stage),
-    [definitions, selectedProgram?.process_stage],
-  );
   const filteredPrograms = useMemo(
     () =>
       programs.filter(
@@ -214,21 +230,6 @@ export function ProgramWorkspace({
       ),
     [colorId, modelId, versions],
   );
-  const versionImportQuery = selectedProgramId
-    ? { default_values: JSON.stringify({ spray_program_id: selectedProgramId }) }
-    : undefined;
-  const brushImportQuery = selectedVersionId
-    ? { default_values: JSON.stringify({ program_version_id: selectedVersionId }) }
-    : undefined;
-  const brushParameterImportQuery = selectedBrushId
-    ? { default_values: JSON.stringify({ brush_id: selectedBrushId }) }
-    : undefined;
-  const contributionImportQuery = selectedBrushId
-    ? { default_values: JSON.stringify({ brush_id: selectedBrushId }) }
-    : undefined;
-  const contributionDownloadQuery = selectedBrushId
-    ? { brush_id: selectedBrushId }
-    : undefined;
   const loadBrush = useCallback(async (brushId: string) => {
     if (!brushId) {
       setParameters([]);
@@ -243,6 +244,25 @@ export function ProgramWorkspace({
     setSelectedBrushId(brushId);
     setParameters(nextParameters);
     setContributions(nextContributions);
+  }, []);
+
+  const loadBrushTable = useCallback(async (versionId: string, brushTableNo: string) => {
+    if (!versionId || !brushTableNo) {
+      setAllBrushData({});
+      return;
+    }
+    const versionBrushes = await request<Brush[]>(`/api/process/program-versions/${versionId}/brushes`);
+    const tableBrushes = versionBrushes.filter((b) => b.brush_table_no === brushTableNo);
+    const entries = await Promise.all(
+      tableBrushes.map(async (brush) => {
+        const [params, contribs] = await Promise.all([
+          request<BrushParameter[]>(`/api/process/brushes/${brush.id}/parameters`),
+          request<Contribution[]>(`/api/process/brushes/${brush.id}/contributions`),
+        ]);
+        return [brush.id, { parameters: params, contributions: contribs }] as const;
+      }),
+    );
+    setAllBrushData(Object.fromEntries(entries));
   }, []);
 
   const loadVersion = useCallback(async (versionId: string, preferredBrushId = "") => {
@@ -321,15 +341,6 @@ export function ProgramWorkspace({
     // Initial load only; subsequent refreshes preserve the current hierarchy explicitly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const stats = useMemo(() => {
-    return [
-      ["喷涂程序", filteredPrograms.length, "覆盖五个工艺阶段"],
-      ["当前程序版本", filteredVersions.length, selectedProgram?.program_code ?? "请选择程序"],
-      ["刷子号", brushes.length, selectedVersion?.version ?? "请选择版本"],
-      ["参数 / 贡献", parameters.length + contributions.length, `${parameters.length} 参数 · ${contributions.length} 贡献`],
-    ] as const;
-  }, [brushes.length, contributions.length, filteredPrograms.length, filteredVersions.length, parameters.length, selectedProgram, selectedVersion]);
 
   function openModal(kind: ModalKind, record?: ModalState["record"]) {
     setError("");
@@ -413,11 +424,13 @@ export function ProgramWorkspace({
     }
   }
 
-  async function handleBrushConfigSaved(brushId: string) {
+  async function handleBrushConfigSaved() {
     setBrushConfig(null);
     setNotice("刷子、参数与点位贡献已保存");
     await reload();
-    await loadBrush(brushId);
+    if (selectedVersionId && selectedBrushTableNo) {
+      await loadBrushTable(selectedVersionId, selectedBrushTableNo);
+    }
   }
 
   function bulkResult(message: string, type: "success" | "error") {
@@ -451,6 +464,208 @@ export function ProgramWorkspace({
     }
   }
 
+  const brushTableOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const brush of brushes) {
+      if (!seen.has(brush.brush_table_no)) seen.set(brush.brush_table_no, brush.brush_table_no);
+    }
+    return Array.from(seen.entries());
+  }, [brushes]);
+
+  function handleProgramChange(programId: string) {
+    setSelectedBrushTableNo("");
+    setAllBrushData({});
+    setEditingRowKey(null);
+    void loadProgram(programId);
+  }
+
+  function handleVersionChange(versionId: string) {
+    setSelectedBrushTableNo("");
+    setAllBrushData({});
+    setEditingRowKey(null);
+    void loadVersion(versionId);
+  }
+
+  function handleBrushTableChange(tableNo: string) {
+    setEditingRowKey(null);
+    setSelectedBrushTableNo(tableNo);
+    if (selectedVersionId && tableNo) {
+      void loadBrushTable(selectedVersionId, tableNo);
+    } else {
+      setAllBrushData({});
+    }
+  }
+
+  const paramCodes = useMemo(
+    () => stageParamCodes(selectedProgram?.process_stage ?? ""),
+    [selectedProgram?.process_stage],
+  );
+
+  const recipeRows = useMemo(() => {
+    if (!selectedBrushTableNo || !brushes.length) return [];
+    const tableBrushes = brushes.filter((b) => b.brush_table_no === selectedBrushTableNo);
+    const rows: Array<{
+      key: string;
+      brush: Brush;
+      pointId: string;
+      pointLabel: string;
+      params: BrushParameter[];
+      contribution: Contribution | null;
+    }> = [];
+    for (const brush of tableBrushes) {
+      const data = allBrushData[brush.id] ?? { parameters: [], contributions: [] };
+      const pointRows = data.contributions.length ? data.contributions : [null];
+      for (const contrib of pointRows) {
+        const point = points.find((p) => p.id === contrib?.measurement_point_id);
+        rows.push({
+          key: `${brush.id}__${contrib?.measurement_point_id ?? "none"}`,
+          brush,
+          pointId: contrib?.measurement_point_id ?? "",
+          pointLabel: point ? `${point.code} / ${point.name}` : "",
+          params: data.parameters,
+          contribution: contrib ?? null,
+        });
+      }
+    }
+    return rows;
+  }, [allBrushData, brushes, points, selectedBrushTableNo]);
+
+  function startEditRow(row: (typeof recipeRows)[number]) {
+    const draft: Record<string, string> = { spray_position: row.brush.spray_position ?? "" };
+    for (const [code] of paramCodes) {
+      const param = row.params.find((p) => p.parameter_code === code);
+      draft[code] = param ? String(param.configured_value) : "";
+      draft[`${code}__min`] = param && param.soft_min != null ? String(param.soft_min) : "";
+      draft[`${code}__max`] = param && param.soft_max != null ? String(param.soft_max) : "";
+    }
+    draft.weight = row.contribution ? String(row.contribution.contribution_weight) : "";
+    setEditingRowKey(row.key);
+    setRowDraft(draft);
+  }
+
+  function cancelEditRow() {
+    setEditingRowKey(null);
+    setRowDraft({});
+  }
+
+  async function saveRow(row: (typeof recipeRows)[number]) {
+    setSubmitting(true);
+    setError("");
+    try {
+      const sprayPosition = rowDraft.spray_position ?? "";
+      if (sprayPosition !== (row.brush.spray_position ?? "")) {
+        await request(`/api/process/brushes/${row.brush.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ spray_position: sprayPosition || null }),
+        });
+      }
+      for (const [code] of paramCodes) {
+        const param = row.params.find((p) => p.parameter_code === code);
+        const valueStr = rowDraft[code] ?? "";
+        const minStr = rowDraft[`${code}__min`] ?? "";
+        const maxStr = rowDraft[`${code}__max`] ?? "";
+        const configuredValue = valueStr === "" ? null : Number(valueStr);
+        const softMin = minStr === "" ? null : Number(minStr);
+        const softMax = maxStr === "" ? null : Number(maxStr);
+        if (configuredValue === null && softMin === null && softMax === null) continue;
+        if (param) {
+          const patch: Record<string, number | null> = {};
+          if (configuredValue !== null && configuredValue !== param.configured_value) patch.configured_value = configuredValue;
+          if (softMin !== (param.soft_min ?? null)) patch.soft_min = softMin;
+          if (softMax !== (param.soft_max ?? null)) patch.soft_max = softMax;
+          if (Object.keys(patch).length) {
+            await request(`/api/process/brush-parameters/${param.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(patch),
+            });
+          }
+        }
+      }
+      if (row.pointId) {
+        const weightStr = rowDraft.weight ?? "";
+        if (weightStr !== "") {
+          const weight = Number(weightStr);
+          if (row.contribution && weight !== row.contribution.contribution_weight) {
+            await request(`/api/process/brushes/${row.brush.id}/contributions/${row.pointId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                overlap_ratio: row.contribution.overlap_ratio,
+                contribution_weight: weight,
+                source: row.contribution.source,
+                version: row.contribution.version,
+                is_approved: row.contribution.is_approved,
+              }),
+            });
+          }
+        }
+      }
+      setNotice("已保存");
+      setEditingRowKey(null);
+      setRowDraft({});
+      if (selectedVersionId && selectedBrushTableNo) {
+        await loadBrushTable(selectedVersionId, selectedBrushTableNo);
+      }
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "保存失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function wideDownloadUrl(action: "template" | "export"): string {
+    const params = new URLSearchParams();
+    params.set("format", wideFormat);
+    if (selectedProgramId) params.set("spray_program_id", selectedProgramId);
+    if (selectedVersionId) params.set("program_version_id", selectedVersionId);
+    if (selectedBrushTableNo) params.set("brush_table_no", selectedBrushTableNo);
+    return `/api/recipe-wide/${action}?${params.toString()}`;
+  }
+
+  async function wideImportFile(file: File) {
+    setWideUploading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams();
+      params.set("filename", file.name);
+      if (selectedProgramId) params.set("spray_program_id", selectedProgramId);
+      if (selectedVersionId) params.set("program_version_id", selectedVersionId);
+      if (selectedBrushTableNo) params.set("brush_table_no", selectedBrushTableNo);
+      const response = await fetch(`/api/recipe-wide/import?${params.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        total_rows?: number;
+        created?: number;
+        updated?: number;
+        skipped?: number;
+        failed?: number;
+        errors?: Array<{ row: number; message: string }>;
+      };
+      if (!response.ok) throw new Error(result.error ?? `导入失败（${response.status}）`);
+      const firstError = result.errors?.[0];
+      const summary = `已处理 ${result.total_rows ?? 0} 行，新增 ${result.created ?? 0}，更新 ${result.updated ?? 0}，跳过 ${result.skipped ?? 0}，失败 ${result.failed ?? 0}`;
+      if (firstError) {
+        setError(`${summary}；首个错误：第 ${firstError.row} 行 ${firstError.message}`);
+      } else {
+        setNotice(summary);
+      }
+      await reload();
+      if (selectedVersionId && selectedBrushTableNo) {
+        await loadBrushTable(selectedVersionId, selectedBrushTableNo);
+      }
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : "宽表导入失败");
+    } finally {
+      setWideUploading(false);
+    }
+  }
+
   return (
     <div className={showChrome ? "page-stack" : "embedded-stack"}>
       {showChrome ? (
@@ -476,16 +691,8 @@ export function ProgramWorkspace({
         </div>
       </header>
       ) : null}
-      <div className="freshness"><span className="live-dot" /> 实时程序配置 · 版本状态受控</div>
-      <section className="module-stat-strip">
-        {stats.map(([label, value, note]) => (
-          <article key={label}><span>{label}</span><strong>{loading ? "…" : value}</strong><small>{note}</small></article>
-        ))}
-      </section>
       {error ? <div className="message-banner message-error">{error}</div> : null}
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
-      <div className="freshness">程序、版本、刷子采用版本化与替换治理；当前页面不提供物理删除。</div>
-      <div className="freshness">建议顺序：先程序 → 再版本 → 再一次填完刷子身份、本工序参数与测量点贡献。参数列表会按当前程序工序自动过滤（如中涂只显示中涂参数）。</div>
 
       {!hideOuterTabs ? (
       <div className="master-tabs program-workspace-tabs">
@@ -494,178 +701,138 @@ export function ProgramWorkspace({
         <button className={workspaceTab === "diff" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setWorkspaceTab("diff")}>版本对比</button>
         {contextFilterActive && workspaceTab === "programs" ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}
       </div>
-      ) : workspaceTab === "programs" ? (
-        <div className="master-tabs program-workspace-tabs">
-          <BulkDataActions resourceKey="process.spray-programs" resourceLabel="喷涂程序" disabled={loading || submitting} onImported={reload} onResult={bulkResult} />
-          <button className="button button-primary" onClick={() => openModal("program")}><Plus aria-hidden="true" />新建喷涂程序</button>
-          <button className="button button-secondary" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} aria-hidden="true" />刷新</button>
-          {contextFilterActive ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}
-        </div>
       ) : null}
 
-      {workspaceTab === "programs" ? <section className="program-config-grid">
-        <article className="panel program-column">
-          <div className="program-column-heading"><div><span className="eyebrow">第 1 步</span><h2>喷涂程序</h2></div><span>{filteredPrograms.length}</span></div>
-          <div className="program-list">
-            {filteredPrograms.map((program) => (
-              <button
-                className={program.id === selectedProgramId ? "program-list-item selected" : "program-list-item"}
-                key={program.id}
-                onClick={() => void loadProgram(program.id)}
-              >
-                <div><strong>{program.program_code}</strong><span>{program.name}</span><small>{program.station_code} · {stageLabel(program.process_stage)}</small></div>
-                <ChevronRight />
+      {workspaceTab === "programs" ? <section className="recipe-workspace">
+        <div className="recipe-cascading-bar">
+          <label className="recipe-select">
+            <span>喷涂程序</span>
+            <select value={selectedProgramId} onChange={(e) => handleProgramChange(e.target.value)} disabled={loading}>
+              <option value="">选择喷涂程序</option>
+              {filteredPrograms.map((p) => (
+                <option key={p.id} value={p.id}>{p.program_code} · {p.name}</option>
+              ))}
+            </select>
+            <button className="button button-secondary" type="button" onClick={() => openModal("program")} disabled={submitting}><Plus />新建</button>
+            {selectedProgram ? <button className="button button-secondary" type="button" onClick={() => openModal("program", selectedProgram)}><Pencil />编辑</button> : null}
+          </label>
+          <label className="recipe-select">
+            <span>版本</span>
+            <select value={selectedVersionId} onChange={(e) => handleVersionChange(e.target.value)} disabled={loading || !selectedProgram}>
+              <option value="">{selectedProgram ? "选择版本" : "先选喷涂程序"}</option>
+              {filteredVersions.map((v) => (
+                <option key={v.id} value={v.id}>{v.version} · {statusLabels[v.status] ?? v.status}{v.is_master_sample ? " · 封样" : ""}</option>
+              ))}
+            </select>
+            <button className="button button-secondary" type="button" onClick={() => openModal("version")} disabled={submitting || !selectedProgram}><Plus />新建</button>
+            {selectedVersion ? <button className="button button-secondary" type="button" onClick={() => openModal("version", selectedVersion)}><Pencil />编辑</button> : null}
+            {selectedVersion && ["DRAFT", "PENDING", "APPROVED"].includes(selectedVersion.status) ? (
+              <button className="button button-primary" type="button" onClick={() => void advanceVersion(selectedVersion)} disabled={submitting}>
+                {selectedVersion.status === "DRAFT" ? "提交审批" : selectedVersion.status === "PENDING" ? "批准版本" : "激活版本"}
               </button>
-            ))}
-            {!filteredPrograms.length ? <div className="program-empty large-empty"><Settings2 />暂无喷涂程序，请先创建程序主档，再继续维护版本与刷子。</div> : null}
+            ) : null}
+          </label>
+          <label className="recipe-select">
+            <span>刷子表</span>
+            <select value={selectedBrushTableNo} onChange={(e) => handleBrushTableChange(e.target.value)} disabled={loading || !selectedVersion}>
+              <option value="">{selectedVersion ? "选择刷子表" : "先选版本"}</option>
+              {brushTableOptions.map(([no]) => (
+                <option key={no} value={no}>{no}</option>
+              ))}
+            </select>
+            <button className="button button-secondary" type="button" onClick={() => openBrushConfig("create")} disabled={submitting || !selectedVersion}><Plus />新建刷子</button>
+          </label>
+          <div className="recipe-wide-actions">
+            <select value={wideFormat} onChange={(e) => setWideFormat(e.target.value as "xlsx" | "csv")} disabled={wideUploading || !selectedVersion}>
+              <option value="xlsx">Excel</option>
+              <option value="csv">CSV</option>
+            </select>
+            <a className="button button-secondary" href={selectedVersion ? wideDownloadUrl("template") : undefined} aria-disabled={!selectedVersion}>模板</a>
+            <a className="button button-secondary" href={selectedVersion ? wideDownloadUrl("export") : undefined} aria-disabled={!selectedVersion}>导出</a>
+            <input ref={wideInputRef} type="file" accept=".xlsx,.csv" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void wideImportFile(f); }} />
+            <button className="button button-primary" type="button" onClick={() => wideInputRef.current?.click()} disabled={wideUploading || !selectedVersion}>
+              {wideUploading ? <LoaderCircle className="spin" /> : <Upload />}导入宽表
+            </button>
+            <button className="button button-secondary" type="button" onClick={() => void reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} />刷新</button>
           </div>
-          {selectedProgram ? (
-            <div className="program-column-actions">
-              <button className="button button-secondary" onClick={() => openModal("program", selectedProgram)}><Pencil />编辑</button>
-            </div>
-          ) : filteredPrograms.length ? <div className="program-empty">请先从左侧明确选择一个喷涂程序，再进入版本维护。</div> : null}
-        </article>
+        </div>
 
-        <article className="panel program-column">
-          <div className="program-column-heading">
-            <div><span className="eyebrow">第 2 步</span><h2>受控版本</h2><small>{selectedProgram ? `当前归属 ${selectedProgram.program_code}` : "先选择左侧程序后，才能新建或导入版本"}</small></div>
-            <div className="row-actions program-heading-actions">
-              <BulkDataActions
-                resourceKey="process.program-versions"
-                resourceLabel="程序版本"
-                disabled={loading || submitting || !selectedProgram}
-                onImported={reload}
-                onResult={bulkResult}
-                importQuery={versionImportQuery}
-                className="program-version-bulk-actions"
-              />
-              <button className="button button-secondary" onClick={() => openModal("version")} disabled={!selectedProgram}>
-                <Plus />
-                新建版本
-              </button>
-            </div>
-          </div>
-          <div className="program-list">
-            {filteredVersions.map((version) => (
-              <button
-                className={version.id === selectedVersionId ? "program-list-item selected" : "program-list-item"}
-                key={version.id}
-                onClick={() => void loadVersion(version.id)}
-              >
-                <div><strong>{version.version}</strong><span>{statusLabels[version.status] ?? version.status}</span><small>{{ MANUAL: "人工配置", AI: "智能推荐", IMPORT: "外部导入" }[version.source_type] ?? version.source_type}{version.is_master_sample ? " · 封样" : ""}</small></div>
-                <span className={`version-dot version-${version.status.toLowerCase()}`} />
-              </button>
-            ))}
-            {!filteredVersions.length ? <div className="program-empty">当前程序暂无版本，请先新建受控版本并补齐适用范围。</div> : null}
-          </div>
-          {selectedVersion ? (
-            <div className="program-column-actions stacked-actions">
-              {["DRAFT", "PENDING", "APPROVED"].includes(selectedVersion.status) ? (
-                <button className="button button-primary" onClick={() => void advanceVersion(selectedVersion)} disabled={submitting}>
-                  {selectedVersion.status === "DRAFT" ? <Send /> : <CheckCircle2 />}
-                  {selectedVersion.status === "DRAFT" ? "提交审批" : selectedVersion.status === "PENDING" ? "批准版本" : "激活版本"}
-                </button>
-              ) : null}
-              <div>
-                <button className="button button-secondary" onClick={() => openModal("version", selectedVersion)}><Pencil />编辑</button>
-              </div>
-            </div>
-          ) : selectedProgram ? <div className="program-empty">请先选择一个程序版本，再维护刷子和审批流转。</div> : null}
-        </article>
-
-        <article className="panel program-detail-column">
-          <div className="program-column-heading">
-            <div><span className="eyebrow">第 3 步</span><h2>刷子与点位贡献</h2><small>{selectedVersion ? `当前归属 ${selectedVersion.version}${selectedProgram ? ` · ${stageLabel(selectedProgram.process_stage)}` : ""}` : "先选择受控版本后，才能导入或新建刷子"}</small></div>
-            <div className="row-actions program-heading-actions">
-              <BulkDataActions
-                resourceKey="process.brushes"
-                resourceLabel="刷子"
-                disabled={loading || submitting || !selectedVersion}
-                onImported={reload}
-                onResult={bulkResult}
-                importQuery={brushImportQuery}
-                className="program-version-bulk-actions"
-              />
-              <button className="button button-primary" onClick={() => openBrushConfig("create")} disabled={!selectedVersion}><Plus />配置刷子（参数+贡献）</button>
-            </div>
-          </div>
-          {!selectedVersion ? <div className="program-empty">先选择程序版本，再一次填完刷子身份、本工序参数与测量点贡献。</div> : null}
-          <div className="brush-selector">
-            {brushes.map((brush) => (
-              <button className={brush.id === selectedBrushId ? "brush-chip selected" : "brush-chip"} key={brush.id} onClick={() => void loadBrush(brush.id)}>
-                <CircleDot />{brush.brush_no}<span>{brush.brush_table_no}</span>
-              </button>
-            ))}
-            {!brushes.length ? <span className="program-empty">当前版本暂无刷子号。</span> : null}
-          </div>
-          {selectedBrush ? (
-            <>
-              <div className="brush-summary">
-                <div><span>刷子号</span><strong>{selectedBrush.brush_no}</strong></div>
-                <div><span>刷子表号</span><strong>{selectedBrush.brush_table_no}</strong></div>
-                <div><span>喷涂位置</span><strong>{selectedBrush.spray_position ?? "待维护"}</strong></div>
-                <div><span>负责零件</span><strong>{relationName(parts, selectedBrush.part_id)}</strong></div>
-                <div className="row-actions">
-                  <button className="button button-secondary" onClick={() => openBrushConfig("edit", selectedBrush)}><Pencil />编辑完整配置</button>
-                </div>
-              </div>
-              <div className="program-subsection">
-                <div className="program-subheading">
-                  <div>
-                    <span className="eyebrow">参数矩阵</span>
-                    <h3>配置参数</h3>
-                    <small>
-                      {selectedProgram
-                        ? `仅展示 ${stageLabel(selectedProgram.process_stage)} 相关参数（目录 ${stageDefinitions.length} 项）· 刷子 ${selectedBrush.brush_no}`
-                        : `当前归属刷子 ${selectedBrush.brush_no}`}
-                    </small>
-                  </div>
-                  <div className="row-actions program-heading-actions">
-                    <BulkDataActions resourceKey="process.brush-parameters" resourceLabel="刷子参数" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={brushParameterImportQuery} className="program-version-bulk-actions" />
-                    <button className="button button-secondary" onClick={() => openBrushConfig("edit", selectedBrush)}><Pencil />在表单中改</button>
-                  </div>
-                </div>
-                <div className="compact-table">
-                  <div className="compact-row compact-head"><span>参数</span><span>配置值</span><span>软边界</span><span>可推荐</span></div>
-                  {parameters.map((parameter) => (
-                    <div className="compact-row" key={parameter.id}>
-                      <span><strong>{parameter.parameter_name}</strong><small>{parameter.parameter_code}</small></span>
-                      <span className="mono">{parameter.configured_value} {parameter.unit}</span>
-                      <span className="mono">{parameter.soft_min ?? "—"} ~ {parameter.soft_max ?? "—"}</span>
-                      <span>{parameter.is_recommendable ? "是" : "否"}</span>
-                    </div>
+        {!selectedBrushTableNo ? (
+          <div className="program-empty large-empty"><Settings2 />请依次选择喷涂程序、版本、刷子表后查看与编辑刷子参数及点位贡献。</div>
+        ) : !recipeRows.length ? (
+          <div className="program-empty">当前刷子表暂无刷子，请通过宽表导入或「配置刷子」新建。</div>
+        ) : (
+          <div className="recipe-table-wrap">
+            <table className="recipe-table">
+              <thead>
+                <tr>
+                  <th>刷子号</th>
+                  <th>喷涂点位</th>
+                  <th>测量点</th>
+                  {paramCodes.map(([, label]) => (
+                    <th key={label}>{label}</th>
                   ))}
-                  {!parameters.length ? <div className="program-empty">当前刷子暂无配置参数，请点「编辑完整配置」一次填完本工序参数。</div> : null}
-                </div>
-              </div>
-              <div className="program-subsection">
-                <div className="program-subheading">
-                  <div>
-                    <span className="eyebrow">点位贡献</span>
-                    <h3>测量点贡献权重</h3>
-                    <small>当前归属刷子 {selectedBrush.brush_no} · 与参数同表单维护</small>
-                  </div>
-                  <div className="row-actions program-heading-actions">
-                    <BulkDataActions resourceKey="process.brush-contributions" resourceLabel="点位贡献" disabled={loading || submitting || !selectedBrush} onImported={reload} onResult={bulkResult} importQuery={contributionImportQuery} downloadQuery={contributionDownloadQuery} className="program-version-bulk-actions" />
-                    <button className="button button-secondary" onClick={() => openBrushConfig("edit", selectedBrush)}><Pencil />在表单中改</button>
-                  </div>
-                </div>
-                <div className="compact-table">
-                  <div className="compact-row contribution-row compact-head"><span>测量点</span><span>重叠率</span><span>贡献权重</span><span>审批</span></div>
-                  {contributions.map((item) => (
-                    <div className="compact-row contribution-row" key={item.id}>
-                      <span><strong>{relationName(points, item.measurement_point_id)}</strong><small>{item.source} · {item.version}</small></span>
-                      <span className="mono">{(item.overlap_ratio * 100).toFixed(1)}%</span>
-                      <span className="mono">{(item.contribution_weight * 100).toFixed(1)}%</span>
-                      <span>{item.is_approved ? "已审批" : "待审批"}</span>
-                    </div>
-                  ))}
-                  {!contributions.length ? <div className="program-empty">当前刷子暂无点位贡献，请在统一表单中勾选测量点并填写权重。</div> : null}
-                </div>
-              </div>
-            </>
-          ) : <div className="program-empty large-empty"><Settings2 />请选择刷子查看摘要，或点「配置刷子（参数+贡献）」一次填完。</div>}
-        </article>
+                  <th>下限</th>
+                  <th>上限</th>
+                  <th>权重</th>
+                  <th className="recipe-action-col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recipeRows.map((row) => {
+                  const isEditing = editingRowKey === row.key;
+                  const sprayParam = row.params.find((p) => p.parameter_code === paramCodes[0]?.[0]);
+                  return (
+                    <tr key={row.key}>
+                      <td>{row.brush.brush_no}</td>
+                      <td>
+                        {isEditing ? (
+                          <input value={rowDraft.spray_position ?? ""} onChange={(e) => setRowDraft({ ...rowDraft, spray_position: e.target.value })} />
+                        ) : (row.brush.spray_position ?? "—")}
+                      </td>
+                      <td>{row.pointLabel || "—"}</td>
+                      {paramCodes.map(([code]) => {
+                        const param = row.params.find((p) => p.parameter_code === code);
+                        return (
+                          <td key={code} className="mono">
+                            {isEditing ? (
+                              <input type="number" step="any" value={rowDraft[code] ?? ""} onChange={(e) => setRowDraft({ ...rowDraft, [code]: e.target.value })} />
+                            ) : (param ? param.configured_value : "—")}
+                          </td>
+                        );
+                      })}
+                      <td className="mono">
+                        {isEditing ? (
+                          <input type="number" step="any" value={rowDraft[`${paramCodes[0]?.[0]}__min`] ?? ""} onChange={(e) => setRowDraft({ ...rowDraft, [`${paramCodes[0]?.[0]}__min`]: e.target.value })} />
+                        ) : (sprayParam?.soft_min ?? "—")}
+                      </td>
+                      <td className="mono">
+                        {isEditing ? (
+                          <input type="number" step="any" value={rowDraft[`${paramCodes[0]?.[0]}__max`] ?? ""} onChange={(e) => setRowDraft({ ...rowDraft, [`${paramCodes[0]?.[0]}__max`]: e.target.value })} />
+                        ) : (sprayParam?.soft_max ?? "—")}
+                      </td>
+                      <td className="mono">
+                        {isEditing ? (
+                          <input type="number" step="any" value={rowDraft.weight ?? ""} onChange={(e) => setRowDraft({ ...rowDraft, weight: e.target.value })} />
+                        ) : (row.contribution ? row.contribution.contribution_weight : "—")}
+                      </td>
+                      <td className="recipe-action-col">
+                        {isEditing ? (
+                          <div className="row-actions">
+                            <button className="button button-primary" type="button" onClick={() => void saveRow(row)} disabled={submitting}>保存</button>
+                            <button className="button button-secondary" type="button" onClick={cancelEditRow} disabled={submitting}>取消</button>
+                          </div>
+                        ) : (
+                          <button className="button button-secondary" type="button" onClick={() => startEditRow(row)}><Pencil />编辑</button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section> : workspaceTab === "durr" ? <section className="panel"><DurrTrajectoryPanel /></section> : <section className="panel"><VersionDiffPanel versions={versions} programId={selectedProgramId} /></section>}
 
       {modal ? (
@@ -690,7 +857,7 @@ export function ProgramWorkspace({
           existingContributions={brushConfig.mode === "edit" ? contributions : []}
           busy={loading || submitting}
           onClose={closeBrushConfig}
-          onSaved={(brushId) => void handleBrushConfigSaved(brushId)}
+          onSaved={() => void handleBrushConfigSaved()}
           onError={setError}
         />
       ) : null}

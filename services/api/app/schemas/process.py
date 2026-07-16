@@ -607,3 +607,18 @@ class AiOverviewSummary(BaseModel):
     trials_active: int
     trials_completed: int
     open_changes: int
+
+
+class RecipeWideImportError(BaseModel):
+    row: int
+    message: str
+
+
+class RecipeWideImportResult(BaseModel):
+    total_rows: int
+    created: int
+    updated: int
+    skipped: int
+    failed: int
+    errors: list[RecipeWideImportError] = Field(default_factory=list)
+

@@ -16,6 +16,7 @@ from app.api.routes import (
     modeling,
     process,
     quality,
+    recipe_wide,
     robot_governance,
     security,
 )
@@ -27,6 +28,7 @@ api_router.include_router(engineering.router)
 api_router.include_router(factories.router)
 api_router.include_router(master_data.router)
 api_router.include_router(process.router)
+api_router.include_router(recipe_wide.router)
 api_router.include_router(material_governance.router)
 api_router.include_router(robot_governance.router)
 api_router.include_router(quality.router)
