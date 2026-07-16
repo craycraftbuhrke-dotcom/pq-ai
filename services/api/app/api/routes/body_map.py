@@ -155,8 +155,21 @@ def _layout_view_keys(body_view: str) -> tuple[str, ...]:
 
 
 def _web_public_dir() -> Path:
-    """Monorepo apps/web/public — body-map photos and view-images.json live here."""
-    return Path(__file__).resolve().parents[5] / "apps" / "web" / "public"
+    """Monorepo apps/web/public — body-map photos and view-images.json live here.
+
+    In local dev the repo root is parents[5] of this file. In the API Docker
+    container only services/api is shipped, so apps/web/public is absent; the
+    returned path simply won't exist and callers fall back to built-in assets.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "apps" / "web" / "public"
+        if candidate.is_dir():
+            return candidate
+    # Fallback (e.g. Docker API container without the web app): best-effort
+    # path whose is_file()/is_dir() checks will be False.
+    root = here.parents[5] if len(here.parents) > 5 else here.parent
+    return root / "apps" / "web" / "public"
 
 
 def _builtin_body_view_image(vehicle_model_code: str, body_view: str) -> str:
