@@ -35,9 +35,7 @@ function QualityHubInner() {
 
   return (
     <DomainHub
-      kicker="质量管理"
       title="质量管理中心"
-      description="按角色走最短路径：质量上数与判定、工艺看点位与刷子、管理层看 SPC 与数据可靠性。真·SPC 在「SPC 与趋势」。"
       tabs={QUALITY_HUB_TABS}
       defaultTab={defaultTab}
       toolbar={

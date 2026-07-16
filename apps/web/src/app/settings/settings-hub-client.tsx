@@ -79,9 +79,7 @@ function SettingsHubInner({
 }) {
   return (
     <DomainHub
-      kicker="系统设置"
       title="系统设置中心"
-      description="系统对接、运行监控与操作审计。账号权限请使用侧栏「用户与角色」。"
       tabs={TABS}
       defaultTab="integrations"
     >

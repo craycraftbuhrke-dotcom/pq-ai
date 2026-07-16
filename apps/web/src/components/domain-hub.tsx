@@ -9,9 +9,7 @@ export type DomainTab = {
 };
 
 type DomainHubProps = {
-  kicker: string;
   title: string;
-  description: string;
   tabs: DomainTab[];
   defaultTab: string;
   actions?: ReactNode;

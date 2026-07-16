@@ -202,9 +202,7 @@ function SecurityAdminInner() {
 
   return (
     <DomainHub
-      kicker="账号权限"
       title="安全管理"
-      description="维护登录用户、角色分配，以及系统对接用的 API Key 签发。"
       tabs={TABS}
       defaultTab="users"
       actions={

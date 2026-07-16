@@ -14,9 +14,7 @@ const TABS = [
 function MasterDataHubInner() {
   return (
     <DomainHub
-      kicker="主数据"
       title="主数据中心"
-      description="维护工厂、车型、颜色、零件，以及机器人设备与轨迹治理。测量编组与测量点位请到质量管理中心「车身点位图」一站式维护。"
       tabs={TABS}
       defaultTab="entities"
     >

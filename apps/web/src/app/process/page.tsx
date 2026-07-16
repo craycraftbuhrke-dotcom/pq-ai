@@ -96,9 +96,7 @@ function ProcessOverview() {
 function ProcessHubInner() {
   return (
     <DomainHub
-      kicker="工艺管理"
       title="工艺管理中心"
-      description="统一管理喷涂配方、虚拟产线仿真、刷子参数、贡献权重与生产实绩。工艺变更与受控试验在 AI 分析中心闭环。"
       tabs={TABS}
       defaultTab="overview"
     >

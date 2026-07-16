@@ -22,6 +22,10 @@ build/
 .vscode/
 .DS_Store
 
+# Temp/runtime artifacts
+.tmp-*
+.tmp-review.db
+
 # Body-map runtime uploads (keep folder via .gitkeep)
 apps/web/public/body-maps/custom/*
 !apps/web/public/body-maps/custom/.gitkeep

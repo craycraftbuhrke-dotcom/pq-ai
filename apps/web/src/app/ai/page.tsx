@@ -29,9 +29,7 @@ function AiHubInner() {
 
   return (
     <DomainHub
-      kicker="AI 智能分析"
       title="AI 分析中心"
-      description="预测诊断、推荐与受控试验、工艺变更闭环，以及模型训练验收。推荐与试验、工艺变更放在同一工作台。"
       tabs={AI_HUB_TABS}
       defaultTab={defaultTab}
       toolbar={

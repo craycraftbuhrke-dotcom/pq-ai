@@ -14,9 +14,7 @@ const TABS = [
 function InstrumentsHubInner() {
   return (
     <DomainHub
-      kicker="仪器管理"
       title="仪器管理中心"
-      description="仪器台账、测量方法、参考件、校准记录与导入模板的统一治理；校准健康度与待校准预警一目了然。"
       tabs={TABS}
       defaultTab="overview"
     >
