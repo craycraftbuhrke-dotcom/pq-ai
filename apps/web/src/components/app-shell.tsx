@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, LogOut, Menu, ShieldCheck, X } from "lucide-react";
+import { LogOut, Menu, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
@@ -22,8 +22,6 @@ export function AppShell({ children }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const isAdmin = actor.roles.includes("ADMIN") || actor.permissions.includes("*");
-  const isQualityFocused =
-    actor.roles.includes("QUALITY_ENGINEER") && !actor.roles.includes("PROCESS_ENGINEER") && !isAdmin;
 
   const visibleSections = useMemo(() => {
     if (isAdmin) return navSections;
@@ -40,33 +38,6 @@ export function AppShell({ children }: AppShellProps) {
       })
       .filter((section) => section.items.length > 0);
   }, [actor.roles, isAdmin, pathname]);
-
-  const initialCollapsedSections = useMemo(() => {
-    const collapsed: Record<string, boolean> = {};
-    for (const section of visibleSections) {
-      if (section.key === "settings") {
-        collapsed[section.key] = !isAdmin;
-        continue;
-      }
-      if (section.key === "quality" && isQualityFocused) {
-        collapsed[section.key] = false;
-        continue;
-      }
-      collapsed[section.key] = false;
-    }
-    return collapsed;
-  }, [isAdmin, isQualityFocused, visibleSections]);
-
-  const [collapsedOverrides, setCollapsedOverrides] = useState<Record<string, boolean>>({});
-
-  function toggleSection(sectionKey: string) {
-    const defaultValue = initialCollapsedSections[sectionKey] ?? false;
-    const currentValue = collapsedOverrides[sectionKey] ?? defaultValue;
-    setCollapsedOverrides((current) => ({
-      ...current,
-      [sectionKey]: !currentValue,
-    }));
-  }
 
   const isAuthPage = pathname === "/login" || pathname === "/register";
   const todayLabel = new Date().toLocaleDateString("zh-CN", {
@@ -105,65 +76,32 @@ export function AppShell({ children }: AppShellProps) {
             </button>
           </div>
           <nav className="main-nav" aria-label="主导航">
-            <span className="nav-section-label nav-root-label">工作空间</span>
             {visibleSections.map((section) => {
-              const containsActive = section.items.some((item) => item.href.split("?")[0] === pathname);
-              const isCollapsed = containsActive
-                ? false
-                : (collapsedOverrides[section.key] ?? initialCollapsedSections[section.key] ?? false);
+              const item = section.items[0];
+              if (!item) return null;
+              const Icon = navigationIcons[item.icon];
+              const active = item.href.split("?")[0] === pathname;
               return (
-                <div className={`nav-group${isCollapsed ? " nav-group-collapsed" : ""}`} key={section.key}>
-                  <button
-                    className={`nav-group-header${section.collapsible ? " nav-group-toggle" : ""}`}
-                    type="button"
-                    onClick={section.collapsible ? () => toggleSection(section.key) : undefined}
-                    aria-expanded={!isCollapsed}
-                  >
-                    <div className="nav-section-copy">
-                      <span className="nav-section-label">{section.title}</span>
-                    </div>
-                    {section.collapsible ? (
-                      <span className={`nav-section-toggle${isCollapsed ? " collapsed" : ""}`}>
-                        <ChevronDown aria-hidden="true" />
-                      </span>
-                    ) : null}
-                  </button>
-                  {!isCollapsed
-                    ? section.items.map((item) => {
-                        const Icon = navigationIcons[item.icon];
-                        const active = item.href.split("?")[0] === pathname;
-                        return (
-                          <Link
-                            key={item.href}
-                            className={`nav-item ${active ? "nav-item-active" : ""}`}
-                            href={item.href}
-                            onClick={() => setMobileOpen(false)}
-                          >
-                            <Icon aria-hidden="true" />
-                            <span>{item.label}</span>
-                          </Link>
-                        );
-                      })
-                    : null}
-                </div>
+                <Link
+                  key={section.key}
+                  className={`nav-item nav-item-flat ${active ? "nav-item-active" : ""}`}
+                  href={item.href}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <Icon aria-hidden="true" />
+                  <span>{section.title}</span>
+                </Link>
               );
             })}
             {actor.isAuthenticated && isAdmin ? (
-              <div className="nav-group">
-                <div className="nav-group-header">
-                  <div className="nav-section-copy">
-                    <span className="nav-section-label">账号权限</span>
-                  </div>
-                </div>
-                <Link
-                  className={`nav-item ${pathname === "/security-admin" ? "nav-item-active" : ""}`}
-                  href="/security-admin"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  <ShieldCheck aria-hidden="true" />
-                  <span>用户与角色</span>
-                </Link>
-              </div>
+              <Link
+                className={`nav-item nav-item-flat ${pathname === "/security-admin" ? "nav-item-active" : ""}`}
+                href="/security-admin"
+                onClick={() => setMobileOpen(false)}
+              >
+                <ShieldCheck aria-hidden="true" />
+                <span>用户与角色</span>
+              </Link>
             ) : null}
           </nav>
           <div className="sidebar-foot">

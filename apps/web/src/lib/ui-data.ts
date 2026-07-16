@@ -41,27 +41,44 @@ export type NavSection = {
   items: readonly NavItem[];
 };
 
-/** 按领域模块组织：概览入口墙 + 各域工作台 */
+/** 侧滑栏一级导航：每项直接链接到对应域，无二级标题。 */
 export const navSections: readonly NavSection[] = [
   {
     key: "home",
-    title: "工作台",
-    items: [{ href: "/", label: "各域概览", icon: "dashboard" }],
+    title: "驾驶舱",
+    items: [{ href: "/", label: "驾驶舱", icon: "dashboard" }],
+  },
+  {
+    key: "ai",
+    title: "AI 闭环",
+    items: [
+      {
+        href: "/ai",
+        label: "AI 闭环",
+        icon: "ai",
+        roles: ["DATA_SCIENTIST", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "APPROVER", "ADMIN"],
+      },
+    ],
   },
   {
     key: "process",
     title: "工艺管理",
-    items: [{ href: "/process", label: "工艺管理中心", icon: "program" }],
-  },
-  {
-    key: "materials",
-    title: "油漆材料",
-    items: [{ href: "/materials", label: "材料管理中心", icon: "material" }],
+    items: [{ href: "/process", label: "工艺管理", icon: "program" }],
   },
   {
     key: "quality",
     title: "质量管理",
-    items: [{ href: "/quality", label: "质量管理中心", icon: "quality" }],
+    items: [{ href: "/quality", label: "质量管理", icon: "quality" }],
+  },
+  {
+    key: "materials",
+    title: "油漆材料",
+    items: [{ href: "/materials", label: "油漆材料", icon: "material" }],
+  },
+  {
+    key: "instruments",
+    title: "仪器管理",
+    items: [{ href: "/quality?tab=governance", label: "仪器管理", icon: "monitor" }],
   },
   {
     key: "master",
@@ -69,37 +86,28 @@ export const navSections: readonly NavSection[] = [
     items: [
       {
         href: "/master-data",
-        label: "主数据中心",
+        label: "主数据",
         icon: "master",
         roles: ["ADMIN", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "INTEGRATION_OPERATOR"],
       },
     ],
   },
   {
-    key: "ai",
-    title: "AI 智能分析",
+    key: "settings",
+    title: "系统设置",
     items: [
       {
-        href: "/ai",
-        label: "AI 分析中心",
-        icon: "ai",
-        roles: ["DATA_SCIENTIST", "PROCESS_ENGINEER", "QUALITY_ENGINEER", "APPROVER", "ADMIN"],
+        href: "/settings",
+        label: "系统设置",
+        icon: "integration",
+        roles: ["ADMIN", "INTEGRATION_OPERATOR", "AUDITOR"],
       },
     ],
   },
   {
-    key: "settings",
-    title: "系统设置",
-    collapsible: true,
-    items: [
-      {
-        href: "/settings",
-        label: "系统设置中心",
-        icon: "integration",
-        roles: ["ADMIN", "INTEGRATION_OPERATOR", "AUDITOR"],
-      },
-      { href: "/profile", label: "用户中心", icon: "audit" },
-    ],
+    key: "profile",
+    title: "个人中心",
+    items: [{ href: "/profile", label: "个人中心", icon: "audit" }],
   },
 ] as const;
 

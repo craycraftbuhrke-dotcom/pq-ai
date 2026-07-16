@@ -262,6 +262,12 @@ textarea {
   color: var(--text);
 }
 
+.nav-item-flat {
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 11px 12px;
+}
+
 .nav-item-active svg {
   color: var(--teal);
 }
