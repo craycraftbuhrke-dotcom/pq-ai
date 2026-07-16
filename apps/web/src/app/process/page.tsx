@@ -1,13 +1,13 @@
 "use client";
 
-import Link from "next/link";
 import { Suspense } from "react";
-import { Activity, ArrowRight, Bot, Factory, GitCompareArrows } from "lucide-react";
 
 import { DomainHub } from "@/components/domain-hub";
+import { OvpCard, OvpCardList, OvpCardStatusStrip, type OvpAccent } from "@/components/ovp-card";
 import { PaintLineSimulation } from "@/components/paint-line-simulation";
 import { ProductionWorkspace } from "@/components/production-workspace";
 import { ProgramWorkspace } from "@/components/program-workspace";
+import { useOverviewData, type ProcessOverview as ProcessOverviewData } from "@/lib/overview-data";
 
 const TABS = [
   { key: "overview", label: "概览" },
@@ -16,72 +16,81 @@ const TABS = [
   { key: "runs", label: "生产实绩" },
 ];
 
-const OVERVIEW_CARDS = [
-  {
-    key: "simulation",
-    href: "/process?tab=simulation",
-    icon: Factory,
-    title: "虚拟产线仿真",
-    description: "五站喷涂线可视化：工位装机、点击查看刷子设定参数，并仿真车身过线。",
-    action: "进入仿真",
-  },
-  {
-    key: "recipes",
-    href: "/process?tab=recipes",
-    icon: GitCompareArrows,
-    title: "配方与刷子",
-    description: "维护喷涂程序、受控版本、刷子身份、本工序参数与测量点贡献权重。",
-    action: "进入配方",
-  },
-  {
-    key: "runs",
-    href: "/process?tab=runs",
-    icon: Activity,
-    title: "生产实绩",
-    description: "查看生产事件，补录五段工序实绩与实际参数。质量上传可自动创建生产事件。",
-    action: "进入实绩",
-  },
-  {
-    key: "ai",
-    href: "/ai?tab=recommendations",
-    icon: Bot,
-    title: "工艺变更与试验",
-    description: "工程师参数变更、推荐执行与受控试验已统一到 AI 分析中心闭环。",
-    action: "去 AI 闭环",
-  },
-] as const;
+function ProcessOverviewPanel({ data }: { data: ProcessOverviewData }) {
+  const stageSegments = data.stages.map((s) => ({
+    label: `${s.name} ${s.runCount}`,
+    tone: (s.healthy ? "positive" : "neutral") as OvpAccent,
+  }));
+  const healthyCount = data.stages.filter((s) => s.healthy).length;
+  const total = data.stages.length || 5;
+  const recentRunItems = data.recentRuns.map((r) => ({
+    label: `${r.runNo}${r.shift ? ` · ${r.shift}` : ""}`,
+    value: r.bodyNo ?? "—",
+  }));
 
-function ProcessOverview() {
   return (
     <div className="domain-overview">
       <div className="domain-overview-intro">
         <strong>从这里进入工艺工作台</strong>
         <span>配方配置与生产实绩在本中心完成；推荐试验与工艺变更请到 AI 分析中心。</span>
       </div>
-      <div className="domain-overview-grid">
-        {OVERVIEW_CARDS.map((card) => {
-          const Icon = card.icon;
-          return (
-            <article className="domain-overview-card" key={card.key}>
-              <div className="domain-overview-card-head">
-                <span className="domain-overview-icon" aria-hidden="true">
-                  <Icon />
-                </span>
-                <div>
-                  <h3>{card.title}</h3>
-                  <p>{card.description}</p>
-                </div>
-              </div>
-              <Link className="button button-secondary domain-overview-action" href={card.href}>
-                {card.action}
-                <ArrowRight aria-hidden="true" />
-              </Link>
-            </article>
-          );
-        })}
+      <div className="ovp-card-grid">
+        <OvpCard
+          title="在制生产"
+          kpiLabel="活动批次"
+          kpiValue={data.activeRuns}
+          kpiUnit="台"
+          accent="info"
+          viewAllHref="/process?tab=runs"
+          viewAllLabel="进入实绩"
+        >
+          <OvpCardList items={recentRunItems} />
+        </OvpCard>
+        <OvpCard
+          title="五段健康"
+          kpiLabel="健康段数"
+          kpiValue={`${healthyCount}/${total}`}
+          accent={healthyCount === total ? "positive" : "warning"}
+          viewAllHref="/process?tab=simulation"
+          viewAllLabel="进入仿真"
+        >
+          <OvpCardStatusStrip segments={stageSegments} />
+        </OvpCard>
+        <OvpCard
+          title="配方版本"
+          kpiLabel="生效版本"
+          kpiValue={data.programVersionsActive}
+          kpiUnit="个"
+          accent={data.programVersionsDraft > 0 ? "warning" : "positive"}
+          viewAllHref="/process?tab=recipes"
+          viewAllLabel="进入配方"
+        >
+          <OvpCardList
+            items={[
+              { label: "生效版本", value: String(data.programVersionsActive) },
+              { label: "草稿版本", value: String(data.programVersionsDraft) },
+            ]}
+          />
+        </OvpCard>
+        <OvpCard
+          title="工艺问题"
+          kpiLabel="未关闭问题"
+          kpiValue={data.openIssueTasks}
+          kpiUnit="项"
+          accent={data.openIssueTasks > 0 ? "warning" : "positive"}
+          viewAllHref="/ai?tab=changes"
+          viewAllLabel="去 AI 闭环"
+        >
+          <OvpCardList items={[{ label: "待处理问题", value: String(data.openIssueTasks) }]} />
+        </OvpCard>
       </div>
     </div>
   );
+}
+
+function ProcessOverview() {
+  const { process } = useOverviewData();
+  return <ProcessOverviewPanel data={process} />;
 }
 
 function ProcessHubInner() {

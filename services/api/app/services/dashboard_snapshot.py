@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -6,12 +6,17 @@ from sqlalchemy.orm import Session
 
 from app.models.domain import (
     DiagnosisResult,
+    MaterialBatch,
+    MeasurementCalibrationRecord,
     MeasurementPoint,
+    ModelVersion,
     PredictionResult,
     ProductionRun,
+    QualityIssueTask,
     QualityMeasurement,
     Recommendation,
     RecommendationAction,
+    VersionStatus,
 )
 
 
@@ -69,6 +74,25 @@ def dashboard_snapshot(db: Session | None = None) -> dict:
             "confidence": 0.0,
             "constraints_checked": False,
             "actions": [],
+        },
+        "material_batches": {
+            "total": 0,
+            "verified": 0,
+            "fail_spec": 0,
+        },
+        "calibration_alerts": {
+            "expiring_30d": 0,
+            "expired": 0,
+        },
+        "engineering_open_tasks": 0,
+        "ai_models": {
+            "approved": 0,
+            "total": 0,
+            "latest_metric": None,
+        },
+        "recent_predictions": {
+            "count_24h": 0,
+            "top_risk_point": None,
         },
     }
     if not db:
@@ -168,6 +192,87 @@ def dashboard_snapshot(db: Session | None = None) -> dict:
                     for action in actions
                 ],
             }
+
+        # Cross-domain KPIs for the operations cockpit (Fiori OVP home).
+        total_batches = int(db.scalar(select(func.count()).select_from(MaterialBatch)) or 0)
+        snapshot["material_batches"]["total"] = total_batches
+
+        now = datetime.now(UTC)
+        calib_cutoff = now + timedelta(days=30)
+        expired_calibrations = int(
+            db.scalar(
+                select(func.count())
+                .select_from(MeasurementCalibrationRecord)
+                .where(MeasurementCalibrationRecord.valid_until < now)
+            )
+            or 0
+        )
+        expiring_calibrations = int(
+            db.scalar(
+                select(func.count())
+                .select_from(MeasurementCalibrationRecord)
+                .where(
+                    MeasurementCalibrationRecord.valid_until >= now,
+                    MeasurementCalibrationRecord.valid_until <= calib_cutoff,
+                )
+            )
+            or 0
+        )
+        snapshot["calibration_alerts"] = {
+            "expiring_30d": expiring_calibrations,
+            "expired": expired_calibrations,
+        }
+
+        snapshot["engineering_open_tasks"] = int(
+            db.scalar(
+                select(func.count())
+                .select_from(QualityIssueTask)
+                .where(QualityIssueTask.status.notin_(["VERIFIED", "CLOSED"]))
+            )
+            or 0
+        )
+
+        total_models = int(db.scalar(select(func.count()).select_from(ModelVersion)) or 0)
+        approved_models = int(
+            db.scalar(
+                select(func.count())
+                .select_from(ModelVersion)
+                .where(ModelVersion.status == VersionStatus.APPROVED)
+            )
+            or 0
+        )
+        latest_model = db.scalar(
+            select(ModelVersion)
+            .where(ModelVersion.status == VersionStatus.APPROVED)
+            .order_by(ModelVersion.trained_at.desc().nullslast())
+        )
+        snapshot["ai_models"] = {
+            "approved": approved_models,
+            "total": total_models,
+            "latest_metric": latest_model.target_metric if latest_model else None,
+        }
+
+        predictions_24h = int(
+            db.scalar(
+                select(func.count())
+                .select_from(PredictionResult)
+                .where(PredictionResult.predicted_at >= now - timedelta(hours=24))
+            )
+            or 0
+        )
+        top_risk_prediction = db.scalar(
+            select(PredictionResult)
+            .where(PredictionResult.predicted_at >= now - timedelta(hours=24))
+            .order_by(PredictionResult.predicted_at.desc())
+        )
+        top_risk_point_code = None
+        if top_risk_prediction:
+            point = db.get(MeasurementPoint, top_risk_prediction.measurement_point_id)
+            top_risk_point_code = point.code if point else top_risk_prediction.measurement_point_id
+        snapshot["recent_predictions"] = {
+            "count_24h": predictions_24h,
+            "top_risk_point": top_risk_point_code,
+        }
     except SQLAlchemyError:
         db.rollback()
     return snapshot

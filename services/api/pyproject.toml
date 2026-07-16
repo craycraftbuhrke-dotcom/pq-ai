@@ -5,6 +5,10 @@ description = "PQ-AI paint process and quality closed-loop API"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi==0.115.6",
+  "starlette==0.41.3",
+  "anyio>=3.4.0,<5",
+  "sniffio>=1.1.0",
+  "idna>=3.0",
   "pydantic==2.10.4",
   "pydantic-settings==2.7.0",
   "python-multipart==0.0.20",

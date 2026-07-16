@@ -577,3 +577,33 @@ class SprayProgramVersionRead(ResourceRead):
     effective_from: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ProcessOverviewStageSummary(BaseModel):
+    code: str
+    name: str
+    healthy: bool
+    run_count: int
+
+
+class ProcessOverviewSummary(BaseModel):
+    active_runs: int
+    total_runs: int
+    stages: list[ProcessOverviewStageSummary]
+    program_versions_active: int
+    program_versions_draft: int
+    open_issue_tasks: int
+    recent_runs: list[dict]
+
+
+class AiOverviewSummary(BaseModel):
+    models_approved: int
+    models_total: int
+    latest_model_metric: str | None
+    predictions_24h: int
+    top_risk_point: str | None
+    recommendations_pending: int
+    recommendations_total: int
+    trials_active: int
+    trials_completed: int
+    open_changes: int

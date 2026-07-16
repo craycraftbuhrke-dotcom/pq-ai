@@ -10,6 +10,8 @@ import {
   TrendingUp,
   X,
 } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { useAuth } from "@/lib/auth-context";
@@ -488,6 +490,22 @@ export function MaterialTrendsPanel({ embedded = false }: { embedded?: boolean }
               </strong>
               <small>可靠性问题</small>
             </article>
+          </section>
+
+          <section className="panel material-ai-readiness">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">AI 闭环</span>
+                <h2>材料特性 → AI 推荐</h2>
+              </div>
+              <Link className="button button-secondary" href="/ai?tab=recommendations">
+                进入 AI 推荐
+                <ArrowRight aria-hidden="true" />
+              </Link>
+            </div>
+            <p className="material-ai-readiness-hint">
+              材料批次特性数据将进入 AI 推荐闭环，驱动工艺参数优化与受控试验。已验证结果越多，推荐置信度越高。
+            </p>
           </section>
 
           <section className="panel">

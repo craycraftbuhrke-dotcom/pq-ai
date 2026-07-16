@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.delete_policy import reject_physical_delete
@@ -28,10 +28,12 @@ from app.models.domain import (
     ProductionStageRun,
     ProgramColor,
     ProgramVehicleModel,
+    QualityIssueTask,
     SprayProgram,
     SprayProgramVersion,
     VehicleModelColor,
     VehicleModel,
+    VersionStatus,
 )
 from app.schemas.process import (
     ActualParameterCreate,
@@ -53,6 +55,8 @@ from app.schemas.process import (
     ParameterConstraintSourceCreate,
     ParameterConstraintSourceRead,
     ParameterConstraintSourceUpdate,
+    ProcessOverviewStageSummary,
+    ProcessOverviewSummary,
     ProductionRunCreate,
     ProductionRunRead,
     ProductionRunUpdate,
@@ -69,6 +73,15 @@ from app.schemas.process import (
 from app.services.catalog_seed import seed_parameter_catalog
 
 router = APIRouter(tags=["process-data"])
+
+
+PROCESS_STAGE_LABELS = {
+    ProcessStage.MIDCOAT_EXT: "中涂外喷",
+    ProcessStage.BASECOAT_1: "色漆一站",
+    ProcessStage.BASECOAT_2: "色漆二站",
+    ProcessStage.CLEARCOAT_1: "清漆一站",
+    ProcessStage.CLEARCOAT_2: "清漆二站",
+}
 
 
 def _validate_mapping_scope(values: dict | None, label: str) -> None:
@@ -1075,4 +1088,88 @@ def delete_actual_parameter(parameter_id: str, db: Session = Depends(get_db)) ->
         db,
         _required(db, ActualParameter, parameter_id, "实际参数"),
         "实际参数",
+    )
+
+
+@router.get("/overview-summary", response_model=ProcessOverviewSummary)
+def process_overview_summary(db: Session = Depends(get_db)) -> ProcessOverviewSummary:
+    total_runs = int(db.scalar(select(func.count()).select_from(ProductionRun)) or 0)
+    active_runs = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ProductionRun)
+            .where(ProductionRun.completed_at.is_(None))
+        )
+        or 0
+    )
+
+    stage_summaries: list[ProcessOverviewStageSummary] = []
+    for stage in ProcessStage:
+        run_count = int(
+            db.scalar(
+                select(func.count())
+                .select_from(ProductionStageRun)
+                .where(ProductionStageRun.process_stage == stage.value)
+            )
+            or 0
+        )
+        stage_summaries.append(
+            ProcessOverviewStageSummary(
+                code=stage.value,
+                name=PROCESS_STAGE_LABELS.get(stage, stage.value),
+                healthy=run_count > 0,
+                run_count=run_count,
+            )
+        )
+
+    program_versions_active = int(
+        db.scalar(
+            select(func.count())
+            .select_from(SprayProgramVersion)
+            .where(SprayProgramVersion.status == VersionStatus.ACTIVE)
+        )
+        or 0
+    )
+    program_versions_draft = int(
+        db.scalar(
+            select(func.count())
+            .select_from(SprayProgramVersion)
+            .where(SprayProgramVersion.status == VersionStatus.DRAFT)
+        )
+        or 0
+    )
+
+    open_issue_tasks = int(
+        db.scalar(
+            select(func.count())
+            .select_from(QualityIssueTask)
+            .where(QualityIssueTask.status.notin_(["VERIFIED", "CLOSED"]))
+        )
+        or 0
+    )
+
+    recent_run_rows = list(
+        db.scalars(
+            select(ProductionRun).order_by(ProductionRun.started_at.desc()).limit(3)
+        )
+    )
+    recent_runs = [
+        {
+            "run_no": run.run_no,
+            "body_no": run.body_no,
+            "shift": run.shift,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        }
+        for run in recent_run_rows
+    ]
+
+    return ProcessOverviewSummary(
+        active_runs=active_runs,
+        total_runs=total_runs,
+        stages=stage_summaries,
+        program_versions_active=program_versions_active,
+        program_versions_draft=program_versions_draft,
+        open_issue_tasks=open_issue_tasks,
+        recent_runs=recent_runs,
     )

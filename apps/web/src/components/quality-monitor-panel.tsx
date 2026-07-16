@@ -190,6 +190,44 @@ export function QualityMonitorPanel({ embedded = false }: { embedded?: boolean }
         <div className="master-empty"><Activity /> 正在加载质量监控数据...</div>
       ) : data ? (
         <>
+          <section className="ovp-kpi-strip" aria-label="质量概览头条">
+            <div className="ovp-kpi-tile">
+              <span className="ovp-kpi-tile-label">一次合格率</span>
+              <div className="ovp-kpi-tile-value">
+                <strong>
+                  {data.overview.total_measurements > 0
+                    ? ((data.overview.valid_measurements / data.overview.total_measurements) * 100).toFixed(1)
+                    : "0.0"}
+                </strong>
+                <span>%</span>
+              </div>
+              <span className="ovp-kpi-tile-hint">有效测量 / 总测量</span>
+            </div>
+            <div className="ovp-kpi-tile">
+              <span className="ovp-kpi-tile-label">超差测量</span>
+              <div className="ovp-kpi-tile-value">
+                <strong>{data.overview.failed_measurements}</strong>
+                <span>条</span>
+              </div>
+              <span className="ovp-kpi-tile-hint">需判定与处理</span>
+            </div>
+            <div className="ovp-kpi-tile">
+              <span className="ovp-kpi-tile-label">生效标准</span>
+              <div className="ovp-kpi-tile-value">
+                <strong>{data.standards.active_standards}</strong>
+                <span>项</span>
+              </div>
+              <span className="ovp-kpi-tile-hint">质量判定依据</span>
+            </div>
+            <div className="ovp-kpi-tile">
+              <span className="ovp-kpi-tile-label">校准健康</span>
+              <div className="ovp-kpi-tile-value">
+                <strong>{data.instruments.calibration_health}</strong>
+                <span>%</span>
+              </div>
+              <span className="ovp-kpi-tile-hint">仪器可靠性</span>
+            </div>
+          </section>
           <section className="monitor-hero">
             <div className="monitor-health-card" style={{ borderColor: healthColor }}>
               <div className="monitor-health-main">

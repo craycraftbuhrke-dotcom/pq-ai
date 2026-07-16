@@ -1,7 +1,7 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.referential_integrity import check_fk
@@ -11,14 +11,18 @@ from app.models.domain import (
     ClosedLoopEvaluation,
     ControlledTrial,
     DiagnosisResult,
+    MeasurementPoint,
     ModelVersion,
     PredictionResult,
     ProgramRollbackExecution,
+    QualityIssueTask,
     QualityMeasurement,
     QualityMetricValue,
     Recommendation,
     RecommendationAction,
+    RecommendationStatus,
     SprayProgramVersion,
+    VersionStatus,
 )
 from app.schemas.common import (
     ControlledTrialApproval,
@@ -31,6 +35,7 @@ from app.schemas.common import (
     RecommendationVerification,
     RollbackExecutionCreate,
 )
+from app.schemas.process import AiOverviewSummary
 
 router = APIRouter(prefix="/ai", tags=["ai-closed-loop"])
 
@@ -701,3 +706,92 @@ def verify_recommendation(
         "verified_by": evaluation.verified_by,
         "conclusion": evaluation.conclusion,
     }
+
+
+@router.get("/overview-summary", response_model=AiOverviewSummary)
+def ai_overview_summary(db: Session = Depends(get_db)) -> AiOverviewSummary:
+    models_total = int(db.scalar(select(func.count()).select_from(ModelVersion)) or 0)
+    models_approved = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ModelVersion)
+            .where(ModelVersion.status == VersionStatus.APPROVED)
+        )
+        or 0
+    )
+    latest_model = db.scalar(
+        select(ModelVersion)
+        .where(ModelVersion.status == VersionStatus.APPROVED)
+        .order_by(ModelVersion.trained_at.desc().nullslast())
+    )
+
+    now = datetime.now(UTC)
+    predictions_24h = int(
+        db.scalar(
+            select(func.count())
+            .select_from(PredictionResult)
+            .where(PredictionResult.predicted_at >= now - timedelta(hours=24))
+        )
+        or 0
+    )
+    top_risk_prediction = db.scalar(
+        select(PredictionResult)
+        .where(PredictionResult.predicted_at >= now - timedelta(hours=24))
+        .order_by(PredictionResult.predicted_at.desc())
+    )
+    top_risk_point = None
+    if top_risk_prediction:
+        point = db.get(MeasurementPoint, top_risk_prediction.measurement_point_id)
+        top_risk_point = point.code if point else top_risk_prediction.measurement_point_id
+
+    recommendations_total = int(
+        db.scalar(select(func.count()).select_from(Recommendation)) or 0
+    )
+    recommendations_pending = int(
+        db.scalar(
+            select(func.count())
+            .select_from(Recommendation)
+            .where(Recommendation.status == RecommendationStatus.PENDING)
+        )
+        or 0
+    )
+
+    trials_total = int(db.scalar(select(func.count()).select_from(ControlledTrial)) or 0)
+    trials_active = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ControlledTrial)
+            .where(ControlledTrial.status.notin_(["COMPLETED", "VERIFIED", "ROLLED_BACK"]))
+        )
+        or 0
+    )
+    trials_completed = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ControlledTrial)
+            .where(ControlledTrial.status.in_(["COMPLETED", "VERIFIED"]))
+        )
+        or 0
+    )
+
+    open_changes = int(
+        db.scalar(
+            select(func.count())
+            .select_from(QualityIssueTask)
+            .where(QualityIssueTask.status.notin_(["VERIFIED", "CLOSED"]))
+        )
+        or 0
+    )
+
+    return AiOverviewSummary(
+        models_approved=models_approved,
+        models_total=models_total,
+        latest_model_metric=latest_model.target_metric if latest_model else None,
+        predictions_24h=predictions_24h,
+        top_risk_point=top_risk_point,
+        recommendations_pending=recommendations_pending,
+        recommendations_total=recommendations_total,
+        trials_active=trials_active,
+        trials_completed=trials_completed,
+        open_changes=open_changes,
+    )
