@@ -219,14 +219,14 @@ export function QualityMonitorPanel({ embedded = false }: { embedded?: boolean }
               </div>
               <span className="ovp-kpi-tile-hint">质量判定依据</span>
             </div>
-            <div className="ovp-kpi-tile">
-              <span className="ovp-kpi-tile-label">校准健康</span>
+            <Link className="ovp-kpi-tile" href="/instruments">
+              <span className="ovp-kpi-tile-label">仪器管理</span>
               <div className="ovp-kpi-tile-value">
-                <strong>{data.instruments.calibration_health}</strong>
-                <span>%</span>
+                <strong>{data.instruments.total}</strong>
+                <span>台</span>
               </div>
-              <span className="ovp-kpi-tile-hint">仪器可靠性</span>
-            </div>
+              <span className="ovp-kpi-tile-hint">校准健康 {data.instruments.calibration_health}% →</span>
+            </Link>
           </section>
           <section className="monitor-hero">
             <div className="monitor-health-card" style={{ borderColor: healthColor }}>
@@ -255,14 +255,14 @@ export function QualityMonitorPanel({ embedded = false }: { embedded?: boolean }
             <Link className="monitor-stat-link" href="/quality?tab=measurements&filter=reliability_failed">
               <article><AlertTriangle /><span>核验失败</span><strong>{data.overview.failed_measurements}</strong><small>打开判定筛选</small></article>
             </Link>
-            <Link className="monitor-stat-link" href="/quality?tab=governance">
-              <article><Clock /><span>校准过期</span><strong>{data.instruments.expired_calibrations}</strong><small>共 {data.instruments.total_calibrations} 条 · 去仪器</small></article>
+            <Link className="monitor-stat-link" href="/instruments">
+              <article><Clock /><span>校准过期</span><strong>{data.instruments.expired_calibrations}</strong><small>共 {data.instruments.total_calibrations} 条 · 去仪器管理</small></article>
             </Link>
           </section>
           <div className="quality-monitor-cta-row">
             <Link className="button button-secondary" href="/quality?tab=measurements&filter=unverified">查看未核验测量</Link>
             <Link className="button button-secondary" href="/quality?tab=analytics">打开 SPC 与趋势</Link>
-            <Link className="button button-secondary" href="/quality?tab=governance">维护仪器可靠性</Link>
+            <Link className="button button-secondary" href="/instruments">维护仪器可靠性</Link>
             <Link className="button button-secondary" href="/ai?tab=predictions">去 AI 预测诊断</Link>
           </div>
 
@@ -311,14 +311,14 @@ export function QualityMonitorPanel({ embedded = false }: { embedded?: boolean }
                   <span className="eyebrow">校准状态</span>
                   <h2>仪器校准状态</h2>
                 </div>
-                <span className={`record-status ${data.instruments.needs_calibration.length === 0 ? "status-on" : "status-off"}`}>
-                  {data.instruments.needs_calibration.length === 0 ? "全部正常" : `${data.instruments.needs_calibration.length} 个待校准`}
-                </span>
+                <Link href="/instruments" className="text-link" style={{ fontSize: "0.82rem" }}>
+                  去仪器管理 →
+                </Link>
               </div>
               {data.instruments.needs_calibration.length > 0 ? (
                 <div className="calibration-alerts">
                   {data.instruments.needs_calibration.map((inst) => (
-                    <Link className="calibration-alert-row" key={inst.id} href="/quality?tab=governance">
+                    <Link className="calibration-alert-row" key={inst.id} href="/instruments">
                       <AlertTriangle className="alert-icon" />
                       <div>
                         <strong>{inst.name}</strong>
@@ -367,16 +367,16 @@ export function QualityMonitorPanel({ embedded = false }: { embedded?: boolean }
                   <small>已验证 / 有效</small>
                 </div>
               </div>
-              <div className="monitor-indicator">
+              <Link className="monitor-indicator is-link" href="/instruments">
                 <div className="indicator-bar">
                   <div className="indicator-fill" style={{ width: `${data.instruments.calibration_health}%`, background: gaugeColor(data.instruments.calibration_health) }} />
                 </div>
                 <div className="indicator-info">
                   <span>校准健康度</span>
                   <strong>{data.instruments.calibration_health}%</strong>
-                  <small>{data.instruments.valid_calibrations} / {data.instruments.total_calibrations}</small>
+                  <small>{data.instruments.valid_calibrations} / {data.instruments.total_calibrations} · 去仪器</small>
                 </div>
-              </div>
+              </Link>
               <Link className="monitor-indicator is-link" href="/quality?tab=standards">
                 <div className="indicator-bar">
                   <div className="indicator-fill" style={{ width: `${data.standards.active_standards ? 100 : 0}%`, background: gaugeColor(data.standards.active_standards ? 100 : 0) }} />

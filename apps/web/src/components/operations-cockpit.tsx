@@ -193,7 +193,7 @@ function CalibrationAlertCard({ d }: { d: DashboardOverview }) {
       kpiValue={d.calibrationAlerts.expiring30d}
       kpiUnit="件"
       accent={d.calibrationAlerts.expired > 0 ? "negative" : d.calibrationAlerts.expiring30d > 0 ? "warning" : "positive"}
-      viewAllHref="/quality?tab=governance"
+      viewAllHref="/instruments"
     >
       <OvpCardList items={items} />
     </OvpCard>

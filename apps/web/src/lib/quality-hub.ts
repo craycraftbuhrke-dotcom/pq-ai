@@ -7,8 +7,7 @@ export type QualityHubTab =
   | "body-map"
   | "3d-view"
   | "standards"
-  | "analytics"
-  | "governance";
+  | "analytics";
 
 export const QUALITY_HUB_TABS: Array<{ key: QualityHubTab; label: string }> = [
   { key: "overview", label: "数据可靠性" },
@@ -18,7 +17,6 @@ export const QUALITY_HUB_TABS: Array<{ key: QualityHubTab; label: string }> = [
   { key: "3d-view", label: "3D 车身" },
   { key: "standards", label: "质量标准" },
   { key: "analytics", label: "SPC 与趋势" },
-  { key: "governance", label: "仪器可靠性" },
 ];
 
 export type QualityShortcut = { tab: QualityHubTab; label: string };
@@ -37,7 +35,7 @@ export function qualityHomeTab(roles: readonly string[]): QualityHubTab {
   if (isQe && !isPe) return "upload";
   if (isPe && !isQe) return "body-map";
   if (isBoss && !isQe && !isPe) return "analytics";
-  if (isAdmin && !isQe && !isPe) return "governance";
+  if (isAdmin && !isQe && !isPe) return "overview";
   if (isQe) return "upload";
   if (isPe) return "body-map";
   return "overview";
@@ -56,7 +54,7 @@ export function qualityShortcuts(roles: readonly string[]): QualityShortcut[] {
       { tab: "upload", label: "上传" },
       { tab: "measurements", label: "判定" },
       { tab: "standards", label: "标准" },
-      { tab: "governance", label: "仪器" },
+      { tab: "overview", label: "可靠性" },
     ];
   }
   if (isPe && !isQe) {
@@ -76,10 +74,10 @@ export function qualityShortcuts(roles: readonly string[]): QualityShortcut[] {
   }
   if (isAdmin && !isQe && !isPe) {
     return [
-      { tab: "governance", label: "仪器" },
       { tab: "standards", label: "标准" },
       { tab: "body-map", label: "点位治理" },
       { tab: "overview", label: "可靠性" },
+      { tab: "analytics", label: "SPC" },
     ];
   }
   // Mixed / default plant users

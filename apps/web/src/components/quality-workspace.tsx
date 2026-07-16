@@ -17,7 +17,6 @@ import { CSSProperties, FormEvent, ReactNode, useCallback, useEffect, useMemo, u
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
 import { ModalShell } from "@/components/modal-shell";
-import { MeasurementGovernancePanel } from "@/components/measurement-governance-panel";
 import { QualityImportPanel } from "@/components/quality-import-panel";
 import { WorkspaceEmptyState } from "@/components/workspace-empty-state";
 import {
@@ -202,9 +201,9 @@ type Analytics = {
 type MetricRow = { metric_code: string; raw_value: string; corrected_value: string };
 type RepeatRow = { repeat_no: string; metric_code: string; raw_value: string; corrected_value: string };
 type FormState = Record<string, string | boolean>;
-type Tab = "upload" | "measurements" | "standards" | "analytics" | "governance";
+type Tab = "upload" | "measurements" | "standards" | "analytics";
 
-const TAB_VALUES: Tab[] = ["upload", "measurements", "standards", "analytics", "governance"];
+const TAB_VALUES: Tab[] = ["upload", "measurements", "standards", "analytics"];
 
 function parseTab(value: string | null): Tab {
   if (value && TAB_VALUES.includes(value as Tab)) return value as Tab;
@@ -873,13 +872,12 @@ export function QualityWorkspace({
           <button className={tab === "measurements" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("measurements")}>查看与判定 <span>{measurements.length}</span></button>
           <button className={tab === "standards" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("standards")}>质量标准 <span>{standards.length}</span></button>
           <button className={tab === "analytics" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("analytics")}>SPC 与趋势 <span>{filteredAnalytics?.series.length ?? analytics?.statistics.samples ?? 0}</span></button>
-          <button className={tab === "governance" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("governance")}>仪器可靠性 <span>{instruments.length}</span></button>
         </div>
         ) : null}
         {tab === "upload" ? (
           <QualityImportPanel embedded onImported={() => void reload()} />
         ) : null}
-        {tab !== "upload" && tab !== "governance" ? <div className="quality-toolbar">
+        {tab !== "upload" ? <div className="quality-toolbar">
           {tab !== "analytics" ? <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`搜索质量${tab === "measurements" ? "测量" : "标准"}`} /></label> : <div className="quality-analytics-title"><Activity /><span>实时过程能力与点位风险</span></div>}
           {contextFilterActive ? <span className="context-filter-hint">已按顶部作业范围筛选</span> : null}
           <select value={tab === "analytics" ? typeFilter || "ORANGE_PEEL" : typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>{tab !== "analytics" ? <option value="">全部质量类型</option> : null}{Object.entries(qualityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
@@ -945,8 +943,6 @@ export function QualityWorkspace({
           </div>
         ) : tab === "analytics" ? (
           <QualityAnalyticsPanel analytics={filteredAnalytics} loading={analyticsLoading} />
-        ) : tab === "governance" ? (
-          <MeasurementGovernancePanel />
         ) : null}
       </section>
 

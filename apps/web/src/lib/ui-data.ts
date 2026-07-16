@@ -78,7 +78,7 @@ export const navSections: readonly NavSection[] = [
   {
     key: "instruments",
     title: "仪器管理",
-    items: [{ href: "/quality?tab=governance", label: "仪器管理", icon: "monitor" }],
+    items: [{ href: "/instruments", label: "仪器管理", icon: "monitor" }],
   },
   {
     key: "master",

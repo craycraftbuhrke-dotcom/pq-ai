@@ -64,7 +64,6 @@ function QualityHubInner() {
         if (tab === "3d-view") return <BodyPointMap3D />;
         if (tab === "standards") return <QualityWorkspace mode="embed" lockedTab="standards" />;
         if (tab === "analytics") return <QualityWorkspace mode="embed" lockedTab="analytics" />;
-        if (tab === "governance") return <QualityWorkspace mode="embed" lockedTab="governance" />;
         return <QualityMonitorPanel embedded />;
       }}
     </DomainHub>
