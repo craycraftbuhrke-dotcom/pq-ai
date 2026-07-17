@@ -3,7 +3,6 @@
 import { Suspense, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { QualityMonitorPanel } from "@/components/quality-monitor-panel";
 import { BodyPointMap } from "@/components/body-point-map";
 import { BodyPointMap3D } from "@/components/body-point-map-3d";
 import { DomainHub } from "@/components/domain-hub";
@@ -22,7 +21,11 @@ function QualityHubInner() {
   const searchParams = useSearchParams();
   const defaultTab = useMemo(() => qualityHomeTab(actor.roles), [actor.roles]);
   const shortcuts = useMemo(() => qualityShortcuts(actor.roles), [actor.roles]);
-  const activeTab = (searchParams.get("tab") as QualityHubTab | null) ?? defaultTab;
+  const activeTab = useMemo(() => {
+    const raw = searchParams.get("tab");
+    if (raw && QUALITY_HUB_TABS.some((item) => item.key === raw)) return raw as QualityHubTab;
+    return defaultTab;
+  }, [defaultTab, searchParams]);
 
   function goTab(tab: QualityHubTab) {
     const params = new URLSearchParams(searchParams.toString());
@@ -55,14 +58,13 @@ function QualityHubInner() {
       }
     >
       {(tab) => {
-        if (tab === "overview") return <QualityMonitorPanel embedded />;
         if (tab === "upload") return <QualityWorkspace mode="embed" lockedTab="upload" />;
         if (tab === "measurements") return <QualityWorkspace mode="embed" lockedTab="measurements" />;
         if (tab === "body-map") return <BodyPointMap />;
         if (tab === "3d-view") return <BodyPointMap3D />;
         if (tab === "standards") return <QualityWorkspace mode="embed" lockedTab="standards" />;
         if (tab === "analytics") return <QualityWorkspace mode="embed" lockedTab="analytics" />;
-        return <QualityMonitorPanel embedded />;
+        return <QualityWorkspace mode="embed" lockedTab="upload" />;
       }}
     </DomainHub>
   );

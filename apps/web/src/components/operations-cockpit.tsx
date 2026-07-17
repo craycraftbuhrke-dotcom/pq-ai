@@ -322,11 +322,11 @@ export function OperationsCockpit() {
             />
           ) : null}
           <SupportTile
-            title="数据可靠性"
-            value={dashboard.healthScore.toFixed(0)}
-            unit="/100"
-            hint={`合格率 ${dashboard.qualityPassRate.toFixed(1)}%`}
-            href="/quality?tab=overview"
+            title="质量合格率"
+            value={dashboard.qualityPassRate.toFixed(1)}
+            unit="%"
+            hint={`健康分 ${dashboard.healthScore.toFixed(0)}/100`}
+            href="/quality?tab=measurements"
             tone={
               dashboard.healthScore >= 80 ? "ok" : dashboard.healthScore >= 60 ? "warn" : "bad"
             }

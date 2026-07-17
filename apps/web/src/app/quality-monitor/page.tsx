@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-/** Standalone /quality-monitor folds into the quality hub reliability tab. */
+/** Legacy /quality-monitor folds into quality hub measurements. */
 export default function QualityMonitorRedirectPage() {
-  redirect("/quality?tab=overview");
+  redirect("/quality?tab=measurements");
 }

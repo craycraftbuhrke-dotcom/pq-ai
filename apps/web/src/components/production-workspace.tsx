@@ -96,10 +96,11 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
   const [colors, setColors] = useState<Resource[]>([]);
   const [programVersions, setProgramVersions] = useState<ProgramVersion[]>([]);
   const [definitions, setDefinitions] = useState<Definition[]>([]);
-  const [stageRuns, setStageRuns] = useState<StageRun[]>([]);
+  const [stagesByRunId, setStagesByRunId] = useState<Record<string, StageRun[]>>({});
   const [actualParameters, setActualParameters] = useState<ActualParameter[]>([]);
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedStageId, setSelectedStageId] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [form, setForm] = useState<FormState>({});
@@ -107,6 +108,24 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  const loadStagesForRuns = useCallback(async (runList: ProductionRun[]) => {
+    if (!runList.length) {
+      setStagesByRunId({});
+      return;
+    }
+    const entries = await Promise.all(
+      runList.map(async (run) => {
+        try {
+          const stages = await request<StageRun[]>(`/api/process/production-runs/${run.id}/stages`);
+          return [run.id, stages] as const;
+        } catch {
+          return [run.id, [] as StageRun[]] as const;
+        }
+      }),
+    );
+    setStagesByRunId(Object.fromEntries(entries));
+  }, []);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -138,23 +157,20 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
       setProgramVersions(versions);
       setDefinitions(nextDefinitions);
       setSelectedRunId((current) => (current && nextRuns.some((run) => run.id === current) ? current : ""));
+      await loadStagesForRuns(nextRuns);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "生产实绩加载失败");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadStagesForRuns]);
 
   const loadStages = useCallback(async (runId: string) => {
-    if (!runId) {
-      setStageRuns([]);
-      setActualParameters([]);
-      return;
-    }
+    if (!runId) return;
     try {
       const nextStages = await request<StageRun[]>(`/api/process/production-runs/${runId}/stages`);
-      setStageRuns(nextStages);
-      setSelectedStageId((current) => (current && nextStages.some((stage) => stage.id === current) ? current : ""));
+      setStagesByRunId((prev) => ({ ...prev, [runId]: nextStages }));
+      setSelectedStageId((current) => (current && nextStages.some((stage) => stage.id === current) ? current : nextStages[0]?.id ?? ""));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "工序实绩加载失败");
     }
@@ -177,15 +193,18 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
     return () => window.clearTimeout(timer);
   }, [reload]);
   useEffect(() => {
+    if (!drawerOpen || !selectedRunId) return;
     const timer = window.setTimeout(() => void loadStages(selectedRunId), 0);
     return () => window.clearTimeout(timer);
-  }, [loadStages, selectedRunId]);
+  }, [drawerOpen, loadStages, selectedRunId]);
   useEffect(() => {
+    if (!drawerOpen) return;
     const timer = window.setTimeout(() => void loadActuals(selectedStageId), 0);
     return () => window.clearTimeout(timer);
-  }, [loadActuals, selectedStageId]);
+  }, [drawerOpen, loadActuals, selectedStageId]);
 
   const selectedRun = runs.find((run) => run.id === selectedRunId);
+  const stageRuns = selectedRunId ? stagesByRunId[selectedRunId] ?? [] : [];
   const selectedStage = stageRuns.find((stage) => stage.id === selectedStageId);
   const filteredRuns = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -255,8 +274,10 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
       setModal(null);
       setNotice("生产实绩已保存");
       await reload();
-      await loadStages(selectedRunId);
-      await loadActuals(selectedStageId);
+      if (selectedRunId) {
+        await loadStages(selectedRunId);
+        await loadActuals(selectedStageId);
+      }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "保存失败");
     } finally {
@@ -269,12 +290,26 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
     setError(type === "error" ? message : "");
   }
 
+  function openRunDrawer(runId: string, stageId?: string) {
+    setSelectedRunId(runId);
+    setSelectedStageId(stageId ?? "");
+    setDrawerOpen(true);
+  }
+
+  function closeRunDrawer() {
+    setDrawerOpen(false);
+  }
+
+  function stageForRun(runId: string, processStage: string): StageRun | undefined {
+    return (stagesByRunId[runId] ?? []).find((stage) => stage.process_stage === processStage);
+  }
+
   const content = (
     <>
       {error ? <button className="message-banner message-error" onClick={() => setError("")}>{error}<X /></button> : null}
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
       {showChrome ? <div className="freshness">质量「批量上传」可自动创建生产事件；本页重点补录工序实绩与材料追溯。记录采用停用、替换或追加治理，不提供物理删除。</div> : null}
-      {showChrome ? <section className="module-stat-strip"><article><span>生产事件</span><strong>{runs.length}</strong><small>按车身/批次追溯</small></article><article><span>当前事件工序</span><strong>{stageRuns.length}/5</strong><small>五个喷涂执行阶段</small></article><article><span>实际参数</span><strong>{actualParameters.length}</strong><small>PLC / 机器人采样</small></article><article><span>材料批次</span><strong>{materials.length}</strong><small>粘度、固含与 COA</small></article></section> : null}
+      {showChrome ? <section className="module-stat-strip"><article><span>生产事件</span><strong>{runs.length}</strong><small>按车身/批次追溯</small></article><article><span>已录工序</span><strong>{Object.values(stagesByRunId).reduce((sum, list) => sum + list.length, 0)}</strong><small>五个喷涂执行阶段</small></article><article><span>实际参数</span><strong>{actualParameters.length}</strong><small>PLC / 机器人采样</small></article><article><span>材料批次</span><strong>{materials.length}</strong><small>粘度、固含与 COA</small></article></section> : null}
       <section className={showChrome ? "panel production-workspace" : "production-workspace embedded-workspace"}>
         {!lockedTab ? (
           <div className="master-tabs">
@@ -304,7 +339,274 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
             <button className="button button-secondary" onClick={() => void reload()}><RefreshCw className={loading ? "spin" : ""} /> 刷新</button>
           </div>
         ) : null}
-        {tab === "runs" ? <div className="production-grid"><div className="production-run-list">{filteredRuns.map((run) => <button key={run.id} className={`program-list-item ${run.id === selectedRunId ? "selected" : ""}`} onClick={() => setSelectedRunId(run.id)}><div><strong>{run.run_no}</strong><span>{run.body_no || "未维护车身号"} · {run.shift || "未维护班次"}</span><small>{new Date(run.started_at).toLocaleString("zh-CN")}</small></div><Activity /></button>)}{!filteredRuns.length ? <div className="master-empty"><Activity /> 暂无生产事件。日常请先到质量管理「批量上传」上传质量数据（可自动建档）；若只需补工序实绩，也可在此手工新建生产事件。</div> : null}</div><div className="production-detail">{selectedRun ? <><div className="production-run-summary"><div><span>生产事件</span><strong>{selectedRun.run_no}</strong></div><div><span>工厂</span><strong>{relationName(factories, selectedRun.factory_id)}</strong></div><div><span>车型 / 颜色</span><strong>{relationName(vehicleModels, selectedRun.vehicle_model_id)} · {relationName(colors, selectedRun.color_id)}</strong></div><div className="row-actions"><button className="icon-button" onClick={() => openModal("run", selectedRun)} aria-label="编辑生产事件"><Pencil aria-hidden="true" /></button></div></div><div className="production-stage-heading"><div><span className="eyebrow">五站工序</span><h3>工序实绩</h3></div><div className="row-actions"><BulkDataActions resourceKey="process.production-stage-runs" resourceLabel="工序实绩" disabled={loading || submitting} onImported={async () => { await reload(); await loadStages(selectedRunId); }} onResult={bulkResult} /><button className="button button-primary" onClick={() => openModal("stage")} disabled={stageRuns.length >= 5}><Plus /> 添加工序</button></div></div><div className="production-stage-list">{stageRuns.map((stage) => <button className={`production-stage-card ${stage.id === selectedStageId ? "selected" : ""}`} key={stage.id} onClick={() => setSelectedStageId(stage.id)}><span>{stageLabel(stage.process_stage)}</span><strong>{statusLabel(stage.status)}</strong><small>{programVersions.find((version) => version.id === stage.program_version_id)?.program_name ?? "程序版本"} · {programVersions.find((version) => version.id === stage.program_version_id)?.version}</small></button>)}{!stageRuns.length ? <div className="master-empty">当前生产事件还没有工序实绩，请按五个执行阶段逐步补录。</div> : null}</div>{selectedStage ? <><div className="production-stage-heading"><div><span className="eyebrow">实际参数</span><h3>实际参数</h3></div><div className="row-actions"><BulkDataActions resourceKey="process.actual-parameters" resourceLabel="实际参数" disabled={loading || submitting} onImported={async () => { await loadActuals(selectedStageId); }} onResult={bulkResult} /><button className="button button-secondary" onClick={() => openModal("stage", selectedStage)}><Pencil /> 编辑工序</button><button className="button button-primary" onClick={() => openModal("actual")}><Plus /> 添加实绩参数</button></div></div><div className="compact-table"><div className="production-actual-row compact-head"><span>参数</span><span>实际值</span><span>来源</span><span>采样时间</span><span>操作</span></div>{actualParameters.map((parameter) => <div className="production-actual-row" key={parameter.id}><span><strong>{definitions.find((item) => item.code === parameter.parameter_code)?.name ?? parameter.parameter_code}</strong><small>{parameter.parameter_code}</small></span><span>{parameter.actual_value} {parameter.unit}</span><span>{parameter.source_system || "—"}</span><span>{new Date(parameter.sampled_at).toLocaleString("zh-CN")}</span><span className="row-actions"><button className="icon-button" onClick={() => openModal("actual", parameter)} aria-label="编辑实际参数"><Pencil aria-hidden="true" /></button></span></div>)}{!actualParameters.length ? <div className="master-empty">当前工序还没有实绩参数，请继续补录 PLC / 机器人采样值。</div> : null}</div></> : null}</> : <div className="large-empty"><Activity /> 请选择生产事件</div>}</div></div> : tab === "materials" ? <div className="master-table-wrap"><table className="master-table production-material-table"><thead><tr><th>批次号</th><th>材料</th><th>类型</th><th>供应商</th><th>历史粘度字段</th><th>历史固含字段</th><th>操作</th></tr></thead><tbody>{filteredMaterials.map((material) => <tr key={material.id}><td>{material.batch_no}</td><td>{material.material_code} / {material.material_name}</td><td>{{ MIDCOAT: "中涂", BASECOAT: "色漆", CLEARCOAT: "清漆" }[material.material_type] ?? material.material_type}</td><td>{material.supplier ?? "—"}</td><td>{material.viscosity ?? "—"}</td><td>{material.solid_ratio ?? "—"}</td><td><div className="row-actions"><button className="icon-button" onClick={() => openModal("material", material)} aria-label="编辑材料批次"><Pencil aria-hidden="true" /></button></div></td></tr>)}</tbody></table>{!filteredMaterials.length ? <div className="master-empty"><Boxes /> 暂无材料批次，请先维护批次，再绑定到对应工艺阶段。</div> : null}</div> : <MaterialGovernancePanel />}
+        {tab === "runs" ? (
+          <>
+            <div className="master-table-wrap production-wide-wrap">
+              <table className="master-table production-wide-table">
+                <thead>
+                  <tr>
+                    <th>生产事件</th>
+                    <th>车身号</th>
+                    <th>工厂</th>
+                    <th>车型</th>
+                    <th>颜色</th>
+                    <th>班次</th>
+                    <th>开始时间</th>
+                    {stages.map(([code, label]) => (
+                      <th key={code}>{label}</th>
+                    ))}
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRuns.map((run) => (
+                    <tr key={run.id} className={run.id === selectedRunId && drawerOpen ? "is-selected" : undefined}>
+                      <td>
+                        <button type="button" className="link-button" onClick={() => openRunDrawer(run.id)}>
+                          <strong>{run.run_no}</strong>
+                        </button>
+                      </td>
+                      <td>{run.body_no || "—"}</td>
+                      <td>{relationName(factories, run.factory_id)}</td>
+                      <td>{relationName(vehicleModels, run.vehicle_model_id)}</td>
+                      <td>{relationName(colors, run.color_id)}</td>
+                      <td>{run.shift || "—"}</td>
+                      <td>{new Date(run.started_at).toLocaleString("zh-CN")}</td>
+                      {stages.map(([code]) => {
+                        const stage = stageForRun(run.id, code);
+                        return (
+                          <td key={code}>
+                            {stage ? (
+                              <button
+                                type="button"
+                                className={`production-stage-chip status-${stage.status.toLowerCase()}`}
+                                onClick={() => openRunDrawer(run.id, stage.id)}
+                              >
+                                {statusLabel(stage.status)}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="production-stage-chip is-empty"
+                                onClick={() => {
+                                  openRunDrawer(run.id);
+                                  setForm({
+                                    process_stage: code,
+                                    program_version_id: programVersions.find((item) => item.process_stage === code)?.id ?? "",
+                                    material_batch_id: "",
+                                    status: "COMPLETED",
+                                    actual_parameters: "{}",
+                                  });
+                                  setModal({ kind: "stage" });
+                                }}
+                              >
+                                未录
+                              </button>
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td>
+                        <div className="row-actions">
+                          <button type="button" className="button button-secondary" onClick={() => openRunDrawer(run.id)}>
+                            详情
+                          </button>
+                          <button type="button" className="icon-button" onClick={() => openModal("run", run)} aria-label="编辑生产事件">
+                            <Pencil aria-hidden="true" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!filteredRuns.length ? (
+                <div className="master-empty">
+                  <Activity /> 暂无生产事件。日常请先到质量管理「批量上传」上传质量数据（可自动建档）；若只需补工序实绩，也可在此手工新建生产事件。
+                </div>
+              ) : null}
+            </div>
+
+            {drawerOpen && selectedRun ? (
+              <div className="production-drawer-backdrop" role="presentation" onMouseDown={closeRunDrawer}>
+                <aside
+                  className="production-drawer"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label={`生产事件 ${selectedRun.run_no}`}
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <div className="production-drawer-head">
+                    <div>
+                      <span className="eyebrow">生产事件详情</span>
+                      <h3>{selectedRun.run_no}</h3>
+                      <p>
+                        {relationName(factories, selectedRun.factory_id)} ·{" "}
+                        {relationName(vehicleModels, selectedRun.vehicle_model_id)} ·{" "}
+                        {relationName(colors, selectedRun.color_id)}
+                      </p>
+                    </div>
+                    <div className="row-actions">
+                      <button type="button" className="button button-secondary" onClick={() => openModal("run", selectedRun)}>
+                        <Pencil /> 编辑事件
+                      </button>
+                      <button type="button" className="icon-button" onClick={closeRunDrawer} aria-label="关闭">
+                        <X aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="production-drawer-section">
+                    <div className="production-stage-heading">
+                      <div>
+                        <span className="eyebrow">五站工序</span>
+                        <h4>工序实绩</h4>
+                      </div>
+                      <div className="row-actions">
+                        <BulkDataActions
+                          resourceKey="process.production-stage-runs"
+                          resourceLabel="工序实绩"
+                          disabled={loading || submitting}
+                          onImported={async () => {
+                            await reload();
+                            await loadStages(selectedRunId);
+                          }}
+                          onResult={bulkResult}
+                        />
+                        <button
+                          type="button"
+                          className="button button-primary"
+                          onClick={() => openModal("stage")}
+                          disabled={stageRuns.length >= 5}
+                        >
+                          <Plus /> 添加工序
+                        </button>
+                      </div>
+                    </div>
+                    <div className="master-table-wrap">
+                      <table className="master-table production-stage-table">
+                        <thead>
+                          <tr>
+                            <th>工序</th>
+                            <th>状态</th>
+                            <th>程序版本</th>
+                            <th>材料批次</th>
+                            <th>操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stageRuns.map((stage) => {
+                            const version = programVersions.find((item) => item.id === stage.program_version_id);
+                            const material = materials.find((item) => item.id === stage.material_batch_id);
+                            return (
+                              <tr
+                                key={stage.id}
+                                className={stage.id === selectedStageId ? "is-selected" : undefined}
+                                onClick={() => setSelectedStageId(stage.id)}
+                              >
+                                <td>{stageLabel(stage.process_stage)}</td>
+                                <td>{statusLabel(stage.status)}</td>
+                                <td>{version ? `${version.program_name} / ${version.version}` : "—"}</td>
+                                <td>{material ? `${material.batch_no} / ${material.material_name}` : "—"}</td>
+                                <td>
+                                  <div className="row-actions">
+                                    <button
+                                      type="button"
+                                      className="button button-secondary"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setSelectedStageId(stage.id);
+                                        openModal("stage", stage);
+                                      }}
+                                    >
+                                      编辑
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      {!stageRuns.length ? (
+                        <div className="master-empty">当前生产事件还没有工序实绩，请通过「添加工序」或宽表导入补录五个执行阶段。</div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {selectedStage ? (
+                    <div className="production-drawer-section">
+                      <div className="production-stage-heading">
+                        <div>
+                          <span className="eyebrow">实际参数</span>
+                          <h4>{stageLabel(selectedStage.process_stage)}</h4>
+                        </div>
+                        <div className="row-actions">
+                          <BulkDataActions
+                            resourceKey="process.actual-parameters"
+                            resourceLabel="实际参数"
+                            disabled={loading || submitting}
+                            onImported={async () => {
+                              await loadActuals(selectedStageId);
+                            }}
+                            onResult={bulkResult}
+                          />
+                          <button type="button" className="button button-primary" onClick={() => openModal("actual")}>
+                            <Plus /> 添加实绩参数
+                          </button>
+                        </div>
+                      </div>
+                      <div className="master-table-wrap">
+                        <table className="master-table">
+                          <thead>
+                            <tr>
+                              <th>参数</th>
+                              <th>实际值</th>
+                              <th>来源</th>
+                              <th>采样时间</th>
+                              <th>操作</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {actualParameters.map((parameter) => (
+                              <tr key={parameter.id}>
+                                <td>
+                                  <strong>
+                                    {definitions.find((item) => item.code === parameter.parameter_code)?.name
+                                      ?? parameter.parameter_code}
+                                  </strong>
+                                  <small className="mono">{parameter.parameter_code}</small>
+                                </td>
+                                <td>
+                                  {parameter.actual_value} {parameter.unit}
+                                </td>
+                                <td>{parameter.source_system || "—"}</td>
+                                <td>{new Date(parameter.sampled_at).toLocaleString("zh-CN")}</td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    onClick={() => openModal("actual", parameter)}
+                                    aria-label="编辑实际参数"
+                                  >
+                                    <Pencil aria-hidden="true" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {!actualParameters.length ? (
+                          <div className="master-empty">当前工序还没有实绩参数，请继续补录 PLC / 机器人采样值。</div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                </aside>
+              </div>
+            ) : null}
+          </>
+        ) : tab === "materials" ? <div className="master-table-wrap"><table className="master-table production-material-table"><thead><tr><th>批次号</th><th>材料</th><th>类型</th><th>供应商</th><th>历史粘度字段</th><th>历史固含字段</th><th>操作</th></tr></thead><tbody>{filteredMaterials.map((material) => <tr key={material.id}><td>{material.batch_no}</td><td>{material.material_code} / {material.material_name}</td><td>{{ MIDCOAT: "中涂", BASECOAT: "色漆", CLEARCOAT: "清漆" }[material.material_type] ?? material.material_type}</td><td>{material.supplier ?? "—"}</td><td>{material.viscosity ?? "—"}</td><td>{material.solid_ratio ?? "—"}</td><td><div className="row-actions"><button className="icon-button" onClick={() => openModal("material", material)} aria-label="编辑材料批次"><Pencil aria-hidden="true" /></button></div></td></tr>)}</tbody></table>{!filteredMaterials.length ? <div className="master-empty"><Boxes /> 暂无材料批次，请先维护批次，再绑定到对应工艺阶段。</div> : null}</div> : <MaterialGovernancePanel />}
       </section>
       {modal ? <ProductionModal modal={modal} form={form} setForm={setForm} submit={submit} close={closeModal} submitting={submitting} factories={factories} vehicleModels={vehicleModels} colors={colors} materials={materials} versions={programVersions} definitions={definitions} selectedRun={selectedRun} /> : null}
     </>

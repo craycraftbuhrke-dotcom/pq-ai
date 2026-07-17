@@ -705,7 +705,7 @@ export function ProgramWorkspace({
 
       {workspaceTab === "programs" ? <section className="recipe-workspace">
         <div className="recipe-cascading-bar">
-          <label className="recipe-select">
+          <div className="recipe-select">
             <span>喷涂程序</span>
             <select value={selectedProgramId} onChange={(e) => handleProgramChange(e.target.value)} disabled={loading}>
               <option value="">选择喷涂程序</option>
@@ -713,10 +713,12 @@ export function ProgramWorkspace({
                 <option key={p.id} value={p.id}>{p.program_code} · {p.name}</option>
               ))}
             </select>
-            <button className="button button-secondary" type="button" onClick={() => openModal("program")} disabled={submitting}><Plus />新建</button>
-            {selectedProgram ? <button className="button button-secondary" type="button" onClick={() => openModal("program", selectedProgram)}><Pencil />编辑</button> : null}
-          </label>
-          <label className="recipe-select">
+            <div className="recipe-select-actions">
+              <button className="button button-secondary" type="button" onClick={() => openModal("program")} disabled={submitting}><Plus />新建</button>
+              {selectedProgram ? <button className="button button-secondary" type="button" onClick={() => openModal("program", selectedProgram)}><Pencil />编辑</button> : null}
+            </div>
+          </div>
+          <div className="recipe-select">
             <span>版本</span>
             <select value={selectedVersionId} onChange={(e) => handleVersionChange(e.target.value)} disabled={loading || !selectedProgram}>
               <option value="">{selectedProgram ? "选择版本" : "先选喷涂程序"}</option>
@@ -724,15 +726,17 @@ export function ProgramWorkspace({
                 <option key={v.id} value={v.id}>{v.version} · {statusLabels[v.status] ?? v.status}{v.is_master_sample ? " · 封样" : ""}</option>
               ))}
             </select>
-            <button className="button button-secondary" type="button" onClick={() => openModal("version")} disabled={submitting || !selectedProgram}><Plus />新建</button>
-            {selectedVersion ? <button className="button button-secondary" type="button" onClick={() => openModal("version", selectedVersion)}><Pencil />编辑</button> : null}
-            {selectedVersion && ["DRAFT", "PENDING", "APPROVED"].includes(selectedVersion.status) ? (
-              <button className="button button-primary" type="button" onClick={() => void advanceVersion(selectedVersion)} disabled={submitting}>
-                {selectedVersion.status === "DRAFT" ? "提交审批" : selectedVersion.status === "PENDING" ? "批准版本" : "激活版本"}
-              </button>
-            ) : null}
-          </label>
-          <label className="recipe-select">
+            <div className="recipe-select-actions">
+              <button className="button button-secondary" type="button" onClick={() => openModal("version")} disabled={submitting || !selectedProgram}><Plus />新建</button>
+              {selectedVersion ? <button className="button button-secondary" type="button" onClick={() => openModal("version", selectedVersion)}><Pencil />编辑</button> : null}
+              {selectedVersion && ["DRAFT", "PENDING", "APPROVED"].includes(selectedVersion.status) ? (
+                <button className="button button-primary" type="button" onClick={() => void advanceVersion(selectedVersion)} disabled={submitting}>
+                  {selectedVersion.status === "DRAFT" ? "提交审批" : selectedVersion.status === "PENDING" ? "批准版本" : "激活版本"}
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div className="recipe-select">
             <span>刷子表</span>
             <select value={selectedBrushTableNo} onChange={(e) => handleBrushTableChange(e.target.value)} disabled={loading || !selectedVersion}>
               <option value="">{selectedVersion ? "选择刷子表" : "先选版本"}</option>
@@ -740,10 +744,12 @@ export function ProgramWorkspace({
                 <option key={no} value={no}>{no}</option>
               ))}
             </select>
-            <button className="button button-secondary" type="button" onClick={() => openBrushConfig("create")} disabled={submitting || !selectedVersion}><Plus />新建刷子</button>
-          </label>
+            <div className="recipe-select-actions">
+              <button className="button button-secondary" type="button" onClick={() => openBrushConfig("create")} disabled={submitting || !selectedVersion}><Plus />新建刷子</button>
+            </div>
+          </div>
           <div className="recipe-wide-actions">
-            <select value={wideFormat} onChange={(e) => setWideFormat(e.target.value as "xlsx" | "csv")} disabled={wideUploading || !selectedVersion}>
+            <select value={wideFormat} onChange={(e) => setWideFormat(e.target.value as "xlsx" | "csv")} disabled={wideUploading || !selectedVersion} aria-label="宽表格式">
               <option value="xlsx">Excel</option>
               <option value="csv">CSV</option>
             </select>

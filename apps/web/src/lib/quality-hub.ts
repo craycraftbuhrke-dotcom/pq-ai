@@ -1,7 +1,6 @@
 /** Quality hub IA helpers: role home tabs and shortcut chips. */
 
 export type QualityHubTab =
-  | "overview"
   | "upload"
   | "measurements"
   | "body-map"
@@ -10,7 +9,6 @@ export type QualityHubTab =
   | "analytics";
 
 export const QUALITY_HUB_TABS: Array<{ key: QualityHubTab; label: string }> = [
-  { key: "overview", label: "数据可靠性" },
   { key: "upload", label: "批量上传" },
   { key: "measurements", label: "查看与判定" },
   { key: "body-map", label: "车身点位图" },
@@ -35,10 +33,10 @@ export function qualityHomeTab(roles: readonly string[]): QualityHubTab {
   if (isQe && !isPe) return "upload";
   if (isPe && !isQe) return "body-map";
   if (isBoss && !isQe && !isPe) return "analytics";
-  if (isAdmin && !isQe && !isPe) return "overview";
+  if (isAdmin && !isQe && !isPe) return "standards";
   if (isQe) return "upload";
   if (isPe) return "body-map";
-  return "overview";
+  return "upload";
 }
 
 /** Sticky shortcut chips under the hub header — same tabs, shorter path. */
@@ -54,7 +52,7 @@ export function qualityShortcuts(roles: readonly string[]): QualityShortcut[] {
       { tab: "upload", label: "上传" },
       { tab: "measurements", label: "判定" },
       { tab: "standards", label: "标准" },
-      { tab: "overview", label: "可靠性" },
+      { tab: "analytics", label: "SPC" },
     ];
   }
   if (isPe && !isQe) {
@@ -62,13 +60,13 @@ export function qualityShortcuts(roles: readonly string[]): QualityShortcut[] {
       { tab: "body-map", label: "点位图" },
       { tab: "analytics", label: "SPC" },
       { tab: "measurements", label: "判定" },
-      { tab: "overview", label: "可靠性" },
+      { tab: "3d-view", label: "3D" },
     ];
   }
   if (isBoss && !isQe && !isPe) {
     return [
       { tab: "analytics", label: "SPC" },
-      { tab: "overview", label: "可靠性" },
+      { tab: "measurements", label: "判定" },
       { tab: "body-map", label: "点位图" },
     ];
   }
@@ -76,7 +74,7 @@ export function qualityShortcuts(roles: readonly string[]): QualityShortcut[] {
     return [
       { tab: "standards", label: "标准" },
       { tab: "body-map", label: "点位治理" },
-      { tab: "overview", label: "可靠性" },
+      { tab: "measurements", label: "判定" },
       { tab: "analytics", label: "SPC" },
     ];
   }
