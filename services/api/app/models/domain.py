@@ -64,7 +64,8 @@ class AppUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class Role(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    __tablename__ = "role"
+    # MySQL 保留字 role 在正式库落表为 role_code（见 docs/sql/pq_ai_mysql_schema.sql）
+    __tablename__ = "role_code"
 
     code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)

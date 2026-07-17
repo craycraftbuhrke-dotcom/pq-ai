@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from app.models.domain import (
@@ -141,8 +141,32 @@ def _hash(text: str) -> str:
     return sha256(text.encode("utf-8")).hexdigest()
 
 
+def _existing_tables(db: Session) -> set[str]:
+    bind = db.get_bind()
+    return set(inspect(bind).get_table_names())
+
+
 def seed_domain_demo_data(db: Session) -> dict:
     """幂等写入每个业务领域模型各 5 条演示数据。返回统计字典。"""
+    tables = _existing_tables(db)
+    required = {
+        Factory.__tablename__,
+        VehicleModel.__tablename__,
+        Color.__tablename__,
+        Part.__tablename__,
+        Role.__tablename__,
+        Permission.__tablename__,
+        AppUser.__tablename__,
+    }
+    missing = sorted(required - tables)
+    if missing:
+        return {
+            "created": 0,
+            "skipped": True,
+            "marker": SEED_MARKER_FACTORY_CODE,
+            "missing_tables": missing,
+        }
+
     marker = db.scalar(select(Factory).where(Factory.code == SEED_MARKER_FACTORY_CODE))
     if marker is not None:
         return {"created": 0, "skipped": True, "marker": SEED_MARKER_FACTORY_CODE}

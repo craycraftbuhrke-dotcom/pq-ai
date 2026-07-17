@@ -48,11 +48,19 @@ def _run(name: str, task) -> None:
         return
 
     if result.get("skipped"):
-        logger.info(
-            "[startup-seed] %s OK  skipped=true marker=%s (已存在，不重复写入)",
-            name,
-            result.get("marker"),
-        )
+        missing = result.get("missing_tables")
+        if missing:
+            logger.warning(
+                "[startup-seed] %s skipped=true missing_tables=%s（请先按 docs/sql 建表）",
+                name,
+                ",".join(missing),
+            )
+        else:
+            logger.info(
+                "[startup-seed] %s OK  skipped=true marker=%s (已存在，不重复写入)",
+                name,
+                result.get("marker"),
+            )
         return
 
     logger.info(

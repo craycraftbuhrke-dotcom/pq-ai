@@ -1473,7 +1473,7 @@ CREATE TABLE `role_code` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统角色定义';
 
 CREATE TABLE `role_permission` (
-  `role_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '角色ID；应用层逻辑引用 role.id',
+  `role_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '角色ID；应用层逻辑引用 role_code.id',
   `permission_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '权限ID；应用层逻辑引用 permission.id',
   `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -1630,7 +1630,7 @@ CREATE TABLE `trajectory_segment_geometry` (
 
 CREATE TABLE `user_role` (
   `user_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '用户ID；应用层逻辑引用 app_user.id',
-  `role_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '角色ID；应用层逻辑引用 role.id',
+  `role_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '角色ID；应用层逻辑引用 role_code.id',
   `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -1815,7 +1815,7 @@ CREATE TABLE `vehicle_model_color` (
 -- recommendation.measurement_point_id -> measurement_point.id
 -- recommendation_action.recommendation_id -> recommendation.id
 -- recommendation_action.constraint_source_id -> parameter_constraint_source.id
--- role_permission.role_id -> role.id
+-- role_permission.role_id -> role_code.id
 -- role_permission.permission_id -> permission.id
 -- spray_program.factory_id -> factory.id
 -- spray_program_version.spray_program_id -> spray_program.id
@@ -1830,7 +1830,7 @@ CREATE TABLE `vehicle_model_color` (
 -- trajectory_segment_geometry.path_segment_id -> trajectory_path_segment.id
 -- trajectory_segment_geometry.source_import_job_id -> file_import_job.id
 -- user_role.user_id -> app_user.id
--- user_role.role_id -> role.id
+-- user_role.role_id -> role_code.id
 -- user_session.user_id -> app_user.id
 -- vehicle_model_color.vehicle_model_id -> vehicle_model.id
 -- vehicle_model_color.color_id -> color.id
