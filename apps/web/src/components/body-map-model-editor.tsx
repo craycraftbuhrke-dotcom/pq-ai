@@ -4,7 +4,10 @@ import { Box, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ModalShell } from "@/components/modal-shell";
-import type { BodyModelBounds, BodyModelEntry } from "@/lib/body-map-models";
+import type { BodyModelEntry } from "@/lib/body-map-models";
+
+/** Keep each request under common Xiaomi/K8s Ingress body limits (often 1MB). */
+const CHUNK_SIZE = 512 * 1024;
 
 type Props = {
   open: boolean;
@@ -19,12 +22,89 @@ async function readError(response: Response): Promise<string> {
   return payload.error ?? `请求失败（${response.status}）`;
 }
 
+async function uploadFileChunked(options: {
+  modelCode: string;
+  file: File;
+  upAxis: string;
+  unitScale: string;
+  bounds: string;
+  onProgress: (label: string) => void;
+}): Promise<{
+  source_format?: string;
+  convert_engine?: string | null;
+}> {
+  const { modelCode, file, upAxis, unitScale, bounds, onProgress } = options;
+  const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+
+  onProgress(`创建上传会话（共 ${totalChunks} 片）…`);
+  const initResp = await fetch("/api/body-map-models/uploads", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      modelCode,
+      fileName: file.name,
+      totalSize: file.size,
+      chunkSize: CHUNK_SIZE,
+    }),
+  });
+  const initPayload = (await initResp.json().catch(() => ({}))) as {
+    error?: string;
+    uploadId?: string;
+    totalChunks?: number;
+  };
+  if (!initResp.ok || !initPayload.uploadId) {
+    throw new Error(initPayload.error ?? `创建上传失败（${initResp.status}）`);
+  }
+
+  const uploadId = initPayload.uploadId;
+  const chunks = initPayload.totalChunks ?? totalChunks;
+
+  for (let index = 0; index < chunks; index++) {
+    const start = index * CHUNK_SIZE;
+    const end = Math.min(file.size, start + CHUNK_SIZE);
+    const blob = file.slice(start, end);
+    onProgress(`上传分片 ${index + 1}/${chunks}（${Math.round((end / file.size) * 100)}%）…`);
+
+    let attempt = 0;
+    while (true) {
+      attempt += 1;
+      const chunkResp = await fetch(`/api/body-map-models/uploads/${uploadId}/chunks/${index}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: blob,
+      });
+      if (chunkResp.ok) break;
+      if (attempt >= 3) {
+        throw new Error(await readError(chunkResp));
+      }
+      onProgress(`分片 ${index + 1} 失败，重试 ${attempt}/3…`);
+    }
+  }
+
+  onProgress("分片已齐，服务端组装并转换中（可能较久）…");
+  const completeResp = await fetch(`/api/body-map-models/uploads/${uploadId}/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ upAxis, unitScale, bounds }),
+  });
+  const completePayload = (await completeResp.json().catch(() => ({}))) as {
+    error?: string;
+    source_format?: string;
+    convert_engine?: string | null;
+  };
+  if (!completeResp.ok) {
+    throw new Error(completePayload.error ?? `完成上传失败（${completeResp.status}）`);
+  }
+  return completePayload;
+}
+
 export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChanged }: Props) {
   const [entry, setEntry] = useState<BodyModelEntry | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [progress, setProgress] = useState("");
   const [boundsInput, setBoundsInput] = useState("");
   const [upAxis, setUpAxis] = useState("Y");
   const [unitScale, setUnitScale] = useState("1");
@@ -58,30 +138,44 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
     void load();
   }, [load, open]);
 
-  async function postAction(action: "upload" | "reset", file?: File) {
+  async function resetModel() {
     setBusy(true);
     setError("");
     setMessage("");
+    setProgress("");
     try {
       const form = new FormData();
       form.set("modelCode", modelCode);
-      form.set("action", action);
-      if (action === "upload") {
-        if (file) form.set("file", file);
-        form.set("upAxis", upAxis);
-        form.set("unitScale", unitScale);
-        if (boundsInput.trim()) form.set("bounds", boundsInput.trim());
-      }
+      form.set("action", "reset");
       const response = await fetch("/api/body-map-models", { method: "POST", body: form });
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        convert_engine?: string | null;
-        source_format?: string;
-      };
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? `请求失败（${response.status}）`);
-      if (action === "reset") {
-        setMessage("已恢复内置/无模型");
-      } else if (payload.source_format === "stp") {
+      setMessage("已恢复内置/无模型");
+      await load();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "操作失败");
+    } finally {
+      setBusy(false);
+      setProgress("");
+    }
+  }
+
+  async function uploadModel(file: File) {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    setProgress("");
+    try {
+      const payload = await uploadFileChunked({
+        modelCode,
+        file,
+        upAxis,
+        unitScale,
+        bounds: boundsInput.trim(),
+        onProgress: setProgress,
+      });
+      if (payload.source_format === "stp") {
         setMessage(
           `STEP 已转换并保存为 GLB${payload.convert_engine ? `（${payload.convert_engine}）` : ""}；默认单位缩放 0.001（毫米→米）`,
         );
@@ -95,6 +189,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
       setError(err instanceof Error ? err.message : "操作失败");
     } finally {
       setBusy(false);
+      setProgress("");
     }
   }
 
@@ -104,7 +199,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
     <ModalShell
       eyebrow="数模管理"
       title="3D 车身数模"
-      description={`${modelCode}${modelName ? ` · ${modelName}` : ""} — 上传 GLB/GLTF，或上传 STP/STEP（服务端自动转 GLB）到 public/body-models/custom，并写入 view-models.json。`}
+      description={`${modelCode}${modelName ? ` · ${modelName}` : ""} — 大文件自动分片上传（绕过网关 413），STP/STEP 由服务端转 GLB。`}
       onClose={onClose}
       className="body-map-model-editor-modal"
     >
@@ -114,10 +209,13 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
             {loading ? <LoaderCircle className="spin" /> : <RefreshCw />}
             刷新
           </button>
-          <small className="muted">支持 GLB/GLTF/STP/STEP；大文件不限体积，STP 转换可能需较长时间，请耐心等待</small>
+          <small className="muted">
+            支持 GLB/GLTF/STP/STEP；大文件自动 512KB 分片上传，STP 转换可能较久
+          </small>
         </div>
         {error ? <div className="form-error">{error}</div> : null}
         {message ? <div className="form-success">{message}</div> : null}
+        {progress ? <div className="form-success">{progress}</div> : null}
 
         <div className="body-map-model-info">
           <div className="body-map-model-info-row">
@@ -170,7 +268,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
             onChange={(e) => {
               const file = e.target.files?.[0];
               e.target.value = "";
-              if (file) void postAction("upload", file);
+              if (file) void uploadModel(file);
             }}
           />
           <button
@@ -186,7 +284,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
             type="button"
             className="button button-secondary"
             disabled={busy || !entry?.url}
-            onClick={() => void postAction("reset")}
+            onClick={() => void resetModel()}
           >
             <Box />
             恢复内置

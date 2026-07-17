@@ -51,6 +51,6 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Skip large CAD upload routes so Next does not clone/buffer multi‑GB bodies in middleware.
+  // Skip CAD upload routes so middleware never buffers large/chunk bodies.
   matcher: ["/((?!_next/static|_next/image|api/body-map-models|hdri/|body-models/).*)"],
 };
