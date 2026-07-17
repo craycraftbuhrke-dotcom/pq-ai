@@ -236,7 +236,12 @@ function Scene3DInner({
       <directionalLight position={[5, 10, 5]} intensity={1.2} castShadow />
       <directionalLight position={[-5, 5, -5]} intensity={0.4} />
 
-      {Environment ? <Environment preset="warehouse" /> : null}
+      {/* Local HDR only — never use drei presets (they fetch raw.githack.com). */}
+      {Environment ? (
+        <Suspense fallback={null}>
+          <Environment files="/hdri/empty_warehouse_01_1k.hdr" />
+        </Suspense>
+      ) : null}
 
       {Grid ? (
         <Grid
