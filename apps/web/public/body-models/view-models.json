@@ -1,4 +1,12 @@
 {
   "version": 1,
-  "models": {}
+  "models": {
+    "ms11": {
+      "url": "/body-models/custom/ms11.glb",
+      "up_axis": "Y",
+      "unit_scale": 0.001,
+      "bounds": null,
+      "model_asset_key": "/body-models/custom/ms11.glb"
+    }
+  }
 }

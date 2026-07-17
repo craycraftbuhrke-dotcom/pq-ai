@@ -8955,35 +8955,622 @@ a.calibration-alert-row:hover {
   }
 }
 
+/* ===== Operations Cockpit — triage board ===== */
+.cockpit-page {
+  gap: 16px;
+  position: relative;
+}
+
+.cockpit-page::before {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-strong) 70%, transparent), transparent 70%),
+    radial-gradient(ellipse 70% 45% at 0% 0%, color-mix(in srgb, var(--teal) 8%, transparent), transparent 55%);
+  content: "";
+  height: 220px;
+  inset: -8px -4px auto;
+  pointer-events: none;
+  position: absolute;
+  z-index: 0;
+}
+
+.cockpit-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+.cockpit-toolbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cockpit-freshness {
+  align-items: center;
+  color: var(--text-soft);
+  display: inline-flex;
+  font-size: 0.78rem;
+  gap: 8px;
+}
+
+.cockpit-deck {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+}
+
+.cockpit-deck.is-single {
+  grid-template-columns: 1fr;
+}
+
+.cockpit-panel {
+  animation: cockpit-rise 0.4s ease both;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 16px 18px 14px;
+}
+
+.cockpit-triage.is-alert {
+  border-color: color-mix(in srgb, var(--red) 28%, var(--line));
+  box-shadow: inset 3px 0 0 var(--red);
+}
+
+.cockpit-stages {
+  box-shadow: inset 3px 0 0 var(--teal);
+}
+
+.cockpit-panel-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.cockpit-panel-kicker {
+  color: var(--text-muted);
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+
+.cockpit-triage-count,
+.cockpit-stages-summary {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cockpit-triage-count strong,
+.cockpit-stages-summary strong {
+  color: var(--text);
+  font-size: 2rem;
+  font-weight: 680;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.cockpit-triage.is-alert .cockpit-triage-count strong {
+  color: var(--red-700);
+}
+
+.cockpit-triage-count span,
+.cockpit-stages-summary span {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.cockpit-panel-link {
+  align-items: center;
+  color: var(--teal-700);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  font-weight: 650;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.cockpit-panel-link svg {
+  height: 14px;
+  width: 14px;
+}
+
+.cockpit-exception-list,
+.cockpit-run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cockpit-exception-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0;
+}
+
+.cockpit-exception-row {
+  align-items: center;
+  border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 9px 0 9px 10px;
+  position: relative;
+}
+
+.cockpit-exception-row:first-child {
+  border-top: 0;
+}
+
+.cockpit-exception-row::before {
+  background: var(--line-strong);
+  border-radius: 2px;
+  content: "";
+  height: 60%;
+  left: 0;
+  position: absolute;
+  top: 20%;
+  width: 2px;
+}
+
+.cockpit-exception-row.tone-thickness::before { background: var(--teal); }
+.cockpit-exception-row.tone-color::before { background: var(--cyan); }
+.cockpit-exception-row.tone-orange::before { background: var(--amber); }
+
+.cockpit-exception-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cockpit-exception-code {
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.cockpit-exception-name {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cockpit-exception-meta {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cockpit-exception-metric {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.cockpit-exception-risk {
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 680;
+}
+
+.cockpit-more {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  margin-top: 6px;
+}
+
+.cockpit-status-strip {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.cockpit-status-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cockpit-status-chip span {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.cockpit-status-chip strong {
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.cockpit-stage-board {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
+.cockpit-stage-cell {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 8px;
+}
+
+.cockpit-stage-cell.is-healthy {
+  background: color-mix(in srgb, var(--teal-soft) 70%, white);
+  border-color: color-mix(in srgb, var(--teal) 22%, var(--line));
+}
+
+.cockpit-stage-name {
+  color: var(--text-soft);
+  font-size: 0.68rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cockpit-stage-cell strong {
+  color: var(--text);
+  font-size: 1.2rem;
+  font-weight: 680;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.cockpit-stage-hint {
+  color: var(--text-muted);
+  font-size: 0.66rem;
+}
+
+.cockpit-stage-cell.is-healthy .cockpit-stage-hint {
+  color: var(--teal-700);
+}
+
+.cockpit-runs {
+  border-top: 1px solid var(--line);
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.cockpit-runs-head {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 0.72rem;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.cockpit-runs-head a {
+  align-items: center;
+  color: var(--teal-700);
+  display: inline-flex;
+  font-weight: 650;
+  gap: 2px;
+}
+
+.cockpit-runs-head svg {
+  height: 13px;
+  width: 13px;
+}
+
+.cockpit-run-list li {
+  align-items: center;
+  color: var(--text-soft);
+  display: grid;
+  font-size: 0.8rem;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  padding: 5px 0;
+}
+
+.cockpit-run-list li span:first-child {
+  color: var(--text);
+  font-weight: 620;
+}
+
+.cockpit-run-shift {
+  color: var(--text-muted);
+}
+
+.cockpit-empty {
+  color: var(--text-muted);
+  flex: 1;
+  font-size: 0.86rem;
+  padding: 28px 0;
+}
+
+.cockpit-empty.compact {
+  padding: 8px 0;
+}
+
+.cockpit-loop {
+  align-items: stretch;
+  animation: cockpit-rise 0.45s ease both;
+  animation-delay: 60ms;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, #e7f3f6);
+  border: 1px solid color-mix(in srgb, var(--cyan) 22%, var(--line));
+  border-radius: 12px;
+  display: flex;
+  gap: 14px;
+  grid-column: 1 / -1;
+  padding: 12px 16px;
+}
+
+.cockpit-loop-label {
+  align-self: center;
+  color: var(--cyan);
+  flex: 0 0 auto;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  writing-mode: horizontal-tb;
+}
+
+.cockpit-loop-steps {
+  align-items: stretch;
+  display: grid;
+  flex: 1;
+  gap: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cockpit-loop-steps > li {
+  align-items: stretch;
+  display: flex;
+  min-width: 0;
+  position: relative;
+}
+
+.cockpit-loop-connector {
+  background: color-mix(in srgb, var(--cyan) 35%, var(--line));
+  flex: 0 0 auto;
+  margin: 18px 0;
+  width: 1px;
+}
+
+.cockpit-loop-step {
+  border-radius: 8px;
+  color: inherit;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 10px;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.cockpit-loop-step:hover {
+  background: color-mix(in srgb, var(--cyan) 8%, white);
+}
+
+.cockpit-loop-step-label {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.cockpit-loop-step strong {
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cockpit-loop-steps > li.is-hot .cockpit-loop-step strong {
+  color: var(--amber-700);
+}
+
+.cockpit-support-row {
+  animation: cockpit-rise 0.45s ease both;
+  animation-delay: 100ms;
+  display: grid;
+  gap: 12px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.cockpit-support {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.cockpit-support-ok { box-shadow: inset 3px 0 0 var(--teal); }
+.cockpit-support-warn { box-shadow: inset 3px 0 0 var(--amber); }
+.cockpit-support-bad { box-shadow: inset 3px 0 0 var(--red); }
+.cockpit-support-neutral { box-shadow: inset 3px 0 0 var(--line-strong); }
+
+.cockpit-support header span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.cockpit-support-kpi {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.cockpit-support-kpi strong {
+  color: var(--text);
+  font-size: 1.55rem;
+  font-weight: 680;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.cockpit-support-kpi span,
+.cockpit-support header p {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  margin: 0;
+}
+
+.cockpit-support ul {
+  border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  list-style: none;
+  margin: 0;
+  padding: 8px 0 0;
+}
+
+.cockpit-support li {
+  align-items: center;
+  color: var(--text-soft);
+  display: flex;
+  font-size: 0.78rem;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.cockpit-support li strong {
+  color: var(--text);
+  font-weight: 620;
+}
+
+.cockpit-support a {
+  align-items: center;
+  color: var(--teal-700);
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 650;
+  gap: 4px;
+  margin-top: auto;
+}
+
+.cockpit-support a svg {
+  height: 13px;
+  width: 13px;
+}
+
+@keyframes cockpit-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 1180px) {
+  .cockpit-deck {
+    grid-template-columns: 1fr;
+  }
+
+  .cockpit-stage-board {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .cockpit-status-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cockpit-loop {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .cockpit-loop-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cockpit-loop-connector {
+    display: none;
+  }
+
+  .cockpit-support-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .cockpit-stage-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cockpit-stage-cell:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
 /* ===== OVP Card (Fiori-style overview cards) ===== */
 .ovp-card-grid {
   display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
 }
 
 .ovp-card {
-  background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+  background: var(--bg-elevated);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--line);
   border-radius: 14px;
+  box-shadow: 0 1px 0 rgb(19 39 44 / 3%);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+  gap: 14px;
+  padding: 16px 16px 14px;
+  position: relative;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.ovp-card::before {
+  background: var(--line);
+  border-radius: 14px 0 0 14px;
+  content: "";
+  inset: 0 auto 0 0;
+  position: absolute;
+  width: 3px;
 }
 
 .ovp-card:hover {
-  border-color: color-mix(in srgb, var(--teal) 40%, var(--line));
-  box-shadow: 0 6px 20px -12px color-mix(in srgb, var(--teal) 30%, transparent);
+  border-color: color-mix(in srgb, var(--teal) 35%, var(--line));
+  box-shadow: 0 10px 28px -18px rgb(19 39 44 / 28%);
+  transform: translateY(-2px);
 }
 
-.ovp-card-accent-positive { border-left-color: var(--teal); }
-.ovp-card-accent-warning { border-left-color: var(--amber); }
-.ovp-card-accent-negative { border-left-color: var(--red); }
-.ovp-card-accent-info { border-left-color: var(--cyan); }
-.ovp-card-accent-neutral { border-left-color: var(--line); }
+.ovp-card-accent-positive::before { background: var(--teal); }
+.ovp-card-accent-warning::before { background: var(--amber); }
+.ovp-card-accent-negative::before { background: var(--red); }
+.ovp-card-accent-info::before { background: var(--cyan); }
+.ovp-card-accent-neutral::before { background: var(--line-strong); }
 
 .ovp-card-head {
   align-items: flex-start;
@@ -8993,6 +9580,50 @@ a.calibration-alert-row:hover {
 }
 
 .ovp-card-title-wrap {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ovp-card-icon {
+  align-items: center;
+  background: var(--surface-strong);
+  border-radius: 9px;
+  color: var(--text-soft);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.ovp-card-accent-positive .ovp-card-icon {
+  background: var(--teal-soft);
+  color: var(--teal-700);
+}
+
+.ovp-card-accent-warning .ovp-card-icon {
+  background: var(--amber-soft);
+  color: var(--amber-700);
+}
+
+.ovp-card-accent-negative .ovp-card-icon {
+  background: var(--red-soft);
+  color: var(--red-700);
+}
+
+.ovp-card-accent-info .ovp-card-icon {
+  background: color-mix(in srgb, var(--cyan) 14%, white);
+  color: var(--cyan);
+}
+
+.ovp-card-icon svg {
+  height: 16px;
+  width: 16px;
+}
+
+.ovp-card-title-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -9001,40 +9632,42 @@ a.calibration-alert-row:hover {
 
 .ovp-card-title {
   color: var(--text);
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   font-weight: 650;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
 .ovp-card-kpi-label {
-  color: var(--text-soft);
-  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
 }
 
 .ovp-card-kpi {
   align-items: baseline;
   display: flex;
-  gap: 4px;
   flex: 0 0 auto;
+  gap: 4px;
 }
 
 .ovp-card-kpi-value {
   color: var(--text);
-  font-size: 1.7rem;
-  font-weight: 700;
+  font-size: 1.85rem;
+  font-weight: 680;
+  letter-spacing: -0.04em;
   line-height: 1;
 }
 
 .ovp-card-kpi-unit {
-  color: var(--text-soft);
-  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-size: 0.74rem;
 }
 
 .ovp-card-trend {
   align-items: center;
   display: inline-flex;
-  gap: 2px;
   font-size: 0.72rem;
+  gap: 2px;
   margin-left: 4px;
 }
 
@@ -9055,15 +9688,16 @@ a.calibration-alert-row:hover {
   color: var(--text-soft);
   display: flex;
   flex-direction: column;
-  font-size: 0.85rem;
+  flex: 1;
+  font-size: 0.84rem;
   gap: 8px;
-  min-height: 0;
+  min-height: 72px;
 }
 
 .ovp-card-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -9071,9 +9705,16 @@ a.calibration-alert-row:hover {
 
 .ovp-card-list-row {
   align-items: center;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   display: flex;
-  justify-content: space-between;
   gap: 8px;
+  justify-content: space-between;
+  padding: 7px 0;
+}
+
+.ovp-card-list-row:first-child {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .ovp-card-list-label {
@@ -9085,7 +9726,8 @@ a.calibration-alert-row:hover {
 
 .ovp-card-list-value {
   color: var(--text);
-  font-weight: 600;
+  font-size: 0.82rem;
+  font-weight: 620;
   white-space: nowrap;
 }
 
@@ -9096,54 +9738,63 @@ a.calibration-alert-row:hover {
 }
 
 .ovp-card-strip-seg {
+  border: 1px solid transparent;
   border-radius: 6px;
   font-size: 0.72rem;
-  padding: 3px 8px;
+  padding: 4px 8px;
 }
 
 .ovp-card-strip-positive {
-  background: color-mix(in srgb, var(--teal) 14%, var(--surface));
+  background: color-mix(in srgb, var(--teal) 12%, white);
+  border-color: color-mix(in srgb, var(--teal) 18%, transparent);
   color: var(--teal-700);
 }
 
 .ovp-card-strip-warning {
-  background: color-mix(in srgb, var(--amber) 16%, var(--surface));
-  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 12%, white);
+  border-color: color-mix(in srgb, var(--amber) 20%, transparent);
+  color: var(--amber-700);
 }
 
 .ovp-card-strip-negative {
-  background: color-mix(in srgb, var(--red) 14%, var(--surface));
-  color: var(--red);
+  background: color-mix(in srgb, var(--red) 10%, white);
+  border-color: color-mix(in srgb, var(--red) 18%, transparent);
+  color: var(--red-700);
 }
 
 .ovp-card-strip-info {
-  background: color-mix(in srgb, var(--cyan) 14%, var(--surface));
+  background: color-mix(in srgb, var(--cyan) 12%, white);
+  border-color: color-mix(in srgb, var(--cyan) 18%, transparent);
   color: var(--cyan);
 }
 
 .ovp-card-strip-neutral {
-  background: color-mix(in srgb, var(--text-soft) 12%, var(--surface));
+  background: var(--surface-strong);
+  border-color: var(--line);
   color: var(--text-soft);
 }
 
 .ovp-card-empty {
-  color: var(--text-soft);
+  color: var(--text-muted);
   font-size: 0.82rem;
-  padding: 8px 0;
+  padding: 10px 0;
 }
 
 .ovp-card-viewall {
   align-items: center;
+  border-top: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
   color: var(--teal-700);
   display: inline-flex;
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.8rem;
+  font-weight: 650;
   gap: 4px;
   margin-top: auto;
+  padding-top: 12px;
+  transition: gap 0.16s ease;
 }
 
 .ovp-card-viewall:hover {
-  text-decoration: underline;
+  gap: 8px;
 }
 
 .ovp-card-viewall svg {
@@ -9151,48 +9802,10 @@ a.calibration-alert-row:hover {
   width: 14px;
 }
 
-/* OVP KPI header strip (top of cockpit) */
-.ovp-kpi-strip {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-}
-
-.ovp-kpi-tile {
-  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px 14px;
-}
-
-.ovp-kpi-tile-label {
-  color: var(--text-soft);
-  font-size: 0.74rem;
-}
-
-.ovp-kpi-tile-value {
-  align-items: baseline;
-  display: flex;
-  gap: 4px;
-}
-
-.ovp-kpi-tile-value strong {
-  color: var(--text);
-  font-size: 1.5rem;
-  font-weight: 700;
-}
-
-.ovp-kpi-tile-value span {
-  color: var(--text-soft);
-  font-size: 0.78rem;
-}
-
-.ovp-kpi-tile-hint {
-  color: var(--text-soft);
-  font-size: 0.72rem;
+@media (max-width: 640px) {
+  .ovp-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Material trends AI readiness card */

@@ -1,0 +1,2 @@
+# Offline CAD helpers for PQ-AI (not part of the API runtime image).
+cascadio==0.0.17

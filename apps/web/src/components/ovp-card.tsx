@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import { ArrowRight, ArrowDownRight, ArrowUpRight, Minus, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 export type OvpTrend = "up" | "down" | "flat";
@@ -15,6 +15,7 @@ export type OvpCardProps = {
   trend?: OvpTrend;
   trendLabel?: string;
   accent?: OvpAccent;
+  icon?: LucideIcon;
   viewAllHref: string;
   viewAllLabel?: string;
   roles?: readonly string[];
@@ -35,8 +36,9 @@ export function OvpCard({
   trend,
   trendLabel,
   accent = "neutral",
+  icon: Icon,
   viewAllHref,
-  viewAllLabel = "查看全部",
+  viewAllLabel = "进入工作台",
   children,
 }: OvpCardProps) {
   const TrendIcon = trend ? trendIcon[trend] : null;
@@ -44,11 +46,18 @@ export function OvpCard({
     <article className={`ovp-card ovp-card-accent-${accent}`}>
       <header className="ovp-card-head">
         <div className="ovp-card-title-wrap">
-          <h3 className="ovp-card-title">{title}</h3>
-          {kpiLabel ? <span className="ovp-card-kpi-label">{kpiLabel}</span> : null}
+          {Icon ? (
+            <span className="ovp-card-icon" aria-hidden="true">
+              <Icon />
+            </span>
+          ) : null}
+          <div className="ovp-card-title-text">
+            <h3 className="ovp-card-title">{title}</h3>
+            {kpiLabel ? <span className="ovp-card-kpi-label">{kpiLabel}</span> : null}
+          </div>
         </div>
         <div className="ovp-card-kpi">
-          <strong className="ovp-card-kpi-value">{kpiValue}</strong>
+          <strong className="ovp-card-kpi-value mono">{kpiValue}</strong>
           {kpiUnit ? <span className="ovp-card-kpi-unit">{kpiUnit}</span> : null}
           {TrendIcon ? (
             <span className={`ovp-card-trend ovp-card-trend-${trend}`}>
@@ -76,7 +85,7 @@ export function OvpCardList({ items }: { items: Array<{ label: string; value?: s
       {items.map((item, idx) => (
         <li key={`${item.label}-${idx}`} className="ovp-card-list-row">
           <span className="ovp-card-list-label">{item.label}</span>
-          {item.value ? <span className="ovp-card-list-value">{item.value}</span> : null}
+          {item.value ? <span className="ovp-card-list-value mono">{item.value}</span> : null}
         </li>
       ))}
     </ul>
