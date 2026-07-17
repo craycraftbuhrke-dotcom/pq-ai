@@ -4,7 +4,8 @@
 - **只写一次**：以 Factory.code == DEMO-F01 作为全局标记；已存在则整批跳过。
 - **不做 DDL / DELETE**：仅 INSERT；失败由 startup_seed 吞掉，不阻断进程。
 - **跳过**：系统字典（ParameterDefinition / QualityMetricDefinition，由 catalog_seed 负责）、
-  运行态会话（UserSession）、审计流水（AuditLog）、API Key（避免写入伪密钥）。
+  用户认证体系（AppUser / Role / Permission / UserRole / RolePermission / UserSession /
+  ApiKey / AuditLog——库表未齐备前不写入）、运行态会话与审计流水。
 - 业务主键统一 ``DEMO-*`` 前缀，便于识别与排查。
 """
 
@@ -18,7 +19,6 @@ from sqlalchemy.orm import Session
 
 from app.models.domain import (
     ActualParameter,
-    AppUser,
     Brush,
     BrushParameter,
     BrushPointContribution,
@@ -70,7 +70,6 @@ from app.models.domain import (
     ParameterDefinition,
     Part,
     PathSegmentExecution,
-    Permission,
     PointContributionEntry,
     PointContributionVersion,
     PointFeatureSnapshot,
@@ -96,8 +95,6 @@ from app.models.domain import (
     Recommendation,
     RecommendationAction,
     RecommendationStatus,
-    Role,
-    RolePermission,
     SprayProgram,
     SprayProgramVersion,
     SupplierMaterialIssue,
@@ -105,7 +102,6 @@ from app.models.domain import (
     TrajectoryPathSegment,
     TrajectoryProgram,
     TrajectorySegmentGeometry,
-    UserRole,
     VehicleModel,
     VehicleModelColor,
     VersionStatus,
@@ -154,9 +150,6 @@ def seed_domain_demo_data(db: Session) -> dict:
         VehicleModel.__tablename__,
         Color.__tablename__,
         Part.__tablename__,
-        Role.__tablename__,
-        Permission.__tablename__,
-        AppUser.__tablename__,
     }
     missing = sorted(required - tables)
     if missing:
@@ -181,32 +174,7 @@ def seed_domain_demo_data(db: Session) -> dict:
         created += len(rows)
         return rows
 
-    # ---- L1 roots ----
-    roles = add_all(
-        [
-            Role(code=f"DEMO-ROLE-{i:02d}", name=f"演示角色{i}", description="domain seed")
-            for i in range(1, N + 1)
-        ]
-    )
-    permissions = add_all(
-        [
-            Permission(code=f"DEMO-PERM-{i:02d}", name=f"演示权限{i}", description="domain seed")
-            for i in range(1, N + 1)
-        ]
-    )
-    users = add_all(
-        [
-            AppUser(
-                username=f"demo.user{i}",
-                display_name=f"演示用户{i}",
-                email=f"demo.user{i}@pq-ai.local",
-                department="喷涂工艺",
-                password_hash=_hash(f"demo-password-{i}"),
-                is_active=True,
-            )
-            for i in range(1, N + 1)
-        ]
-    )
+    # ---- L1 roots（不含认证体系表）----
     factories = add_all(
         [
             Factory(
@@ -413,12 +381,6 @@ def seed_domain_demo_data(db: Session) -> dict:
     )
 
     # ---- L2 links / children ----
-    add_all(
-        [UserRole(user_id=users[i].id, role_id=roles[i].id) for i in range(N)]
-    )
-    add_all(
-        [RolePermission(role_id=roles[i].id, permission_id=permissions[i].id) for i in range(N)]
-    )
     add_all(
         [
             FactoryVehicleModel(
