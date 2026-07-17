@@ -7,9 +7,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   reactStrictMode: true,
   experimental: {
-    // Next 16 renames middleware body buffering to proxy*; set both for compatibility.
     proxyClientMaxBodySize: LARGE_UPLOAD_BODY,
-    middlewareClientMaxBodySize: LARGE_UPLOAD_BODY,
     serverActions: {
       bodySizeLimit: LARGE_UPLOAD_BODY,
     },
