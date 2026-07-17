@@ -1088,7 +1088,14 @@ DEFAULT_3D_MODEL_ENTRY: dict[str, object] = {
 
 # Per-model built-in GLB assets under apps/web/public/body-models (matched by code).
 MODEL_3D_ASSETS: dict[str, dict[str, object]] = {
-    # e.g. "ms11": {"url": "/body-models/ms11.glb", "up_axis": "Y", "unit_scale": 1.0},
+    # Default body model shipped with the frontend image (public/body-models/custom/ms11.glb).
+    "ms11": {
+        "url": "/body-models/custom/ms11.glb",
+        "up_axis": "Y",
+        "unit_scale": 0.001,
+        "bounds": None,
+        "model_asset_key": "/body-models/custom/ms11.glb",
+    },
 }
 
 
@@ -1456,18 +1463,18 @@ def deactivate_body_map_3d_layout(
     )
 
 
-_STP_MAX_BYTES = 250 * 1024 * 1024
 _STP_SUFFIXES = {".stp", ".step"}
 
 
 @router.get("/convert-stp/status")
-def convert_stp_status() -> dict[str, bool | int | str]:
+def convert_stp_status() -> dict[str, bool | int | str | None]:
     """Report whether STEP→GLB conversion is available on this API instance."""
     ready = cascadio_available()
     return {
         "available": ready,
         "engine": "cascadio" if ready else "none",
-        "max_upload_mb": 250,
+        # No hard app-level cap; platform/proxy timeouts remain the practical limit.
+        "max_upload_mb": None,
     }
 
 
@@ -1493,11 +1500,6 @@ async def convert_stp(
     payload = await file.read()
     if not payload:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传文件为空")
-    if len(payload) > _STP_MAX_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"STEP 文件超过 {_STP_MAX_BYTES // (1024 * 1024)}MB，请离线转换或压缩后再上传",
-        )
 
     with tempfile.TemporaryDirectory(prefix="pqai-stp-") as tmp:
         tmp_dir = Path(tmp)

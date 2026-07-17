@@ -43,8 +43,6 @@ const PUBLIC_DIR = resolvePublicDir();
 const MANIFEST_PATH = path.join(PUBLIC_DIR, "body-models", "view-models.json");
 const CUSTOM_DIR = path.join(PUBLIC_DIR, "body-models", "custom");
 
-const GLB_MAX_BYTES = 80 * 1024 * 1024;
-const STP_MAX_BYTES = 250 * 1024 * 1024;
 const STP_DEFAULT_UNIT_SCALE = 0.001;
 
 const GLB_MIME: Record<string, string> = {
@@ -242,24 +240,12 @@ export async function POST(request: Request) {
     let sourceFormat: "glb" | "stp";
 
     if (isStpFile(file)) {
-      if (file.size > STP_MAX_BYTES) {
-        return NextResponse.json(
-          { error: `STEP 文件不能超过 ${STP_MAX_BYTES / (1024 * 1024)}MB，请离线转换后上传 GLB` },
-          { status: 400 },
-        );
-      }
-
+      // No app-level size cap — conversion may take many minutes for multi‑GB STEP.
       const stpBytes = Buffer.from(await file.arrayBuffer());
       const stpBlob = new File([stpBytes], file.name, {
         type: file.type || "application/step",
       });
       const { bytes, engine } = await convertStpToGlb(request, stpBlob);
-      if (bytes.length > GLB_MAX_BYTES) {
-        return NextResponse.json(
-          { error: `转换后的 GLB 超过 ${GLB_MAX_BYTES / (1024 * 1024)}MB，请提高公差后重试` },
-          { status: 400 },
-        );
-      }
 
       await mkdir(CUSTOM_DIR, { recursive: true });
       const outAbs = path.join(CUSTOM_DIR, `${modelKey}.glb`);
@@ -277,9 +263,6 @@ export async function POST(request: Request) {
       const ext = fileExtension(file.name) || GLB_MIME[mime] || ".glb";
       if (ext !== ".glb" && ext !== ".gltf") {
         return NextResponse.json({ error: "仅支持 GLB / GLTF / STP / STEP" }, { status: 400 });
-      }
-      if (file.size > GLB_MAX_BYTES) {
-        return NextResponse.json({ error: "GLB/GLTF 文件不能超过 80MB" }, { status: 400 });
       }
 
       await mkdir(CUSTOM_DIR, { recursive: true });

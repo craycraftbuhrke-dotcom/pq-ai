@@ -30,7 +30,7 @@ def test_convert_stp_status_endpoint() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert "available" in payload
-    assert payload["max_upload_mb"] == 250
+    assert payload.get("max_upload_mb") is None
 
 
 def test_convert_stp_rejects_non_step() -> None:

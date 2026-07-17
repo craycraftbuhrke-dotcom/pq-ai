@@ -31,8 +31,10 @@ apps/web/public/body-maps/custom/*
 !apps/web/public/body-maps/custom/.gitkeep
 
 # 3D model runtime uploads (keep folder via .gitkeep)
+# Track the default shipped model; ignore other operator uploads.
 apps/web/public/body-models/custom/*
 !apps/web/public/body-models/custom/.gitkeep
+!apps/web/public/body-models/custom/ms11.glb
 
 # 本地备份文件（SQL/ORM 审核合规改造过程的历史快照）
 *.bak

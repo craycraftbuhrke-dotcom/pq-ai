@@ -27,10 +27,15 @@ export const EMPTY_BODY_MODEL_MANIFEST: BodyModelManifest = {
   models: {},
 };
 
-/** Per-model built-in GLB paths under apps/web/public/body-models. */
+/** Per-model built-in GLB paths under apps/web/public/body-models (shipped in image). */
 export const MODEL_3D_ASSETS: Record<string, BodyModelEntry> = {
-  // Add built-in GLB paths here as files become available, e.g.:
-  // ms11: { url: "/body-models/ms11.glb", up_axis: "Y", unit_scale: 1.0 },
+  ms11: {
+    url: "/body-models/custom/ms11.glb",
+    up_axis: "Y",
+    unit_scale: 0.001,
+    bounds: null,
+    model_asset_key: "/body-models/custom/ms11.glb",
+  },
 };
 
 export function normalizeModelKey(code: string): string {

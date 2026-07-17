@@ -114,7 +114,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
             {loading ? <LoaderCircle className="spin" /> : <RefreshCw />}
             刷新
           </button>
-          <small className="muted">GLB/GLTF ≤ 80MB；STP/STEP ≤ 250MB（转换可能需数分钟）</small>
+          <small className="muted">支持 GLB/GLTF/STP/STEP；大文件不限体积，STP 转换可能需较长时间，请耐心等待</small>
         </div>
         {error ? <div className="form-error">{error}</div> : null}
         {message ? <div className="form-success">{message}</div> : null}
