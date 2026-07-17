@@ -14,8 +14,11 @@ export const maxDuration = 600;
 
 type Context = { params: Promise<{ uploadId: string; index: string }> };
 
-/** Receive one binary chunk. Body must stay under Ingress limits (≤512KB recommended). */
-export async function PUT(request: Request, context: Context) {
+/**
+ * Receive one binary chunk via POST (not PUT).
+ * Many Xiaomi/K8s Ingress setups only allow GET/POST and return 404 for PUT.
+ */
+async function receiveChunk(request: Request, context: Context) {
   try {
     const { uploadId, index: indexRaw } = await context.params;
     const index = Number(indexRaw);
@@ -23,12 +26,33 @@ export async function PUT(request: Request, context: Context) {
       return NextResponse.json({ error: "无效的分片参数" }, { status: 400 });
     }
 
-    const meta = await readUploadMeta(uploadId);
+    let meta;
+    try {
+      meta = await readUploadMeta(uploadId);
+    } catch {
+      return NextResponse.json(
+        { error: "上传会话不存在或已过期，请重新选择文件上传" },
+        { status: 404 },
+      );
+    }
+
     if (index >= meta.totalChunks) {
       return NextResponse.json({ error: "分片索引超出范围" }, { status: 400 });
     }
 
-    const bytes = Buffer.from(await request.arrayBuffer());
+    const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
+    let bytes: Buffer;
+    if (contentType.includes("multipart/form-data")) {
+      const form = await request.formData();
+      const part = form.get("chunk") ?? form.get("file");
+      if (typeof part === "string" || !part) {
+        return NextResponse.json({ error: "缺少 chunk 字段" }, { status: 400 });
+      }
+      bytes = Buffer.from(await part.arrayBuffer());
+    } else {
+      bytes = Buffer.from(await request.arrayBuffer());
+    }
+
     if (!bytes.length) {
       return NextResponse.json({ error: "空分片" }, { status: 400 });
     }
@@ -55,7 +79,10 @@ export async function PUT(request: Request, context: Context) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "分片上传失败";
-    const status = message.includes("ENOENT") ? 404 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const POST = receiveChunk;
+/** Kept for local/dev clients; production Ingress often blocks PUT. */
+export const PUT = receiveChunk;

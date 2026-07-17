@@ -49,7 +49,7 @@ export function resolveRepoRoot(): string {
 export const PUBLIC_DIR = resolvePublicDir();
 export const MANIFEST_PATH = path.join(PUBLIC_DIR, "body-models", "view-models.json");
 export const CUSTOM_DIR = path.join(PUBLIC_DIR, "body-models", "custom");
-export const UPLOAD_ROOT = path.join(os.tmpdir(), "pqai-body-map-uploads");
+export const UPLOAD_ROOT = path.join(CUSTOM_DIR, ".uploads");
 
 export function fileExtension(name: string): string {
   const idx = name.lastIndexOf(".");

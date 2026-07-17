@@ -68,14 +68,21 @@ async function uploadFileChunked(options: {
     let attempt = 0;
     while (true) {
       attempt += 1;
+      // Use POST — Xiaomi Ingress commonly returns 404 for PUT.
+      const form = new FormData();
+      form.set("chunk", blob, `chunk-${index}.part`);
       const chunkResp = await fetch(`/api/body-map-models/uploads/${uploadId}/chunks/${index}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/octet-stream" },
-        body: blob,
+        method: "POST",
+        body: form,
       });
       if (chunkResp.ok) break;
       if (attempt >= 3) {
-        throw new Error(await readError(chunkResp));
+        const detail = await readError(chunkResp);
+        throw new Error(
+          chunkResp.status === 404
+            ? `分片上传接口不可用（HTTP 404）。请确认已部署最新前端；若仍失败，网关可能拦截了该路径：${detail}`
+            : detail,
+        );
       }
       onProgress(`分片 ${index + 1} 失败，重试 ${attempt}/3…`);
     }
