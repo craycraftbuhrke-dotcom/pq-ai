@@ -21,6 +21,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cad = [
+  "cascadio==0.0.17",
+]
 dev = [
   "httpx==0.28.1",
   "pytest==8.3.4",

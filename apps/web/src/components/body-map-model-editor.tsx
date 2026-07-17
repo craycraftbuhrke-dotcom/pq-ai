@@ -73,8 +73,22 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
         if (boundsInput.trim()) form.set("bounds", boundsInput.trim());
       }
       const response = await fetch("/api/body-map-models", { method: "POST", body: form });
-      if (!response.ok) throw new Error(await readError(response));
-      setMessage(action === "reset" ? "已恢复内置/无模型" : "数模已上传");
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        convert_engine?: string | null;
+        source_format?: string;
+      };
+      if (!response.ok) throw new Error(payload.error ?? `请求失败（${response.status}）`);
+      if (action === "reset") {
+        setMessage("已恢复内置/无模型");
+      } else if (payload.source_format === "stp") {
+        setMessage(
+          `STEP 已转换并保存为 GLB${payload.convert_engine ? `（${payload.convert_engine}）` : ""}；默认单位缩放 0.001（毫米→米）`,
+        );
+        if (unitScale === "1") setUnitScale("0.001");
+      } else {
+        setMessage("数模已上传");
+      }
       await load();
       onChanged();
     } catch (err) {
@@ -90,7 +104,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
     <ModalShell
       eyebrow="数模管理"
       title="3D 车身数模"
-      description={`${modelCode}${modelName ? ` · ${modelName}` : ""} — 上传 GLB/GLTF 文件到 public/body-models/custom，并记录到 view-models.json。`}
+      description={`${modelCode}${modelName ? ` · ${modelName}` : ""} — 上传 GLB/GLTF，或上传 STP/STEP（服务端自动转 GLB）到 public/body-models/custom，并写入 view-models.json。`}
       onClose={onClose}
       className="body-map-model-editor-modal"
     >
@@ -100,7 +114,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
             {loading ? <LoaderCircle className="spin" /> : <RefreshCw />}
             刷新
           </button>
-          <small className="muted">支持 GLB / GLTF，≤ 80MB</small>
+          <small className="muted">GLB/GLTF ≤ 80MB；STP/STEP ≤ 250MB（转换可能需数分钟）</small>
         </div>
         {error ? <div className="form-error">{error}</div> : null}
         {message ? <div className="form-success">{message}</div> : null}
@@ -151,7 +165,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
               fileRef.current = node;
             }}
             type="file"
-            accept=".glb,.gltf,model/gltf-binary,model/gltf+json"
+            accept=".glb,.gltf,.stp,.step,model/gltf-binary,model/gltf+json,application/step,model/step"
             hidden
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -166,7 +180,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
             onClick={() => fileRef.current?.click()}
           >
             {busy ? <LoaderCircle className="spin" /> : <Upload />}
-            上传 GLB/GLTF
+            {busy ? "处理中…" : "上传 GLB / STP"}
           </button>
           <button
             type="button"

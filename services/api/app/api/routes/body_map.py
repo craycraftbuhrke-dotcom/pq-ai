@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -64,6 +66,7 @@ from app.services.body_map_3d_projection import (
 )
 from app.services.measurement_reliability import VERIFIED
 from app.services.quality_evaluation import evaluate_quality_measurement
+from app.services.stp_convert import StpConvertError, cascadio_available, step_to_glb
 
 router = APIRouter(prefix="/quality/body-map", tags=["quality-body-map"])
 
@@ -1450,4 +1453,73 @@ def deactivate_body_map_3d_layout(
         status=layout.status,
         projected_views={},
         projected_clamped=False,
+    )
+
+
+_STP_MAX_BYTES = 250 * 1024 * 1024
+_STP_SUFFIXES = {".stp", ".step"}
+
+
+@router.get("/convert-stp/status")
+def convert_stp_status() -> dict[str, bool | int | str]:
+    """Report whether STEP→GLB conversion is available on this API instance."""
+    ready = cascadio_available()
+    return {
+        "available": ready,
+        "engine": "cascadio" if ready else "none",
+        "max_upload_mb": 250,
+    }
+
+
+@router.post("/convert-stp")
+async def convert_stp(
+    file: UploadFile = File(...),
+) -> Response:
+    """Convert an uploaded STEP (.stp/.step) file to binary GLB."""
+    if not cascadio_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="STEP 转换服务未就绪：请安装 cascadio（pip install cascadio==0.0.17）",
+        )
+
+    filename = (file.filename or "model.stp").strip()
+    suffix = Path(filename).suffix.lower()
+    if suffix not in _STP_SUFFIXES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅支持 .stp / .step 文件",
+        )
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传文件为空")
+    if len(payload) > _STP_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"STEP 文件超过 {_STP_MAX_BYTES // (1024 * 1024)}MB，请离线转换或压缩后再上传",
+        )
+
+    with tempfile.TemporaryDirectory(prefix="pqai-stp-") as tmp:
+        tmp_dir = Path(tmp)
+        stp_path = tmp_dir / f"input{suffix}"
+        glb_path = tmp_dir / "output.glb"
+        stp_path.write_bytes(payload)
+        try:
+            step_to_glb(stp_path, glb_path)
+        except StpConvertError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        glb_bytes = glb_path.read_bytes()
+
+    out_name = Path(filename).stem or "model"
+    return Response(
+        content=glb_bytes,
+        media_type="model/gltf-binary",
+        headers={
+            "Content-Disposition": f'attachment; filename="{out_name}.glb"',
+            "X-PQAI-Converted-From": filename,
+            "X-PQAI-Glb-Bytes": str(len(glb_bytes)),
+        },
     )

@@ -1,2 +1,2 @@
-# Offline CAD helpers for PQ-AI (not part of the API runtime image).
+# CAD helpers for STEP→GLB (local script + optional API `[cad]` / Docker install).
 cascadio==0.0.17

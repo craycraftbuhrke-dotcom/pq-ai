@@ -11,6 +11,9 @@ WORKDIR /app
 COPY services/api/pyproject.toml ./
 COPY services/api/app ./app
 RUN python -m pip install --no-cache-dir --prefer-binary --default-timeout=300 --retries=10 .
+# Optional CAD stack for STEP→GLB upload; keep image buildable if wheel is unavailable.
+RUN python -m pip install --no-cache-dir --prefer-binary --default-timeout=300 --retries=10 "cascadio==0.0.17" \
+ || echo "WARN: cascadio install failed; STEP upload convert will return 503"
 
 EXPOSE 8000
 
