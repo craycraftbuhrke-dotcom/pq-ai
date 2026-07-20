@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { apiRequestHeaders } from "@/lib/auth-data";
+import { apiRequestHeaders, isUpstreamTimeout, upstreamRequestSignal } from "@/lib/auth-data";
 
 const allowedRoots = new Set(["point-snapshots"]);
 
@@ -22,7 +22,7 @@ async function proxy(request: Request, context: Context) {
   try {
     const response = await fetch(
       `${apiUrl}/features/${path.map(encodeURIComponent).join("/")}${new URL(request.url).search}`,
-      { method: request.method, headers, body, cache: "no-store" },
+      { method: request.method, headers, body, cache: "no-store", signal: upstreamRequestSignal(request, 60_000) },
     );
     if (response.status === 204) return new NextResponse(null, { status: 204 });
     const result = (await response.json().catch(() => ({}))) as Record<string, unknown>;
@@ -33,8 +33,11 @@ async function proxy(request: Request, context: Context) {
       );
     }
     return NextResponse.json(result, { status: response.status });
-  } catch {
-    return NextResponse.json({ error: "无法连接后端特征工程服务" }, { status: 502 });
+  } catch (error) {
+    return NextResponse.json(
+      { error: isUpstreamTimeout(error) ? "特征工程服务响应超时" : "无法连接后端特征工程服务" },
+      { status: isUpstreamTimeout(error) ? 504 : 502 },
+    );
   }
 }
 

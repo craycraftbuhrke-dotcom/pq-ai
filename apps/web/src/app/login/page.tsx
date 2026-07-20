@@ -3,12 +3,11 @@
 import { Eye, EyeOff, LoaderCircle, LogIn } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 
 import { useAuth } from "@/lib/auth-context";
 
-// 认证总开关：与后端 API_AUTH_ENABLED / middleware / auth-context 保持一致
-const authEnabled = process.env.NEXT_PUBLIC_AUTH_ENABLED === "true";
+const allowSelfRegistration = process.env.NEXT_PUBLIC_ALLOW_SELF_REGISTRATION === "true";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -17,13 +16,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
-
-  // 认证关闭时，直接跳回首页（避免用户手动访问 /login 卡在无用页面）
-  useEffect(() => {
-    if (!authEnabled) {
-      router.replace("/");
-    }
-  }, [router]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -61,10 +53,11 @@ export default function LoginPage() {
               placeholder="请输入用户名"
             />
           </label>
-          <label className="form-field">
-            <span>密码</span>
+          <div className="form-field">
+            <label htmlFor="login-password">密码</label>
             <div className="password-input-wrap">
               <input
+                id="login-password"
                 required
                 autoComplete="current-password"
                 type={showPassword ? "text" : "password"}
@@ -81,15 +74,21 @@ export default function LoginPage() {
                 {showPassword ? <EyeOff /> : <Eye />}
               </button>
             </div>
-          </label>
+          </div>
           <button className="button button-primary auth-submit" type="submit" disabled={loading}>
             {loading ? <LoaderCircle className="spin" /> : <LogIn />}
             {loading ? "登录中..." : "登录"}
           </button>
         </form>
         <div className="auth-footer">
-          <span>还没有账号？</span>
-          <Link href="/register">注册新账号</Link>
+          {allowSelfRegistration ? (
+            <>
+              <span>还没有账号？</span>
+              <Link href="/register">注册新账号</Link>
+            </>
+          ) : (
+            <span>账号由系统管理员创建，如需开通请联系管理员。</span>
+          )}
         </div>
       </div>
     </div>

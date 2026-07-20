@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { apiRequestHeaders } from "@/lib/auth-data";
+import { apiRequestHeaders, isUpstreamTimeout, upstreamRequestSignal } from "@/lib/auth-data";
+import { BULK_IMPORT_MAX_BYTES, readBoundedRequestBody } from "@/lib/bounded-request-body";
 
 type Context = { params: Promise<{ path: string[] }> };
 
@@ -14,16 +15,18 @@ async function proxyRecipeWide(request: Request, context: Context) {
     return NextResponse.json({ error: "后端 API 地址未配置" }, { status: 503 });
   }
   const headers = new Headers(await apiRequestHeaders(request));
-  let body: ArrayBuffer | undefined;
-  if (request.method !== "GET") {
-    body = await request.arrayBuffer();
-    headers.set("Content-Type", request.headers.get("content-type") ?? "application/octet-stream");
-  }
-
   try {
+    let body: ArrayBuffer | undefined;
+    if (request.method !== "GET") {
+      const bytes = await readBoundedRequestBody(request, BULK_IMPORT_MAX_BYTES);
+      const copy = new Uint8Array(bytes.length);
+      copy.set(bytes);
+      body = copy.buffer;
+      headers.set("Content-Type", request.headers.get("content-type") ?? "application/octet-stream");
+    }
     const response = await fetch(
       `${apiUrl}/recipe-wide/${path.map(encodeURIComponent).join("/")}${new URL(request.url).search}`,
-      { method: request.method, headers, body, cache: "no-store" },
+      { method: request.method, headers, body, cache: "no-store", signal: upstreamRequestSignal(request, 60_000) },
     );
     const contentType = response.headers.get("content-type") ?? "";
     if (!response.ok) {
@@ -46,8 +49,18 @@ async function proxyRecipeWide(request: Request, context: Context) {
       status: response.status,
       headers: resultHeaders,
     });
-  } catch {
-    return NextResponse.json({ error: "无法连接后端配方宽表服务" }, { status: 502 });
+  } catch (error) {
+    const status = (error as { status?: number }).status;
+    if (typeof status === "number") {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "配方宽表文件无效" },
+        { status },
+      );
+    }
+    return NextResponse.json(
+      { error: isUpstreamTimeout(error) ? "配方宽表服务响应超时" : "无法连接后端配方宽表服务" },
+      { status: isUpstreamTimeout(error) ? 504 : 502 },
+    );
   }
 }
 

@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.master_data import ResourceRead
 
@@ -143,7 +144,7 @@ class FileImportJobCreate(BaseModel):
     source_filename: str = Field(min_length=1, max_length=240)
     source_uri: str | None = Field(default=None, max_length=500)
     source_checksum: str | None = Field(default=None, max_length=128)
-    status: str = Field(default="PREVIEWED", pattern="^(PREVIEWED|VALIDATED|IMPORTED|FAILED|REPLAYED)$")
+    status: str = Field(default="PREVIEWED", pattern="^(PREVIEWED|VALIDATED|IMPORTING|IMPORTED|FAILED|REPLAYED)$")
     row_count: int = Field(default=0, ge=0)
     valid_row_count: int = Field(default=0, ge=0)
     failed_row_count: int = Field(default=0, ge=0)
@@ -157,13 +158,9 @@ class FileImportJobCreate(BaseModel):
 
 
 class FileImportJobUpdate(BaseModel):
-    status: str | None = Field(default=None, pattern="^(PREVIEWED|VALIDATED|IMPORTED|FAILED|REPLAYED)$")
-    row_count: int | None = Field(default=None, ge=0)
-    valid_row_count: int | None = Field(default=None, ge=0)
-    failed_row_count: int | None = Field(default=None, ge=0)
-    preview_payload: dict | None = None
-    error_report: dict | None = None
-    imported_at: datetime | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    source_uri: str | None = Field(default=None, max_length=500)
     remark: str | None = None
 
 
@@ -186,6 +183,10 @@ class FileImportReplayRequest(BaseModel):
     import_no: str | None = Field(default=None, max_length=64)
     submitted_by: str = Field(default="system", max_length=80)
     remark: str | None = None
+
+
+class FileImportCommitRequest(BaseModel):
+    mode: Literal["create", "upsert"] = "upsert"
 
 
 class MeasurementProbeCreate(BaseModel):

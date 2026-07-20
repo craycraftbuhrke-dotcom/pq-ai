@@ -1,6 +1,7 @@
 "use client";
 
 import { Image as ImageIcon, LoaderCircle, RefreshCw, Upload, Wand2 } from "lucide-react";
+import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ModalShell } from "@/components/modal-shell";
@@ -64,7 +65,8 @@ export function BodyMapImageEditor({ open, modelCode, modelName, onClose, onChan
 
   useEffect(() => {
     if (!open) return;
-    void load();
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
   }, [load, open]);
 
   async function postAction(view: BodyMapView, action: "upload" | "reset" | "mirror-from-right", file?: File) {
@@ -103,7 +105,7 @@ export function BodyMapImageEditor({ open, modelCode, modelName, onClose, onChan
     <ModalShell
       eyebrow="底图管理"
       title="四视图白车身照片"
-      description={`${modelCode}${modelName ? ` · ${modelName}` : ""} — 上传替换后写入 public/body-maps/custom，并记录到 view-images.json。`}
+      description={`${modelName || modelCode}：为前、后、左、右四个方向上传清晰的白车身底图。`}
       onClose={onClose}
       className="body-map-image-editor-modal"
     >
@@ -126,7 +128,7 @@ export function BodyMapImageEditor({ open, modelCode, modelName, onClose, onChan
                 <div className="body-map-image-card-head">
                   <div>
                     <span className="eyebrow">{item?.label ?? view}</span>
-                    <strong className="mono">{view}</strong>
+                    <strong>当前底图</strong>
                   </div>
                   <span className={`status-badge ${item?.source === "custom" ? "" : "status-muted"}`}>
                     {item?.source === "custom" ? "已自定义" : "内置"}
@@ -134,7 +136,13 @@ export function BodyMapImageEditor({ open, modelCode, modelName, onClose, onChan
                 </div>
                 <div className="body-map-image-preview">
                   {item?.url ? (
-                    <img src={item.url} alt={item.label} />
+                    <Image
+                      src={item.url}
+                      alt={item.label}
+                      width={640}
+                      height={360}
+                      unoptimized
+                    />
                   ) : (
                     <div className="body-map-image-preview-empty">
                       <ImageIcon />
@@ -142,7 +150,6 @@ export function BodyMapImageEditor({ open, modelCode, modelName, onClose, onChan
                     </div>
                   )}
                 </div>
-                <small className="mono muted body-map-image-path">{item?.url?.split("?")[0] ?? "—"}</small>
                 <div className="body-map-image-actions">
                   <input
                     ref={(node) => {

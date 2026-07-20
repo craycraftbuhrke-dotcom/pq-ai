@@ -66,8 +66,8 @@ export function Dashboard({ snapshot }: DashboardProps) {
           <span>浏览合格/超差结果并维护记录</span>
         </Link>
         <Link className="dashboard-quick-link" href="/quality?tab=analytics">
-          <strong>SPC 与趋势</strong>
-          <span>过程能力、控制图与点位风险</span>
+          <strong>质量趋势</strong>
+          <span>查看过程能力、控制图与点位风险</span>
         </Link>
         <Link className="dashboard-quick-link" href="/production">
           <strong>查看生产车身</strong>

@@ -51,6 +51,10 @@ export function DomainHub({
           <div className="page-actions">{actions}</div>
         </header>
       ) : null}
+      <header className="domain-page-heading">
+        <h1>{title}</h1>
+        <p>选择下面的工作项，系统会自动沿用页面顶部的当前工厂、车型和颜色。</p>
+      </header>
       {toolbar ? <div className="domain-hub-toolbar">{toolbar}</div> : null}
       <section className="panel domain-hub">
         <div className="master-tabs" role="tablist" aria-label={title}>

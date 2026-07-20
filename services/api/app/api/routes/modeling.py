@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -21,12 +21,16 @@ from app.models.domain import (
     PointFeatureSnapshot,
     PredictionResult,
     ProductionRun,
+    TrainingDataUpload,
+    TrainingWideSample,
     VehicleModel,
 )
 from app.schemas.modeling import (
     DatasetBuildRequest,
     DatasetSnapshotRead,
     DatasetSplitMemberRead,
+    TrainingDataUploadRead,
+    TrainingWideSampleRead,
     ModelAcceptanceDecisionRead,
     ModelAcceptanceRequest,
     ModelArtifactRead,
@@ -50,6 +54,14 @@ from app.schemas.modeling import (
     ModelTrainingRequest,
     ModelValidationFoldRead,
     ModelVersionRead,
+)
+from app.core.config import settings
+from app.services.request_body import read_limited_request_body
+from app.services.training_wide import (
+    import_training_file,
+    training_template_response,
+    training_upload_export_response,
+    validate_training_file,
 )
 from app.services.modeling import (
     build_dataset_snapshot,
@@ -128,6 +140,104 @@ def list_dataset_members(
             .order_by(DatasetSplitMember.occurred_at, DatasetSplitMember.measurement_point_id)
         )
     )
+
+
+@router.get("/training-wide/template")
+def download_training_wide_template(
+    target_metric: str,
+    file_format: str = Query(default="xlsx", pattern="^(xlsx|csv)$"),
+    db: Session = Depends(get_db),
+):
+    return training_template_response(db, target_metric, file_format)
+
+
+@router.post("/training-wide/validate")
+async def validate_training_wide_upload(
+    request: Request,
+    target_metric: str,
+    filename: str = Query(default="training-wide.xlsx", max_length=255),
+    feature_set_version: str = Query(default=CURRENT_FEATURE_SET_VERSION, max_length=64),
+    db: Session = Depends(get_db),
+) -> dict:
+    content = await read_limited_request_body(
+        request, settings.bulk_import_max_bytes, "训练宽表"
+    )
+    validated = validate_training_file(
+        db, content, filename, target_metric, feature_set_version
+    )
+    return {
+        **validated["report"],
+        "feature_names": validated["feature_names"],
+    }
+
+
+@router.post(
+    "/training-wide/import",
+    response_model=TrainingDataUploadRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_training_wide_upload(
+    request: Request,
+    target_metric: str,
+    upload_name: str = Query(..., min_length=1, max_length=160),
+    filename: str = Query(default="training-wide.xlsx", max_length=255),
+    feature_set_version: str = Query(default=CURRENT_FEATURE_SET_VERSION, max_length=64),
+    db: Session = Depends(get_db),
+) -> TrainingDataUpload:
+    content = await read_limited_request_body(
+        request, settings.bulk_import_max_bytes, "训练宽表"
+    )
+    actor = request.state.actor
+    return import_training_file(
+        db,
+        content,
+        filename,
+        upload_name,
+        target_metric,
+        feature_set_version,
+        actor.display_name or actor.username,
+    )
+
+
+@router.get("/training-wide/uploads", response_model=list[TrainingDataUploadRead])
+def list_training_wide_uploads(
+    target_metric: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[TrainingDataUpload]:
+    query = select(TrainingDataUpload)
+    if target_metric:
+        query = query.where(TrainingDataUpload.target_metric == target_metric)
+    return list(db.scalars(query.order_by(TrainingDataUpload.uploaded_at.desc())))
+
+
+@router.get(
+    "/training-wide/uploads/{upload_id}/samples",
+    response_model=list[TrainingWideSampleRead],
+)
+def list_training_wide_samples(
+    upload_id: str, db: Session = Depends(get_db)
+) -> list[TrainingWideSample]:
+    if not db.get(TrainingDataUpload, upload_id):
+        raise HTTPException(status_code=404, detail="人工训练数据文件不存在")
+    return list(
+        db.scalars(
+            select(TrainingWideSample)
+            .where(TrainingWideSample.upload_id == upload_id)
+            .order_by(TrainingWideSample.occurred_at, TrainingWideSample.sample_no)
+        )
+    )
+
+
+@router.get("/training-wide/uploads/{upload_id}/export")
+def export_training_wide_upload(
+    upload_id: str,
+    file_format: str = Query(default="xlsx", pattern="^(xlsx|csv)$"),
+    db: Session = Depends(get_db),
+):
+    upload = db.get(TrainingDataUpload, upload_id)
+    if not upload:
+        raise HTTPException(status_code=404, detail="人工训练数据文件不存在")
+    return training_upload_export_response(db, upload, file_format)
 
 
 @router.get("/acceptance-decisions", response_model=list[ModelAcceptanceDecisionRead])

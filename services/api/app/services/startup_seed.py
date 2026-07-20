@@ -1,4 +1,4 @@
-"""进程启动时的字典预置与领域演示数据。
+"""受控初始化任务使用的系统目录预置。
 
 设计约束（非显而易见的 WHY）：
 
@@ -7,7 +7,7 @@
 - **不做 DDL**：`db/session.py` 的运行时策略禁止 CREATE/DROP/ALTER；表结构必须
   由 DBA 通过 `docs/sql/pq_ai_mysql_schema.sql` 预先建好。本模块只做 INSERT。
 - **系统字典**：质量指标 / 工艺参数由 catalog_seed 幂等补齐。
-- **领域演示数据**：每个业务领域模型 5 条，仅写入一次（见 domain_seed）。
+- **禁止演示数据**：本模块只维护系统目录，不写入任何业务示例记录。
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from app.services.catalog_seed import (
     seed_parameter_catalog,
     seed_quality_metric_catalog,
 )
-from app.services.domain_seed import seed_domain_demo_data
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +75,6 @@ def run_startup_seed() -> None:
     logger.info("[startup-seed] 开始执行预置")
     _run("quality_metric_catalog", seed_quality_metric_catalog)
     _run("parameter_catalog", seed_parameter_catalog)
-    _run("domain_demo_data", seed_domain_demo_data)
     logger.info("[startup-seed] 全部预置任务结束")
 
 

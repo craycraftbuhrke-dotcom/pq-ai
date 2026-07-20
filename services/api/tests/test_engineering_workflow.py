@@ -1,12 +1,15 @@
 import base64
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.api.routes.engineering import (
+    FILE_IMPORT_CLAIM_TTL,
+    commit_file_import_job,
     create_contribution_validation,
     create_file_import_profile,
     create_issue_task,
@@ -46,11 +49,13 @@ from app.api.routes.robot_governance import (
     create_path_segment,
     create_trajectory_program,
 )
-from app.models.domain import ModelVersion
+from app.models.domain import ModelVersion, TrajectorySegmentGeometry
 from app.schemas.common import FactoryCreate
 from app.schemas.engineering import (
     ContributionValidationStudyCreate,
     EngineeringKnowledgeEntryCreate,
+    FileImportCommitRequest,
+    FileImportJobUpdate,
     FileImportProfileCreate,
     FileImportPreviewRequest,
     FileImportReplayRequest,
@@ -84,6 +89,8 @@ from app.schemas.process import (
     TrajectoryProgramCreate,
 )
 from app.schemas.quality import MeasurementInstrumentCreate, MeasurementMethodCreate
+from app.services.file_imports import decode_base64_file
+from app.services.bulk_io import get_resource
 from tests.schema_guard import create_transient_test_schema
 
 
@@ -91,6 +98,21 @@ def build_session() -> Session:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     create_transient_test_schema(engine)
     return Session(engine)
+
+
+def test_device_file_size_limit_is_enforced_before_parsing() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        decode_base64_file(base64.b64encode(b"1234").decode("ascii"), max_bytes=3)
+
+    assert exc_info.value.status_code == 413
+
+
+def test_file_import_workflow_fields_are_not_user_editable_or_bulk_importable() -> None:
+    with pytest.raises(ValidationError):
+        FileImportJobUpdate(status="IMPORTED")
+    with pytest.raises(ValidationError):
+        FileImportJobUpdate(row_count=999)
+    assert get_resource("engineering.file-import-jobs").importable is False
 
 
 def seed_context(db: Session):
@@ -233,10 +255,10 @@ def test_engineering_route_task_supplier_measurement_and_ai_workflow() -> None:
             version="1.0",
             domain_type="DURR_DXQ",
             parser_type="DXQ_EXPORT",
-            target_resource="trajectory-geometries",
-            field_mapping={"segment": "segment_no"},
-            required_fields=["segment_no"],
-            validation_rules={"numeric_fields": ["segment_no"], "max_rows": 10},
+            target_resource="engineering.trajectory-geometries",
+            field_mapping={},
+            required_fields=["path_segment_id", "geometry_version"],
+            validation_rules={"numeric_fields": ["gun_distance"], "max_rows": 10},
             status="ACTIVE",
             approved_by="机器人负责人",
         ),
@@ -247,14 +269,47 @@ def test_engineering_route_task_supplier_measurement_and_ai_workflow() -> None:
             import_no="IMP-DXQ-ENG",
             profile_id=durr_profile.id,
             source_filename="dxq-export.csv",
-            content_base64=base64.b64encode(b"segment,speed\n1,800\n").decode("ascii"),
+            content_base64=base64.b64encode(
+                (
+                    "path_segment_id,geometry_version,gun_distance,status\n"
+                    f"{segment.id},DXQ-1,280,VALIDATED\n"
+                ).encode()
+            ).decode("ascii"),
             submitted_by="robot_engineer",
         ),
         db,
     )
     assert import_job.status == "VALIDATED"
     assert import_job.row_count == 1
-    assert import_job.preview_payload["preview_rows"][0]["segment_no"] == "1"
+    assert import_job.preview_payload["preview_rows"][0]["geometry_version"] == "DXQ-1"
+    import_job.status = "IMPORTING"
+    db.commit()
+    with pytest.raises(HTTPException) as active_claim:
+        commit_file_import_job(
+            import_job.id,
+            FileImportCommitRequest(mode="upsert"),
+            db,
+        )
+    assert active_claim.value.status_code == 409
+    import_job.updated_at = datetime.now(UTC) - FILE_IMPORT_CLAIM_TTL - timedelta(seconds=1)
+    db.commit()
+    imported = commit_file_import_job(
+        import_job.id,
+        FileImportCommitRequest(mode="upsert"),
+        db,
+    )
+    assert imported.status == "IMPORTED"
+    assert "_import_claim" not in imported.preview_payload
+    assert imported.preview_payload["import_result"]["created"] == 1
+    with pytest.raises(HTTPException) as already_committed:
+        commit_file_import_job(
+            import_job.id,
+            FileImportCommitRequest(mode="upsert"),
+            db,
+        )
+    assert already_committed.value.status_code == 409
+    imported_geometry = db.query(TrajectorySegmentGeometry).filter_by(geometry_version="DXQ-1").one()
+    assert imported_geometry.path_segment_id == segment.id
     replay = replay_file_import_job(
         import_job.id,
         FileImportReplayRequest(import_no="REPLAY-DXQ-ENG", submitted_by="robot_engineer"),
@@ -262,6 +317,18 @@ def test_engineering_route_task_supplier_measurement_and_ai_workflow() -> None:
     )
     assert replay.status == "REPLAYED"
     assert replay.replay_of_job_id == import_job.id
+    assert replay.preview_payload["import_result"]["updated"] == 1
+    durr_profile.target_resource = "quality.measurements"
+    db.commit()
+    drift_replay = replay_file_import_job(
+        import_job.id,
+        FileImportReplayRequest(import_no="REPLAY-DXQ-DRIFT", submitted_by="robot_engineer"),
+        db,
+    )
+    assert drift_replay.status == "FAILED"
+    assert "目标资源已变化" in drift_replay.error_report["errors"][0]["message"]
+    durr_profile.target_resource = "engineering.trajectory-geometries"
+    db.commit()
     geometry = create_trajectory_geometry(
         TrajectorySegmentGeometryCreate(
             path_segment_id=segment.id,
@@ -335,7 +402,7 @@ def test_engineering_route_task_supplier_measurement_and_ai_workflow() -> None:
             name="COA 导入",
             version="1.0",
             domain_type="MATERIAL_COA",
-            target_resource="supplier-submissions",
+            target_resource="engineering.supplier-submissions",
             field_mapping={"viscosity": "viscosity"},
             required_fields=["viscosity"],
             status="ACTIVE",

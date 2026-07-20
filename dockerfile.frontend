@@ -1,30 +1,36 @@
-FROM node:22-alpine AS deps
+ARG NODE_IMAGE=node:22-alpine
+FROM ${NODE_IMAGE} AS deps
 
 WORKDIR /workspace
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/package.json
 RUN npm ci --prefer-offline --no-audit || npm install --prefer-offline --no-audit
 
-FROM node:22-alpine AS builder
+FROM ${NODE_IMAGE} AS builder
 WORKDIR /workspace
 COPY --from=deps /workspace/node_modules ./node_modules
 COPY . .
 ARG NEXT_PUBLIC_API_URL=
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-# 认证总开关（build-time）：Next.js 会把 NEXT_PUBLIC_* 内联到浏览器 bundle。
-# 默认 false（测试期直接进入系统），未来测试通过后改为 true 恢复完整登录流程。
-ARG NEXT_PUBLIC_AUTH_ENABLED=false
+# 生产构建必须显式启用认证；隔离测试不使用该镜像。
+ARG NEXT_PUBLIC_AUTH_ENABLED
 ENV NEXT_PUBLIC_AUTH_ENABLED=${NEXT_PUBLIC_AUTH_ENABLED}
-RUN npm run build:web
+ARG NEXT_PUBLIC_ALLOW_SELF_REGISTRATION=false
+ENV NEXT_PUBLIC_ALLOW_SELF_REGISTRATION=${NEXT_PUBLIC_ALLOW_SELF_REGISTRATION}
+RUN test "${NEXT_PUBLIC_AUTH_ENABLED}" = "true" && npm run build:web
 
-FROM node:22-alpine AS runner
+FROM ${NODE_IMAGE} AS runner
 WORKDIR /workspace
 ENV NODE_ENV=production
+ENV AUTH_ENABLED=true
 # 前端容器监听端口，默认 80（nginx 惯例）；K8s Deployment 可通过 env PORT 覆盖为 8080 等
 ENV PORT=80
 ENV LISTEN_HOST=0.0.0.0
-COPY --from=builder /workspace/apps/web/.next/standalone ./
-COPY --from=builder /workspace/apps/web/.next/static ./apps/web/.next/static
-COPY --from=builder /workspace/apps/web/public ./apps/web/public
+COPY --chown=node:node --from=builder /workspace/apps/web/.next/standalone ./
+COPY --chown=node:node --from=builder /workspace/apps/web/.next/static ./apps/web/.next/static
+COPY --chown=node:node --from=builder /workspace/apps/web/public ./apps/web/public
+WORKDIR /workspace/apps/web
+ENV WEB_PUBLIC_DIR=/workspace/apps/web/public
+USER node
 EXPOSE 80
-CMD ["sh", "-c", "HOSTNAME=\"${LISTEN_HOST:-0.0.0.0}\" PORT=\"${PORT:-80}\" node apps/web/server.js"]
+CMD ["sh", "-c", ": \"${AUTH_ENABLED:?AUTH_ENABLED must be true}\"; [ \"$AUTH_ENABLED\" = \"true\" ] || exit 1; HOSTNAME=\"${LISTEN_HOST:-0.0.0.0}\" PORT=\"${PORT:-80}\" node server.js"]

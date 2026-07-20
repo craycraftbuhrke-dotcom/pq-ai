@@ -18,6 +18,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.core.config import settings
+from app.services.request_body import read_limited_request_body
 from app.models.domain import (
     Brush,
     BrushParameter,
@@ -381,7 +383,8 @@ async def recipe_wide_import(
     param_codes = _param_codes(program.process_stage)
     label_to_code = {label: code for code, label in param_codes}
 
-    rows = _parse_rows(await request.body(), filename)
+    content = await read_limited_request_body(request, settings.bulk_import_max_bytes, "配方宽表导入文件")
+    rows = _parse_rows(content, filename)
     errors: list[RecipeWideImportError] = []
     created = 0
     updated = 0
@@ -460,6 +463,5 @@ async def recipe_wide_import(
         failed=len(errors),
         errors=errors,
     )
-
 
 

@@ -41,11 +41,6 @@ const INSTRUMENT_LABELS: Record<string, string> = {
   FISCHER_THICKNESS: "Fischer 膜厚仪",
 };
 
-function getApiKey(): string {
-  const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
-
 function gaugeColor(value: number): string {
   if (value >= 90) return "var(--teal-500)";
   if (value >= 70) return "var(--amber-500)";
@@ -65,11 +60,9 @@ export function InstrumentsOverviewPanel({ embedded = false }: { embedded?: bool
       const [monitorResp, summaryResp] = await Promise.all([
         fetch("/api/quality/monitoring/quality-summary", {
           cache: "no-store",
-          headers: { "x-api-key": getApiKey() },
         }),
         fetch("/api/quality/governance/summary", {
           cache: "no-store",
-          headers: { "x-api-key": getApiKey() },
         }),
       ]);
       if (!monitorResp.ok || !summaryResp.ok) throw new Error("加载失败");

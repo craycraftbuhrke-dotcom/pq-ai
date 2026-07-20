@@ -156,7 +156,7 @@ function jsonValue(value: string, label: string): Record<string, unknown> {
     if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error();
     return parsed as Record<string, unknown>;
   } catch {
-    throw new Error(`${label}必须是 JSON 对象`);
+    throw new Error(`${label}中的分项内容格式不正确`);
   }
 }
 

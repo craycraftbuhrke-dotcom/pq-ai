@@ -4,20 +4,43 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.services.bulk_io import (
+    describe_bulk_columns,
     export_resource,
     import_resource,
     list_bulk_resources,
     render_template,
 )
+from app.services.request_body import read_limited_request_body
 
 router = APIRouter(prefix="/bulk", tags=["bulk-import-export"])
+
+
+def _parse_default_values(default_values: str | None) -> dict[str, Any] | None:
+    if not default_values:
+        return None
+    try:
+        payload = json.loads(default_values)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail="页面自动带入内容格式不正确") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="页面自动带入内容格式不正确")
+    return payload
 
 
 @router.get("/resources")
 def bulk_resources() -> list[dict[str, str | bool]]:
     return list_bulk_resources()
+
+
+@router.get("/{resource_key}/columns")
+def bulk_columns(
+    resource_key: str,
+    quality_type: str | None = Query(default=None),
+) -> list[dict[str, str | bool]]:
+    return describe_bulk_columns(resource_key, quality_type=quality_type)
 
 
 @router.get("/{resource_key}/template")
@@ -30,6 +53,7 @@ def bulk_template(
     vehicle_model_code: str | None = Query(default=None),
     shift: str | None = Query(default=None),
     brush_id: str | None = Query(default=None),
+    default_values: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     return render_template(
@@ -42,6 +66,7 @@ def bulk_template(
         vehicle_model_code=vehicle_model_code,
         shift=shift,
         brush_id=brush_id,
+        default_values=_parse_default_values(default_values),
     )
 
 
@@ -64,18 +89,11 @@ async def bulk_import(
     default_values: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> dict:
-    parsed_default_values: dict[str, Any] | None = None
-    if default_values:
-        try:
-            payload = json.loads(default_values)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=422, detail="default_values 必须是合法 JSON") from exc
-        if not isinstance(payload, dict):
-            raise HTTPException(status_code=422, detail="default_values 必须是 JSON 对象")
-        parsed_default_values = payload
+    parsed_default_values = _parse_default_values(default_values)
+    content = await read_limited_request_body(request, settings.bulk_import_max_bytes)
     return import_resource(
         resource_key,
-        await request.body(),
+        content,
         filename=filename,
         mode=mode,
         default_values=parsed_default_values,

@@ -4,10 +4,39 @@ import { Box, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ModalShell } from "@/components/modal-shell";
-import type { BodyModelEntry } from "@/lib/body-map-models";
+import type { BodyModelBounds, BodyModelEntry } from "@/lib/body-map-models";
 
 /** Keep each request under common Xiaomi/K8s Ingress body limits (often 1MB). */
 const CHUNK_SIZE = 512 * 1024;
+type BoundsForm = Record<keyof BodyModelBounds, string>;
+const EMPTY_BOUNDS: BoundsForm = {
+  min_x: "",
+  max_x: "",
+  min_y: "",
+  max_y: "",
+  min_z: "",
+  max_z: "",
+};
+
+function boundsForm(bounds?: BodyModelBounds | null): BoundsForm {
+  if (!bounds) return { ...EMPTY_BOUNDS };
+  return Object.fromEntries(
+    Object.entries(bounds).map(([key, value]) => [key, String(value)]),
+  ) as BoundsForm;
+}
+
+function serializeBounds(form: BoundsForm): string {
+  const entries = Object.entries(form) as Array<[keyof BodyModelBounds, string]>;
+  if (entries.every(([, value]) => value.trim() === "")) return "";
+  if (entries.some(([, value]) => value.trim() === "")) {
+    throw new Error("尺寸边界需要六项全部填写，或全部留空由系统自动识别");
+  }
+  const values = Object.fromEntries(entries.map(([key, value]) => [key, Number(value)]));
+  if (Object.values(values).some((value) => !Number.isFinite(value))) {
+    throw new Error("尺寸边界必须填写有效数值");
+  }
+  return JSON.stringify(values);
+}
 
 type Props = {
   open: boolean;
@@ -36,7 +65,7 @@ async function uploadFileChunked(options: {
   const { modelCode, file, upAxis, unitScale, bounds, onProgress } = options;
   const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
 
-  onProgress(`创建上传会话（共 ${totalChunks} 片）…`);
+  onProgress("正在准备上传…");
   const initResp = await fetch("/api/body-map-models/uploads", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -63,7 +92,7 @@ async function uploadFileChunked(options: {
     const start = index * CHUNK_SIZE;
     const end = Math.min(file.size, start + CHUNK_SIZE);
     const blob = file.slice(start, end);
-    onProgress(`上传分片 ${index + 1}/${chunks}（${Math.round((end / file.size) * 100)}%）…`);
+    onProgress(`正在上传 ${Math.round((end / file.size) * 100)}%…`);
 
     let attempt = 0;
     while (true) {
@@ -79,16 +108,14 @@ async function uploadFileChunked(options: {
       if (attempt >= 3) {
         const detail = await readError(chunkResp);
         throw new Error(
-          chunkResp.status === 404
-            ? `分片上传接口不可用（HTTP 404）。请确认已部署最新前端；若仍失败，网关可能拦截了该路径：${detail}`
-            : detail,
+          chunkResp.status === 404 ? "上传服务暂时不可用，请联系系统管理员检查部署版本" : detail,
         );
       }
-      onProgress(`分片 ${index + 1} 失败，重试 ${attempt}/3…`);
+      onProgress(`上传中断，正在重试（${attempt}/3）…`);
     }
   }
 
-  onProgress("分片已齐，服务端组装并转换中（可能较久）…");
+  onProgress("文件上传完成，正在检查并转换，请稍候…");
   const completeResp = await fetch(`/api/body-map-models/uploads/${uploadId}/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -112,7 +139,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [progress, setProgress] = useState("");
-  const [boundsInput, setBoundsInput] = useState("");
+  const [bounds, setBounds] = useState<BoundsForm>({ ...EMPTY_BOUNDS });
   const [upAxis, setUpAxis] = useState("Y");
   const [unitScale, setUnitScale] = useState("1");
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -128,9 +155,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
       if (!response.ok) throw new Error(await readError(response));
       const payload = (await response.json()) as { entry: BodyModelEntry };
       setEntry(payload.entry);
-      if (payload.entry.bounds) {
-        setBoundsInput(JSON.stringify(payload.entry.bounds, null, 0));
-      }
+      setBounds(boundsForm(payload.entry.bounds));
       setUpAxis(payload.entry.up_axis ?? "Y");
       setUnitScale(String(payload.entry.unit_scale ?? "1"));
     } catch (err) {
@@ -142,7 +167,8 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
 
   useEffect(() => {
     if (!open) return;
-    void load();
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
   }, [load, open]);
 
   async function resetModel() {
@@ -179,7 +205,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
         file,
         upAxis,
         unitScale,
-        bounds: boundsInput.trim(),
+        bounds: serializeBounds(bounds),
         onProgress: setProgress,
       });
       if (payload.source_format === "stp") {
@@ -206,7 +232,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
     <ModalShell
       eyebrow="数模管理"
       title="3D 车身数模"
-      description={`${modelCode}${modelName ? ` · ${modelName}` : ""} — 大文件自动分片上传（绕过网关 413），STP/STEP 由服务端转 GLB。`}
+      description={`${modelName || modelCode}：上传现有车身数模，系统会自动处理大文件和 STEP 转换。`}
       onClose={onClose}
       className="body-map-model-editor-modal"
     >
@@ -217,7 +243,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
             刷新
           </button>
           <small className="muted">
-            支持 GLB/GLTF/STP/STEP；大文件自动 512KB 分片上传，STP 转换可能较久
+            支持 GLB、GLTF、STP 和 STEP 文件；STEP 转换可能需要几分钟
           </small>
         </div>
         {error ? <div className="form-error">{error}</div> : null}
@@ -227,7 +253,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
         <div className="body-map-model-info">
           <div className="body-map-model-info-row">
             <span>当前模型</span>
-            <strong className="mono">{entry?.url ?? "未配置"}</strong>
+            <strong>{entry?.url?.split("/").at(-1) ?? "未配置"}</strong>
           </div>
           <div className="body-map-model-info-row">
             <span>来源</span>
@@ -237,7 +263,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
 
         <div className="body-map-model-form">
           <label className="form-field">
-            <span>Up Axis</span>
+            <span>模型向上方向</span>
             <select value={upAxis} onChange={(e) => setUpAxis(e.target.value)}>
               <option value="Y">Y（默认）</option>
               <option value="Z">Z</option>
@@ -245,7 +271,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
             </select>
           </label>
           <label className="form-field">
-            <span>单位缩放</span>
+            <span>模型尺寸换算</span>
             <input
               type="number"
               step="any"
@@ -253,15 +279,31 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
               onChange={(e) => setUnitScale(e.target.value)}
             />
           </label>
-          <label className="form-field form-field-wide">
-            <span>包围盒 bounds (JSON, 可选)</span>
-            <input
-              type="text"
-              placeholder='{"min_x":-2,"max_x":2,"min_y":0,"max_y":1.6,"min_z":-1,"max_z":1}'
-              value={boundsInput}
-              onChange={(e) => setBoundsInput(e.target.value)}
-            />
-          </label>
+          <fieldset className="form-field form-field-wide body-model-bounds">
+            <legend>模型尺寸边界（可选，全部留空时自动识别）</legend>
+            {(
+              [
+                ["min_x", "左右最小值"],
+                ["max_x", "左右最大值"],
+                ["min_y", "高度最小值"],
+                ["max_y", "高度最大值"],
+                ["min_z", "前后最小值"],
+                ["max_z", "前后最大值"],
+              ] as Array<[keyof BodyModelBounds, string]>
+            ).map(([key, label]) => (
+              <label key={key}>
+                <span>{label}</span>
+                <input
+                  type="number"
+                  step="any"
+                  value={bounds[key]}
+                  onChange={(event) =>
+                    setBounds((current) => ({ ...current, [key]: event.target.value }))
+                  }
+                />
+              </label>
+            ))}
+          </fieldset>
         </div>
 
         <div className="body-map-model-actions">

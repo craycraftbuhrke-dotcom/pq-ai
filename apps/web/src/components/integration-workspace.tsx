@@ -196,6 +196,96 @@ function statusClass(status: string): string {
   return "integration-pending";
 }
 
+const BUSINESS_FIELD_LABELS: Record<string, string> = {
+  run_no: "生产记录编号",
+  body_no: "生产车号",
+  factory_code: "工厂",
+  vehicle_model_code: "车型",
+  color_code: "颜色",
+  shift: "班次",
+  started_at: "开始时间",
+  completed_at: "完成时间",
+  batch_no: "材料批次号",
+  material_code: "材料代码",
+  material_name: "材料名称",
+  material_type: "材料类型",
+  supplier: "供应商",
+  characteristic_results: "材料检测结果",
+  result_no: "结果编号",
+  characteristic_code: "材料特性",
+  method_code: "检测方法",
+  method_version: "方法版本",
+  result_value: "检测结果",
+  unit: "单位",
+  tested_at: "检测时间",
+  tested_by: "检测人员",
+  data_no: "质量数据编号",
+  production_run_no: "生产记录编号",
+  measurement_point_code: "测量点",
+  quality_type: "质量指标类型",
+  measured_at: "检测时间",
+  metrics: "检测结果",
+  metric_code: "指标",
+  metric_name: "指标名称",
+  raw_value: "原始值",
+  process_stage: "喷涂工序",
+  sampled_at: "采集时间",
+  parameters: "实际参数",
+  parameter_code: "参数",
+  actual_value: "实际值",
+  source_system: "数据来源",
+  program_version: "程序版本",
+  executed_checksum: "执行文件校验",
+  segments: "轨迹段",
+  segment_no: "轨迹段号",
+  actual_speed: "实际速度",
+  speed_unit: "速度单位",
+  trigger_state: "喷涂触发状态",
+};
+
+type BusinessRow = { label: string; value: string };
+
+function businessValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "未填写";
+  if (typeof value === "boolean") return value ? "是" : "否";
+  const text = String(value);
+  if (text.includes("T") && !Number.isNaN(new Date(text).getTime())) {
+    return new Date(text).toLocaleString("zh-CN");
+  }
+  return sharedStatusLabel(text);
+}
+
+function businessRows(value: unknown, prefix = ""): BusinessRow[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => businessRows(item, `${prefix}第 ${index + 1} 项 · `));
+  }
+  if (!value || typeof value !== "object") {
+    return [{ label: prefix.replace(/ · $/, "") || "内容", value: businessValue(value) }];
+  }
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, item], index) => {
+    const label = `${prefix}${BUSINESS_FIELD_LABELS[key] ?? `扩展信息 ${index + 1}`}`;
+    if (item && typeof item === "object") return businessRows(item, `${label} · `);
+    return [{ label, value: businessValue(item) }];
+  });
+}
+
+function BusinessPayloadTable({ title, value }: { title: string; value: unknown }) {
+  const rows = businessRows(value);
+  return (
+    <section className="integration-business-table">
+      <h4>{title}</h4>
+      <dl>
+        {rows.map((row, index) => (
+          <div key={`${row.label}-${index}`}>
+            <dt>{row.label}</dt>
+            <dd>{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 export function IntegrationWorkspace({ embedded = false }: { embedded?: boolean } = {}) {
   const [tab, setTab] = useState<Tab>("events");
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -253,7 +343,7 @@ export function IntegrationWorkspace({ embedded = false }: { embedded?: boolean 
       );
       setSelectedEventId((current) => current || nextEvents[0]?.id || "");
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "集成中心加载失败");
+      setError(loadError instanceof Error ? loadError.message : "外部数据页面加载失败");
     } finally {
       setLoading(false);
     }
@@ -324,7 +414,7 @@ export function IntegrationWorkspace({ embedded = false }: { embedded?: boolean 
         body: JSON.stringify(body),
       });
       setEndpointModal(undefined);
-      showSuccess(endpointModal?.id ? "集成端点已更新" : "集成端点已创建");
+      showSuccess(endpointModal?.id ? "外部系统连接已更新" : "外部系统连接已创建");
       await reload();
     } catch (operationError) {
       showError(operationError);
@@ -334,7 +424,7 @@ export function IntegrationWorkspace({ embedded = false }: { embedded?: boolean 
   }
 
   function deleteEndpoint(endpoint: Endpoint) {
-    showError(new Error(`集成端点 ${endpoint.code} 不能物理删除。${physicalDeleteDisabledMessage}`));
+    showError(new Error(`外部系统连接 ${endpoint.code} 不能物理删除。${physicalDeleteDisabledMessage}`));
   }
 
   function bulkResult(message: string, type: "success" | "error") {
@@ -401,7 +491,7 @@ export function IntegrationWorkspace({ embedded = false }: { embedded?: boolean 
         <div className="page-actions">
           <BulkDataActions
             resourceKey={tab === "events" ? "integrations.events" : "integrations.endpoints"}
-            resourceLabel={tab === "events" ? "集成事件" : "集成端点"}
+            resourceLabel={tab === "events" ? "数据接收任务" : "外部系统连接"}
             disabled={loading || Boolean(submitting)}
             onImported={reload}
             onResult={bulkResult}
@@ -417,27 +507,27 @@ export function IntegrationWorkspace({ embedded = false }: { embedded?: boolean 
       {notice ? <button className="message-banner message-success" onClick={() => setNotice("")}>{notice}<X /></button> : null}
 
       <section className="module-stat-strip">
-        <article><span>集成端点</span><strong>{summary?.endpoints ?? 0}</strong><small>{summary?.active_endpoints ?? 0} 个已启用</small></article>
+        <article><span>外部系统连接</span><strong>{summary?.endpoints ?? 0}</strong><small>{summary?.active_endpoints ?? 0} 个已启用</small></article>
         <article><span>累计事件</span><strong>{summary?.events ?? 0}</strong><small>自动接收并映射业务数据</small></article>
         <article><span>处理成功</span><strong>{summary?.events_by_status.SUCCEEDED ?? 0}</strong><small>已落入业务数据表</small></article>
-        <article><span>失败 / 需人工处理</span><strong>{summary?.failed_events ?? 0}</strong><small>支持人工重放</small></article>
+        <article><span>失败 / 需人工处理</span><strong>{summary?.failed_events ?? 0}</strong><small>支持人工再次处理</small></article>
       </section>
 
       <section className="panel integration-workspace">
         <div className="master-tabs">
-          <button className={tab === "events" ? "active" : ""} onClick={() => setTab("events")}>事件任务</button>
-          <button className={tab === "endpoints" ? "active" : ""} onClick={() => setTab("endpoints")}>集成端点</button>
-          <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索端点或事件" /></label>
+          <button className={tab === "events" ? "active" : ""} onClick={() => setTab("events")}>数据任务</button>
+          <button className={tab === "endpoints" ? "active" : ""} onClick={() => setTab("endpoints")}>外部系统连接</button>
+          <label className="master-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索连接或任务" /></label>
           {tab === "events" ? <select className="integration-filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">全部状态</option>{["PENDING", "SUCCEEDED", "FAILED", "DEAD_LETTER"].map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}</select> : <button className="button button-primary" onClick={() => openEndpoint()}><Plus /> 新建端点</button>}
         </div>
 
         {tab === "events" ? <div className="integration-grid">
           <form className="integration-event-form" onSubmit={submitEvent}>
-            <div className="program-subheading"><div><span className="eyebrow">提交对接事件</span><h3>提交集成事件</h3></div><PlugZap /></div>
+            <div className="program-subheading"><div><span className="eyebrow">手工接收数据</span><h3>提交数据接收任务</h3></div><PlugZap /></div>
             <div className="ai-form-stack">
-              <label className="form-field"><span>集成端点 <b>*</b></span><select required value={eventEndpointId} onChange={(event) => setEventEndpointId(event.target.value)}>{endpoints.filter((item) => item.is_active).map((endpoint) => <option value={endpoint.id} key={endpoint.id}>{endpoint.code} · {endpoint.name}</option>)}</select></label>
-              <label className="form-field"><span>事件类型 <b>*</b></span><select value={eventType} onChange={(event) => changeEventType(event.target.value)}>{eventTypes.map((value) => <option value={value} key={value}>{sharedStatusLabel(value)}</option>)}</select></label>
-              <label className="form-field"><span>来源事件编号（防重复） <b>*</b></span><input required value={sourceEventId} onChange={(event) => setSourceEventId(event.target.value)} placeholder="例如 MES-20260611-0001" /></label>
+              <label className="form-field"><span>外部系统连接 <b>*</b></span><select required value={eventEndpointId} onChange={(event) => setEventEndpointId(event.target.value)}>{endpoints.filter((item) => item.is_active).map((endpoint) => <option value={endpoint.id} key={endpoint.id}>{endpoint.code} · {endpoint.name}</option>)}</select></label>
+              <label className="form-field"><span>数据类型 <b>*</b></span><select value={eventType} onChange={(event) => changeEventType(event.target.value)}>{eventTypes.map((value) => <option value={value} key={value}>{sharedStatusLabel(value)}</option>)}</select></label>
+              <label className="form-field"><span>来源记录编号（防止重复导入） <b>*</b></span><input required value={sourceEventId} onChange={(event) => setSourceEventId(event.target.value)} placeholder="例如 MES-20260611-0001" /></label>
               <label className="form-field form-field-wide"><span>事件数据明细 <b>*</b></span><IntegrationEventPayloadEditor eventType={eventType} value={eventPayload} onChange={setEventPayload} /></label>
               <label className="checkbox-field"><input type="checkbox" checked={processImmediately} onChange={(event) => setProcessImmediately(event.target.checked)} />接收后立即处理</label>
               <button className="button button-primary" disabled={!eventEndpointId || !sourceEventId || submitting === "event"}>{submitting === "event" ? <LoaderCircle className="spin" /> : <Play />} 接收并处理</button>
@@ -446,24 +536,27 @@ export function IntegrationWorkspace({ embedded = false }: { embedded?: boolean 
           <div className="integration-event-area">
             <div className="integration-event-list">
               {filteredEvents.map((item) => <button key={item.id} className={`integration-event-card ${item.id === selectedEventId ? "selected" : ""}`} onClick={() => setSelectedEventId(item.id)}><span className={`integration-status ${statusClass(item.status)}`}>{statusLabel(item.status)}</span><strong>{sharedStatusLabel(item.event_type)}</strong><small>{item.event_no}</small><span>尝试 {item.attempt_count}/{item.max_attempts} · {new Date(item.created_at).toLocaleString("zh-CN")}</span>{item.last_error ? <em>{item.last_error}</em> : null}</button>)}
-              {!filteredEvents.length ? <div className="master-empty"><PlugZap /> 暂无集成事件</div> : null}
+              {!filteredEvents.length ? <div className="master-empty"><PlugZap /> 暂无数据接收任务</div> : null}
             </div>
             {selectedEvent ? <div className="integration-detail">
               <div className="program-subheading"><div><span className="eyebrow">事件详情</span><h3>{selectedEvent.source_event_id}</h3></div><span className={`integration-status ${statusClass(selectedEvent.status)}`}>{statusLabel(selectedEvent.status)}</span></div>
-              <div className="integration-detail-meta"><span>事件编号 <b>{selectedEvent.event_no}</b></span><span>尝试次数 <b>{selectedEvent.attempt_count}/{selectedEvent.max_attempts}</b></span><span>处理时间 <b>{selectedEvent.processed_at ? new Date(selectedEvent.processed_at).toLocaleString("zh-CN") : "—"}</b></span></div>
+              <div className="integration-detail-meta"><span>任务编号 <b>{selectedEvent.event_no}</b></span><span>尝试次数 <b>{selectedEvent.attempt_count}/{selectedEvent.max_attempts}</b></span><span>处理时间 <b>{selectedEvent.processed_at ? new Date(selectedEvent.processed_at).toLocaleString("zh-CN") : "—"}</b></span></div>
               {selectedEvent.last_error ? <div className="integration-error"><CircleAlert />{selectedEvent.last_error}</div> : null}
-              <div className="integration-json-grid"><div><span>原始事件负载</span><pre>{JSON.stringify(selectedEvent.payload, null, 2)}</pre></div><div><span>业务映射结果</span><pre>{JSON.stringify(selectedEvent.mapped_payload ?? {}, null, 2)}</pre></div></div>
+              <div className="integration-business-grid">
+                <BusinessPayloadTable title="接收到的业务内容" value={selectedEvent.payload} />
+                <BusinessPayloadTable title="系统识别结果" value={selectedEvent.mapped_payload ?? {}} />
+              </div>
               {selectedEvent.status === "PENDING" || selectedEvent.status === "FAILED" ? <div className="ai-workflow-actions"><button className="button button-primary" onClick={() => void operateEvent(selectedEvent, "process")}><Play /> 处理任务</button></div> : null}
-              {selectedEvent.status === "DEAD_LETTER" || selectedEvent.status === "FAILED" ? <div className="ai-workflow-actions"><button className="button button-secondary" onClick={() => void operateEvent(selectedEvent, "replay")}><RotateCcw /> 重放事件</button></div> : null}
-              {selectedEvent.status === "SUCCEEDED" ? <div className="integration-success-box"><CheckCircle2 />事件已成功映射并写入业务表</div> : null}
+              {selectedEvent.status === "DEAD_LETTER" || selectedEvent.status === "FAILED" ? <div className="ai-workflow-actions"><button className="button button-secondary" onClick={() => void operateEvent(selectedEvent, "replay")}><RotateCcw /> 再次处理</button></div> : null}
+              {selectedEvent.status === "SUCCEEDED" ? <div className="integration-success-box"><CheckCircle2 />事件已成功整理并保存为业务数据</div> : null}
             </div> : null}
           </div>
         </div> : null}
 
-        {tab === "endpoints" ? <div className="master-table-wrap"><table className="master-table integration-endpoint-table"><thead><tr><th>端点</th><th>系统类型</th><th>方向</th><th>连接配置</th><th>最近成功</th><th>状态</th><th>操作</th></tr></thead><tbody>{filteredEndpoints.map((endpoint) => <tr key={endpoint.id}><td><strong>{endpoint.code}</strong><br /><small>{endpoint.name}</small></td><td>{sharedStatusLabel(endpoint.system_type)}</td><td>{sharedStatusLabel(endpoint.direction)}</td><td>{endpoint.base_url ?? "由现场适配器推送"} · {sharedStatusLabel(endpoint.auth_type)}</td><td>{endpoint.last_success_at ? new Date(endpoint.last_success_at).toLocaleString("zh-CN") : "—"}</td><td><span className={`record-status ${endpoint.is_active ? "status-on" : "status-off"}`}>{endpoint.is_active ? "启用" : "停用"}</span></td><td><div className="row-actions"><button className="icon-button" title="查看或编辑" aria-label="查看或编辑集成端点" onClick={() => openEndpoint(endpoint)}><Pencil aria-hidden="true" /></button><button className="icon-button icon-button-danger" title="删除" aria-label="删除集成端点" onClick={() => void deleteEndpoint(endpoint)} disabled={submitting === `delete-${endpoint.id}`}><Trash2 aria-hidden="true" /></button></div></td></tr>)}</tbody></table>{!filteredEndpoints.length ? <div className="master-empty"><PlugZap /> 暂无集成端点</div> : null}</div> : null}
+        {tab === "endpoints" ? <div className="master-table-wrap"><table className="master-table integration-endpoint-table"><thead><tr><th>端点</th><th>系统类型</th><th>方向</th><th>连接配置</th><th>最近成功</th><th>状态</th><th>操作</th></tr></thead><tbody>{filteredEndpoints.map((endpoint) => <tr key={endpoint.id}><td><strong>{endpoint.code}</strong><br /><small>{endpoint.name}</small></td><td>{sharedStatusLabel(endpoint.system_type)}</td><td>{sharedStatusLabel(endpoint.direction)}</td><td>{endpoint.base_url ?? "由现场数据程序推送"} · {sharedStatusLabel(endpoint.auth_type)}</td><td>{endpoint.last_success_at ? new Date(endpoint.last_success_at).toLocaleString("zh-CN") : "—"}</td><td><span className={`record-status ${endpoint.is_active ? "status-on" : "status-off"}`}>{endpoint.is_active ? "启用" : "停用"}</span></td><td><div className="row-actions"><button className="icon-button" title="查看或编辑" aria-label="查看或编辑外部系统连接" onClick={() => openEndpoint(endpoint)}><Pencil aria-hidden="true" /></button><button className="icon-button icon-button-danger" title="删除" aria-label="删除外部系统连接" onClick={() => void deleteEndpoint(endpoint)} disabled={submitting === `delete-${endpoint.id}`}><Trash2 aria-hidden="true" /></button></div></td></tr>)}</tbody></table>{!filteredEndpoints.length ? <div className="master-empty"><PlugZap /> 暂无外部系统连接</div> : null}</div> : null}
       </section>
 
-      {endpointModal !== undefined ? <ModalShell eyebrow="对接端点" title={endpointModal?.id ? "编辑集成端点" : "新建集成端点"} description="统一维护集成端点的连接信息、认证方式和非敏感配置。" onClose={closeEndpointModal} busy={endpointBusy}><form onSubmit={saveEndpoint}><div className="form-grid"><EndpointInput label="端点代码" value={endpointForm.code} onChange={(value) => setEndpointForm({ ...endpointForm, code: value })} required /><EndpointInput label="端点名称" value={endpointForm.name} onChange={(value) => setEndpointForm({ ...endpointForm, name: value })} required /><EndpointSelect label="系统类型" value={endpointForm.system_type} onChange={(value) => setEndpointForm({ ...endpointForm, system_type: value })} options={["MES", "QMS", "ROBOT", "MATERIAL", "MEASUREMENT"]} /><EndpointSelect label="数据方向" value={endpointForm.direction} onChange={(value) => setEndpointForm({ ...endpointForm, direction: value })} options={["INBOUND", "OUTBOUND", "BIDIRECTIONAL"]} /><EndpointInput label="基础地址" value={endpointForm.base_url} onChange={(value) => setEndpointForm({ ...endpointForm, base_url: value })} /><EndpointSelect label="认证方式" value={endpointForm.auth_type} onChange={(value) => setEndpointForm({ ...endpointForm, auth_type: value })} options={["API_KEY", "OAUTH2", "BASIC", "NONE"]} /><label className="form-field form-field-wide"><span>端点参数配置</span><JsonObjectEditor value={endpointForm.config} onChange={(value) => setEndpointForm({ ...endpointForm, config: value })} keyLabel="配置项" valueLabel="配置值" addLabel="新增配置项" /></label><label className="form-field"><span>状态</span><span className="checkbox-field"><input type="checkbox" checked={endpointForm.is_active} onChange={(event) => setEndpointForm({ ...endpointForm, is_active: event.target.checked })} />启用端点</span></label></div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeEndpointModal} disabled={endpointBusy}>取消</button><button className="button button-primary" disabled={endpointBusy}>{endpointBusy ? <LoaderCircle className="spin" aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}{endpointBusy ? "正在保存" : "保存端点"}</button></div></form></ModalShell> : null}
+      {endpointModal !== undefined ? <ModalShell eyebrow="外部系统连接" title={endpointModal?.id ? "编辑外部系统连接" : "新建外部系统连接"} description="统一维护外部系统连接的连接信息、认证方式和非敏感配置。" onClose={closeEndpointModal} busy={endpointBusy}><form onSubmit={saveEndpoint}><div className="form-grid"><EndpointInput label="连接代码" value={endpointForm.code} onChange={(value) => setEndpointForm({ ...endpointForm, code: value })} required /><EndpointInput label="连接名称" value={endpointForm.name} onChange={(value) => setEndpointForm({ ...endpointForm, name: value })} required /><EndpointSelect label="系统类型" value={endpointForm.system_type} onChange={(value) => setEndpointForm({ ...endpointForm, system_type: value })} options={["MES", "QMS", "ROBOT", "MATERIAL", "MEASUREMENT"]} /><EndpointSelect label="数据方向" value={endpointForm.direction} onChange={(value) => setEndpointForm({ ...endpointForm, direction: value })} options={["INBOUND", "OUTBOUND", "BIDIRECTIONAL"]} /><EndpointInput label="基础地址" value={endpointForm.base_url} onChange={(value) => setEndpointForm({ ...endpointForm, base_url: value })} /><EndpointSelect label="认证方式" value={endpointForm.auth_type} onChange={(value) => setEndpointForm({ ...endpointForm, auth_type: value })} options={["API_KEY", "OAUTH2", "BASIC", "NONE"]} /><label className="form-field form-field-wide"><span>连接补充配置</span><JsonObjectEditor value={endpointForm.config} onChange={(value) => setEndpointForm({ ...endpointForm, config: value })} keyLabel="配置项" valueLabel="配置值" addLabel="新增配置项" /></label><label className="form-field"><span>状态</span><span className="checkbox-field"><input type="checkbox" checked={endpointForm.is_active} onChange={(event) => setEndpointForm({ ...endpointForm, is_active: event.target.checked })} />启用此连接</span></label></div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={closeEndpointModal} disabled={endpointBusy}>取消</button><button className="button button-primary" disabled={endpointBusy}>{endpointBusy ? <LoaderCircle className="spin" aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}{endpointBusy ? "正在保存" : "保存连接"}</button></div></form></ModalShell> : null}
     </div>
   );
 }
@@ -483,7 +576,7 @@ function IntegrationEventPayloadEditor({ eventType, value, onChange }: { eventTy
   if (eventType === "MES_PRODUCTION_RUN_UPSERT") {
     return (
       <div className="modal-section-grid">
-        <PayloadInput label="生产事件编号" value={String(payload.run_no ?? "")} onChange={(nextValue) => setField("run_no", nextValue)} />
+        <PayloadInput label="生产任务编号" value={String(payload.run_no ?? "")} onChange={(nextValue) => setField("run_no", nextValue)} />
         <PayloadInput label="车身号" value={String(payload.body_no ?? "")} onChange={(nextValue) => setField("body_no", nextValue)} />
         <PayloadInput label="工厂代码" value={String(payload.factory_code ?? "")} onChange={(nextValue) => setField("factory_code", nextValue)} />
         <PayloadInput label="车型代码" value={String(payload.vehicle_model_code ?? "")} onChange={(nextValue) => setField("vehicle_model_code", nextValue)} />
@@ -528,7 +621,7 @@ function IntegrationEventPayloadEditor({ eventType, value, onChange }: { eventTy
       <div className="structured-editor">
         <div className="modal-section-grid">
           <PayloadInput label="数据编号" value={String(payload.data_no ?? "")} onChange={(nextValue) => setField("data_no", nextValue)} />
-          <PayloadInput label="生产事件编号" value={String(payload.production_run_no ?? "")} onChange={(nextValue) => setField("production_run_no", nextValue)} />
+          <PayloadInput label="生产任务编号" value={String(payload.production_run_no ?? "")} onChange={(nextValue) => setField("production_run_no", nextValue)} />
           <PayloadInput label="测量点代码" value={String(payload.measurement_point_code ?? "")} onChange={(nextValue) => setField("measurement_point_code", nextValue)} />
           <PayloadInput label="质量类型" value={String(payload.quality_type ?? "")} onChange={(nextValue) => setField("quality_type", nextValue)} />
           <PayloadInput label="测量时间" type="datetime-local" value={String(payload.measured_at ?? "")} onChange={(nextValue) => setField("measured_at", nextValue)} />
@@ -551,7 +644,7 @@ function IntegrationEventPayloadEditor({ eventType, value, onChange }: { eventTy
     return (
       <div className="structured-editor">
         <div className="modal-section-grid">
-          <PayloadInput label="生产事件编号" value={String(payload.production_run_no ?? "")} onChange={(nextValue) => setField("production_run_no", nextValue)} />
+          <PayloadInput label="生产任务编号" value={String(payload.production_run_no ?? "")} onChange={(nextValue) => setField("production_run_no", nextValue)} />
           <PayloadInput label="工序" value={String(payload.process_stage ?? "")} onChange={(nextValue) => setField("process_stage", nextValue)} />
           <PayloadInput label="采样时间" type="datetime-local" value={String(payload.sampled_at ?? "")} onChange={(nextValue) => setField("sampled_at", nextValue)} />
         </div>
@@ -573,7 +666,7 @@ function IntegrationEventPayloadEditor({ eventType, value, onChange }: { eventTy
   return (
     <div className="structured-editor">
       <div className="modal-section-grid">
-        <PayloadInput label="生产事件编号" value={String(payload.production_run_no ?? "")} onChange={(nextValue) => setField("production_run_no", nextValue)} />
+        <PayloadInput label="生产任务编号" value={String(payload.production_run_no ?? "")} onChange={(nextValue) => setField("production_run_no", nextValue)} />
         <PayloadInput label="工序" value={String(payload.process_stage ?? "")} onChange={(nextValue) => setField("process_stage", nextValue)} />
         <PayloadInput label="设备配置版本" value={String(payload.device_configuration_version ?? "")} onChange={(nextValue) => setField("device_configuration_version", nextValue)} />
         <PayloadInput label="轨迹代码" value={String(payload.trajectory_code ?? "")} onChange={(nextValue) => setField("trajectory_code", nextValue)} />

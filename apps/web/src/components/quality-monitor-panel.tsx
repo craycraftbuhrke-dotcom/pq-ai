@@ -65,11 +65,6 @@ const INSTRUMENT_LABELS: Record<string, string> = {
   FISCHER_THICKNESS: "Fischer 膜厚仪",
 };
 
-function getApiKey(): string {
-  const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
-
 function gaugeColor(value: number): string {
   if (value >= 90) return "var(--teal-500)";
   if (value >= 70) return "var(--amber-500)";
@@ -130,7 +125,6 @@ export function QualityMonitorPanel({ embedded = false }: { embedded?: boolean }
     try {
       const resp = await fetch("/api/quality/monitoring/quality-summary", {
         cache: "no-store",
-        headers: { "x-api-key": getApiKey() },
       });
       if (!resp.ok) throw new Error("加载失败");
       setData((await resp.json()) as QualityHealth);
@@ -245,7 +239,7 @@ export function QualityMonitorPanel({ embedded = false }: { embedded?: boolean }
               <article><CircleGauge /><span>测量总数</span><strong>{data.overview.total_measurements}</strong><small>有效 {data.overview.valid_measurements}</small></article>
             </Link>
             <Link className="monitor-stat-link" href="/quality?tab=analytics">
-              <article><CheckCircle2 /><span>已核验</span><strong>{data.overview.verified_measurements}</strong><small>可进入 SPC 与趋势</small></article>
+              <article><CheckCircle2 /><span>已核验</span><strong>{data.overview.verified_measurements}</strong><small>可进入质量趋势</small></article>
             </Link>
             <Link className="monitor-stat-link" href="/quality?tab=measurements&filter=reliability_failed">
               <article><AlertTriangle /><span>核验失败</span><strong>{data.overview.failed_measurements}</strong><small>打开判定筛选</small></article>
@@ -256,9 +250,9 @@ export function QualityMonitorPanel({ embedded = false }: { embedded?: boolean }
           </section>
           <div className="quality-monitor-cta-row">
             <Link className="button button-secondary" href="/quality?tab=measurements&filter=unverified">查看未核验测量</Link>
-            <Link className="button button-secondary" href="/quality?tab=analytics">打开 SPC 与趋势</Link>
+            <Link className="button button-secondary" href="/quality?tab=analytics">打开质量趋势</Link>
             <Link className="button button-secondary" href="/instruments">维护仪器可靠性</Link>
-            <Link className="button button-secondary" href="/ai?tab=predictions">去 AI 预测诊断</Link>
+            <Link className="button button-secondary" href="/ai?tab=predictions">去智能预测与原因排查</Link>
           </div>
 
           <div className="monitor-grid">

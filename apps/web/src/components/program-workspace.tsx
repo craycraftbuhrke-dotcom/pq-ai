@@ -680,6 +680,7 @@ export function ProgramWorkspace({
               resourceKey="process.spray-programs"
               resourceLabel="喷涂程序"
               disabled={loading || submitting}
+              defaultValues={{ factory_id: factoryId || undefined }}
               onImported={reload}
               onResult={bulkResult}
             />
@@ -914,7 +915,7 @@ function renderFields(
     <label className="form-field form-field-wide" key="version-hint"><span>录入提示</span><div className="master-empty">适用车型和适用颜色可暂时留空；若当前版本已对外使用，收缩适用范围需要新建版本，不建议直接在原版本删减。</div></label>,
     field("版本号", "version", form, setForm, { required: true }),
     selectField("版本状态", "status", form, setForm, Object.entries(statusLabels)),
-    selectField("来源类型", "source_type", form, setForm, [["MANUAL", "人工配置"], ["AI", "AI 推荐"], ["IMPORT", "外部导入"]]),
+    selectField("来源类型", "source_type", form, setForm, [["MANUAL", "人工配置"], ["AI", "系统建议"], ["IMPORT", "外部导入"]]),
     field("审批人", "approved_by", form, setForm),
     selectField("适用车型（可多选）", "vehicle_model_ids", form, setForm, relationOptions(refs.vehicleModels), true, false),
     selectField("适用颜色（可多选）", "color_ids", form, setForm, relationOptions(refs.colors), true, false),

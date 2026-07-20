@@ -26,13 +26,13 @@ trap cleanup EXIT INT TERM
 API_PID=$!
 
 for _ in $(seq 1 30); do
-  if curl -fsS -H "x-api-key: $API_KEY" "http://127.0.0.1:$API_PORT/api/v1/health" >/dev/null; then
+  if curl -fsS "http://127.0.0.1:$API_PORT/api/v1/health/ready" >/dev/null; then
     break
   fi
   sleep 1
 done
 
-if ! curl -fsS -H "x-api-key: $API_KEY" "http://127.0.0.1:$API_PORT/api/v1/health" >/dev/null; then
+if ! curl -fsS "http://127.0.0.1:$API_PORT/api/v1/health/ready" >/dev/null; then
   echo "API 启动失败，请检查 MySQL 与端口 $API_PORT。" >&2
   exit 1
 fi

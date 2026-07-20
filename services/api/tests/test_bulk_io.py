@@ -1,8 +1,17 @@
+import asyncio
+import csv
 from datetime import UTC, datetime
+from io import StringIO
+import re
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from starlette.requests import Request
 
+from app.db.base import Base
+from app.services.request_body import read_limited_request_body
 from app.api.routes.factories import create_factory
 from app.api.routes.master_data import (
     bind_factory_vehicle_model,
@@ -24,8 +33,14 @@ from app.models.domain import (
     Brush,
     BrushParameter,
     BrushPointContribution,
+    Color,
     Factory,
+    MeasurementPoint,
+    MeasurementPoint3DLayout,
+    MeasurementPointLayout,
     ProductionRun,
+    ProgramColor,
+    ProgramVehicleModel,
     QualityMeasurement,
     QualityMetricValue,
     SprayProgramVersion,
@@ -47,7 +62,13 @@ from app.schemas.process import (
     SprayProgramCreate,
     SprayProgramVersionCreate,
 )
-from app.services.bulk_io import export_resource, import_resource, render_template
+from app.services.bulk_io import (
+    RESOURCES,
+    describe_bulk_columns,
+    export_resource,
+    import_resource,
+    render_template,
+)
 from tests.schema_guard import create_transient_test_schema
 
 
@@ -55,6 +76,75 @@ def build_session() -> Session:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     create_transient_test_schema(engine)
     return Session(engine)
+
+
+def test_bulk_request_stream_stops_as_soon_as_limit_is_exceeded() -> None:
+    receive_calls = 0
+    messages = iter(
+        [
+            {"type": "http.request", "body": b"1234", "more_body": True},
+            {"type": "http.request", "body": b"5678", "more_body": True},
+            {"type": "http.request", "body": b"should-not-be-read", "more_body": False},
+        ]
+    )
+
+    async def receive():
+        nonlocal receive_calls
+        receive_calls += 1
+        return next(messages)
+
+    request = Request({"type": "http", "method": "POST", "path": "/bulk", "headers": []}, receive)
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(read_limited_request_body(request, 6))
+    assert exc_info.value.status_code == 413
+    assert receive_calls == 2
+
+
+def test_every_orm_table_has_bulk_support_or_a_governed_exclusion() -> None:
+    governed_exclusions = {
+        "api_key",
+        "app_user",
+        "audit_log",
+        "closed_loop_evaluation",
+        "controlled_trial",
+        "dataset_snapshot",
+        "dataset_split_member",
+        "diagnosis_result",
+        "measurement_repeat_reading",
+        "model_acceptance_decision",
+        "model_acceptance_policy",
+        "model_applicability_scope",
+        "model_artifact",
+        "model_ood_policy",
+        "model_validation_fold",
+        "model_version",
+        "path_segment_execution",
+        "permission",
+        "point_feature_snapshot",
+        "prediction_result",
+        "program_rollback_execution",
+        "quality_metric_definition",
+        "quality_metric_value",
+        "recommendation",
+        "recommendation_action",
+        "remote_parameter_snapshot",
+        "remote_program_release",
+        "remote_release_event",
+        "remote_station_connection",
+        "remote_station_reconciliation",
+        "role_code",
+        "role_permission",
+        "training_data_upload",
+        "training_wide_sample",
+        "user_role",
+        "user_session",
+    }
+    orm_tables = {table.name for table in Base.metadata.sorted_tables}
+    bulk_tables = {resource.model.__tablename__ for resource in RESOURCES.values()}
+
+    assert len(orm_tables) == 99
+    assert len(RESOURCES) == 63
+    assert orm_tables - bulk_tables == governed_exclusions
 
 
 def build_quality_bulk_context(db: Session) -> dict[str, str]:
@@ -119,14 +209,17 @@ def build_quality_bulk_context(db: Session) -> dict[str, str]:
         db,
     )
     return {
+        "factory_id": factory.id,
         "factory_code": factory.code,
         "group_id": group.id,
         "group_code": group.code,
+        "color_id": color.id,
         "color_code": color.code,
         "point_id": point.id,
         "point_code": point.code,
         "run_id": run.id,
         "run_no": run.run_no,
+        "vehicle_id": vehicle.id,
         "vehicle_code": vehicle.code,
     }
 
@@ -135,7 +228,135 @@ def test_bulk_template_contains_import_headers() -> None:
     response = render_template("master.factories", "csv")
     content = response.body.decode("utf-8-sig")
 
-    assert "id,code,name,site_owner,remark,is_active" in content
+    assert content.splitlines()[0] == "业务代码,名称,现场调试负责人,备注,是否启用"
+    assert "id" not in content.splitlines()[0].lower()
+
+
+def test_template_hides_fields_supplied_by_current_page_context() -> None:
+    response = render_template(
+        "process.production-runs",
+        "csv",
+        default_values={
+            "factory_id": "factory-context",
+            "vehicle_model_id": "model-context",
+            "color_id": "color-context",
+        },
+    )
+    header = response.body.decode("utf-8-sig").splitlines()[0]
+
+    assert "工厂" not in header
+    assert "车型" not in header
+    assert "颜色" not in header
+    assert "生产记录编号" in header
+
+
+@pytest.mark.parametrize("resource_key", sorted(RESOURCES))
+def test_every_upload_template_uses_unique_chinese_headers(resource_key: str) -> None:
+    response = render_template(resource_key, "csv")
+    content = response.body.decode("utf-8-sig")
+    headers = next(csv.reader(StringIO(content)))
+
+    assert headers
+    assert len(headers) == len(set(headers))
+    assert all(re.search(r"[\u4e00-\u9fff]", header) for header in headers)
+    assert all(header.lower() != "id" for header in headers)
+
+
+@pytest.mark.parametrize(
+    "resource_key",
+    sorted(key for key in RESOURCES if key != "quality.measurements"),
+)
+def test_general_upload_template_headers_do_not_contain_internal_english_names(resource_key: str) -> None:
+    response = render_template(resource_key, "csv")
+    headers = next(csv.reader(StringIO(response.body.decode("utf-8-sig"))))
+
+    assert all(not re.search(r"[A-Za-z_]", header) for header in headers)
+
+
+def test_bulk_import_accepts_chinese_headers_and_keeps_legacy_headers_compatible() -> None:
+    db = build_session()
+    chinese_content = (
+        "业务代码,名称,现场调试负责人,备注,是否启用\n"
+        "F97,中文模板工厂,现场负责人,中文模板导入,是\n"
+    )
+
+    created = import_resource(
+        "master.factories",
+        chinese_content.encode("utf-8"),
+        filename="工厂模板.csv",
+        mode="upsert",
+        db=db,
+    )
+
+    assert created["created"] == 1
+    factory = db.query(Factory).filter_by(code="F97").one()
+    assert factory.name == "中文模板工厂"
+    assert factory.is_active is True
+    db.close()
+
+
+def test_bulk_import_resolves_business_codes_and_export_hides_internal_ids() -> None:
+    db = build_session()
+    context = build_quality_bulk_context(db)
+    content = (
+        "业务代码,名称,车型,零件,点位类型,区域,适用质量类型,是否匹配点\n"
+        f"PT2,车顶后部,{context['vehicle_code']},PQ1,质量检测,车顶,橘皮,否\n"
+    )
+
+    result = import_resource(
+        "master.measurement-points",
+        content.encode("utf-8"),
+        filename="测量点模板.csv",
+        mode="upsert",
+        db=db,
+    )
+
+    assert result["created"] == 1
+    point = db.query(MeasurementPoint).filter_by(code="PT2").one()
+    assert point.vehicle_model_id == context["vehicle_id"]
+    assert point.quality_types == ["ORANGE_PEEL"]
+
+    exported = export_resource("master.measurement-points", "csv", db).body.decode("utf-8-sig")
+    header = exported.splitlines()[0]
+    assert "系统记录号" not in header
+    assert context["vehicle_id"] not in exported
+    assert "MQ1 / Model Quality 01" in exported
+    assert "PQ1 / Roof Panel" in exported
+    db.close()
+
+
+def test_bulk_import_and_export_use_human_readable_detail_cells() -> None:
+    db = build_session()
+    content = (
+        "code,name,color_type,feature_values,supplier,tds_uri,msds_uri,coa_uri,doe_uri,digital_standard,remark\n"
+        "C-HUMAN,示例色漆,BASECOAT,金属感=12.5；闪烁=是,供应商甲,,,,,标准板=STD-01,\n"
+    )
+
+    result = import_resource(
+        "master.colors",
+        content.encode("utf-8"),
+        filename="颜色模板.csv",
+        mode="upsert",
+        db=db,
+    )
+
+    assert result["created"] == 1
+    color = db.query(Color).filter_by(code="C-HUMAN").one()
+    assert color.feature_values == {"金属感": 12.5, "闪烁": True}
+    exported = export_resource("master.colors", "csv", db).body.decode("utf-8-sig")
+    assert '"{' not in exported
+    assert "金属感=12.5；闪烁=是" in exported
+    db.close()
+
+
+def test_quality_column_metadata_maps_chinese_labels_to_internal_keys() -> None:
+    columns = describe_bulk_columns("quality.measurements", quality_type="ORANGE_PEEL")
+    by_key = {str(column["key"]): column for column in columns}
+
+    assert by_key["body_no"]["label"] == "车号"
+    assert by_key["measurement_point_code"]["label"] == "测量点代码"
+    assert str(by_key["metric__doi"]["label"]).startswith("橘皮指标：")
+    assert "data_no" not in by_key
 
 
 def test_bulk_import_csv_creates_and_upserts_factory() -> None:
@@ -199,6 +420,156 @@ def test_bulk_export_returns_excel_workbook() -> None:
 
     assert response.media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     assert response.body[:2] == b"PK"
+    db.close()
+
+
+def test_bulk_export_escapes_spreadsheet_formulas() -> None:
+    db = build_session()
+    create_factory(
+        FactoryCreate(code="F96", name="Factory 96", site_owner="=HYPERLINK(\"unsafe\")"),
+        db,
+    )
+
+    response = export_resource("master.factories", "csv", db)
+
+    assert "'=HYPERLINK" in response.body.decode("utf-8-sig")
+    db.close()
+
+
+def test_bulk_export_escapes_formula_like_rendered_detail_values() -> None:
+    db = build_session()
+    db.add(
+        Color(
+            code="C-FORMULA",
+            name="公式防护测试",
+            color_type="BASECOAT",
+            feature_values={"=危险字段": "普通值"},
+        )
+    )
+    db.commit()
+
+    response = export_resource("master.colors", "csv", db)
+
+    assert "'=危险字段=普通值" in response.body.decode("utf-8-sig")
+    db.close()
+
+
+def test_bulk_import_does_not_turn_blank_rows_into_default_only_records() -> None:
+    db = build_session()
+    context = build_quality_bulk_context(db)
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-BLANK",
+            name="空行测试程序",
+            factory_id=context["factory_id"],
+            process_stage="BASECOAT_1",
+            station_code="BC1",
+            station_name="色漆一站",
+        ),
+        db,
+    )
+    result = import_resource(
+        "process.program-versions",
+        (
+            "id,version,status,source_type,is_master_sample,vehicle_model_ids,color_ids\n"
+            ",,,,,,\n"
+        ).encode("utf-8"),
+        filename="空行.csv",
+        mode="upsert",
+        default_values={"spray_program_id": program.id},
+        db=db,
+    )
+
+    assert result["skipped"] == 1
+    assert result["created"] == 0
+    assert result["failed"] == 0
+    db.close()
+
+
+def test_bulk_supports_program_applicability_and_body_map_layouts() -> None:
+    db = build_session()
+    context = build_quality_bulk_context(db)
+    program = create_spray_program(
+        SprayProgramCreate(
+            program_code="PRG-LAYOUT",
+            name="Layout program",
+            factory_id=context["factory_id"],
+            process_stage="BASECOAT_1",
+            station_code="BC1",
+            station_name="色漆一站",
+        ),
+        db,
+    )
+    version = create_program_version(
+        program.id,
+        SprayProgramVersionCreate(version="V1", vehicle_model_ids=[], color_ids=[]),
+        db,
+    )
+
+    model_result = import_resource(
+        "process.program-vehicle-models",
+        f"id,program_version_id,vehicle_model_id\n,{version.id},{context['vehicle_id']}\n".encode(),
+        filename="program-models.csv",
+        mode="upsert",
+        db=db,
+    )
+    color_result = import_resource(
+        "process.program-colors",
+        f"id,program_version_id,color_id\n,{version.id},{context['color_id']}\n".encode(),
+        filename="program-colors.csv",
+        mode="upsert",
+        db=db,
+    )
+    layout_result = import_resource(
+        "quality.body-map-layouts",
+        (
+            "id,measurement_point_id,body_view,layout_x,layout_y,grid_col,grid_row\n"
+            f",{context['point_id']},RIGHT,0.25,0.60,4,8\n"
+        ).encode(),
+        filename="body-map-layouts.csv",
+        mode="upsert",
+        db=db,
+    )
+    layout_3d_result = import_resource(
+        "quality.body-map-3d-layouts",
+        (
+            "id,measurement_point_id,pos_x,pos_y,pos_z,normal_x,normal_y,normal_z,model_asset_key,project_to_2d\n"
+            f",{context['point_id']},1.0,2.0,3.0,0.0,1.0,0.0,default,false\n"
+        ).encode(),
+        filename="body-map-3d-layouts.csv",
+        mode="upsert",
+        db=db,
+    )
+
+    assert model_result["created"] == 1
+    assert color_result["created"] == 1
+    assert layout_result["created"] == 1
+    assert layout_3d_result["created"] == 1
+    assert db.query(ProgramVehicleModel).count() == 1
+    assert db.query(ProgramColor).count() == 1
+    assert db.query(MeasurementPointLayout).count() == 1
+    layout_3d = db.query(MeasurementPoint3DLayout).one()
+    layout_3d.status = "INACTIVE"
+    db.commit()
+
+    reactivated = import_resource(
+        "quality.body-map-3d-layouts",
+        (
+            "id,measurement_point_id,pos_x,pos_y,pos_z,normal_x,normal_y,normal_z,model_asset_key,project_to_2d\n"
+            f",{context['point_id']},1.5,2.5,3.5,0.0,1.0,0.0,default,false\n"
+        ).encode(),
+        filename="body-map-3d-layouts.csv",
+        mode="upsert",
+        db=db,
+    )
+
+    assert reactivated["updated"] == 1
+    assert db.query(MeasurementPoint3DLayout).count() == 1
+    db.refresh(layout_3d)
+    assert layout_3d.status == "ACTIVE"
+    assert layout_3d.pos_x == 1.5
+    assert layout_3d.pos_y == 2.5
+    assert layout_3d.pos_z == 3.5
     db.close()
 
 
@@ -408,12 +779,12 @@ def test_brush_contribution_template_prefills_parent_lineage() -> None:
     content = response.body.decode("utf-8-sig")
     header = content.splitlines()[0]
 
-    assert "factory_code" in header
-    assert "program_code" in header
-    assert "program_version" in header
-    assert "brush_no" in header
-    assert "vehicle_model_code" in header
-    assert "measurement_point_code" in header
+    assert "工厂代码" in header
+    assert "喷涂程序代码" in header
+    assert "程序版本号" in header
+    assert "刷子号" in header
+    assert "车型代码" in header
+    assert "测量点代码" in header
     assert "F-BC" in content
     assert "PRG-BC" in content
     assert "V2" in content
@@ -421,8 +792,8 @@ def test_brush_contribution_template_prefills_parent_lineage() -> None:
     assert "VM-BC" in content
     assert "PT-BC" in content
     assert "Hood Center" in content
-    assert point.id in content
-    assert brush.id in content
+    assert point.id not in content
+    assert brush.id not in content
     db.close()
 
 
@@ -495,15 +866,16 @@ def test_quality_measurement_template_uses_flat_metric_columns() -> None:
     response = render_template("quality.measurements", "csv", db=db, quality_type="ORANGE_PEEL")
     content = response.body.decode("utf-8-sig")
 
-    assert "measurement_group_code" in content
-    assert "measurement_point_code" in content
-    assert "body_no" in content
-    assert "factory_code" in content
-    assert "color_code" in content
-    assert "metric__doi" in content
-    assert "metrics" not in content
-    assert "repeat_readings" not in content
-    assert "data_no" not in content.splitlines()[0]
+    header = content.splitlines()[0]
+    assert "测量编组代码" in header
+    assert "测量点代码" in header
+    assert "车号" in header
+    assert "工厂代码" in header
+    assert "颜色代码" in header
+    assert "DOI" in header
+    assert "metrics" not in header
+    assert "repeat_readings" not in header
+    assert "质量数据编号" not in header
     assert "G1" in content
     assert "PT1" in content
     db.close()

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { apiRequestHeaders, sessionCookieName } from "@/lib/auth-data";
+import { apiRequestHeaders, sessionCookieName, upstreamRequestSignal } from "@/lib/auth-data";
 
 export async function POST(request: Request) {
   const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
@@ -9,6 +9,7 @@ export async function POST(request: Request) {
       method: "POST",
       headers: await apiRequestHeaders(request),
       cache: "no-store",
+      signal: upstreamRequestSignal(request, 2500),
     }).catch(() => undefined);
   }
 

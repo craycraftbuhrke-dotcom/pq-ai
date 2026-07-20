@@ -14,6 +14,7 @@ CREATE TABLE `measurement_point_3d_layout` (
   `normal_y` DOUBLE NULL COMMENT '表面法向 Y（可选）',
   `normal_z` DOUBLE NULL COMMENT '表面法向 Z（可选）',
   `model_asset_key` VARCHAR(120) NULL COMMENT '绑定数模版本/路径键，换模后提示重标定',
+  -- project_to_2d 是 API/批量导入执行指令，仅控制是否同步二维投影，不是持久化字段。
   `row_status` VARCHAR(24) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/INACTIVE；移除仅停用',
   `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',

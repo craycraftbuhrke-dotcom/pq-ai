@@ -37,17 +37,19 @@ type ImportResult = {
 
 type FieldIssue = { field?: string; message: string };
 type RowIssueMap = Record<number, FieldIssue[]>;
-
-function getApiKey(): string {
-  const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
+type ColumnDefinition = {
+  key: string;
+  label: string;
+  kind: string;
+  required: boolean;
+  description?: string;
+};
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, {
     cache: "no-store",
-    headers: { ...init?.headers, "x-api-key": getApiKey() },
     ...init,
+    headers: init?.headers,
   });
   if (resp.status === 204) return undefined as T;
   const payload = (await resp.json().catch(() => ({}))) as T & { detail?: string };
@@ -128,21 +130,21 @@ function validatePreviewRow(row: PreviewRow, columns: string[]): FieldIssue[] {
   const runNo = row.production_run_no?.trim() ?? "";
   const bodyNo = row.body_no?.trim() ?? "";
 
-  if (!pointCode) issues.push({ field: "measurement_point_code", message: "缺少 measurement_point_code" });
-  if (!measuredAt) issues.push({ field: "measured_at", message: "缺少 measured_at" });
+  if (!pointCode) issues.push({ field: "measurement_point_code", message: "请选择测量点" });
+  if (!measuredAt) issues.push({ field: "measured_at", message: "请填写检测时间" });
   if (!runNo && !bodyNo) {
-    issues.push({ field: "body_no", message: "请填写 production_run_no，或填写 body_no" });
+    issues.push({ field: "body_no", message: "请填写生产车号或生产记录编号" });
   }
   if (!runNo && bodyNo && !canAutoCreateRun(row)) {
-    if (!row.factory_code?.trim()) issues.push({ field: "factory_code", message: "自动建档需填写 factory_code" });
+    if (!row.factory_code?.trim()) issues.push({ field: "factory_code", message: "自动建立生产记录前请选择工厂" });
     if (!row.vehicle_model_code?.trim()) {
-      issues.push({ field: "vehicle_model_code", message: "自动建档需填写 vehicle_model_code" });
+      issues.push({ field: "vehicle_model_code", message: "自动建立生产记录前请选择车型" });
     }
-    if (!row.color_code?.trim()) issues.push({ field: "color_code", message: "自动建档需填写 color_code" });
+    if (!row.color_code?.trim()) issues.push({ field: "color_code", message: "自动建立生产记录前请选择颜色" });
   }
 
   const hasMetric = columns.some((col) => col.startsWith("metric__") && (row[col] ?? "").trim() !== "");
-  if (!hasMetric) issues.push({ message: "至少填写 1 个质量指标列（metric__*）" });
+  if (!hasMetric) issues.push({ message: "请至少填写一项检测结果" });
 
   return issues;
 }
@@ -162,13 +164,19 @@ function inferIssueField(message: string): string | undefined {
   return fields.find((field) => message.includes(field));
 }
 
-function issuesFromImportErrors(errors: ImportResult["errors"]): RowIssueMap {
+function issuesFromImportErrors(
+  errors: ImportResult["errors"],
+  columnLabels: Map<string, string>,
+): RowIssueMap {
   const map: RowIssueMap = {};
   for (const err of errors) {
     if (!err.row || err.row < 2) continue;
     const index = err.row - 2;
     const list = map[index] ?? [];
-    list.push({ field: inferIssueField(err.message), message: err.message });
+    const field = inferIssueField(err.message);
+    let message = err.message;
+    for (const [key, label] of columnLabels) message = message.replaceAll(key, label);
+    list.push({ field, message });
     map[index] = list;
   }
   return map;
@@ -183,6 +191,7 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
   const { actor } = useAuth();
   const { factoryId, modelId, colorId } = useWorkspaceContext();
   const fileInput = useRef<HTMLInputElement>(null);
+  const qualityTypeRef = useRef<QualityType>("ORANGE_PEEL");
   const [points, setPoints] = useState<ImportResource[]>([]);
   const [runs, setRuns] = useState<ImportResource[]>([]);
   const [factories, setFactories] = useState<ImportResource[]>([]);
@@ -201,6 +210,28 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
   const [notice, setNotice] = useState("");
   const [qualityType, setQualityType] = useState<QualityType>("ORANGE_PEEL");
   const [shiftPrefill, setShiftPrefill] = useState("");
+  const [columnDefinitions, setColumnDefinitions] = useState<ColumnDefinition[]>([]);
+  const [definitionsFor, setDefinitionsFor] = useState<QualityType | null>(null);
+  const [loadingDefinitions, setLoadingDefinitions] = useState(true);
+
+  const prepareQualityTypeChange = useCallback((nextType: QualityType) => {
+    qualityTypeRef.current = nextType;
+    setColumnDefinitions([]);
+    setDefinitionsFor(null);
+    setLoadingDefinitions(true);
+    setFileName("");
+    setPreview([]);
+    setColumns([]);
+    setDirty(false);
+    setEditingCell(null);
+    setRowIssues({});
+    setShowProblemsOnly(false);
+    setResult(null);
+    setError("");
+    setNotice("");
+    if (fileInput.current) fileInput.current.value = "";
+    setQualityType(nextType);
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -223,6 +254,45 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
     })();
   }, []);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const definitions = await apiRequest<ColumnDefinition[]>(
+          `/api/bulk/quality.measurements/columns?quality_type=${qualityType}`,
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        setColumnDefinitions(definitions);
+        setDefinitionsFor(qualityType);
+      } catch {
+        if (controller.signal.aborted) return;
+        setError("加载中文模板说明失败，请刷新页面后重试");
+      } finally {
+        if (!controller.signal.aborted) setLoadingDefinitions(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [qualityType]);
+
+  const definitionsReady =
+    !loadingDefinitions && definitionsFor === qualityType && columnDefinitions.length > 0;
+
+  const columnLabels = useMemo(
+    () => new Map(columnDefinitions.map((column) => [column.key, column.label])),
+    [columnDefinitions],
+  );
+  const columnAliases = useMemo(
+    () =>
+      new Map(
+        columnDefinitions.flatMap((column) => [
+          [column.key, column.key] as const,
+          [column.label, column.key] as const,
+        ]),
+      ),
+    [columnDefinitions],
+  );
+
   const contextCodes = useMemo(() => {
     const factory = factories.find((item) => item.id === factoryId);
     const model = vehicleModels.find((item) => item.id === modelId);
@@ -235,14 +305,17 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
   }, [colorId, colors, factories, factoryId, modelId, vehicleModels]);
 
   const contextSummary = useMemo(() => {
+    const factory = factories.find((item) => item.id === factoryId);
+    const model = vehicleModels.find((item) => item.id === modelId);
+    const color = colors.find((item) => item.id === colorId);
     const parts = [
-      contextCodes.factory_code && `工厂 ${contextCodes.factory_code}`,
-      contextCodes.vehicle_model_code && `车型 ${contextCodes.vehicle_model_code}`,
-      contextCodes.color_code && `颜色 ${contextCodes.color_code}`,
+      factory && `工厂 ${factory.name}`,
+      model && `车型 ${model.name}`,
+      color && `颜色 ${color.name}`,
       shiftPrefill && `班次 ${shiftPrefill}`,
     ].filter(Boolean);
     return parts.length ? parts.join(" · ") : "未设置（可在顶部作业范围选择，或下载后手工填写）";
-  }, [contextCodes, shiftPrefill]);
+  }, [colorId, colors, factories, factoryId, modelId, shiftPrefill, vehicleModels]);
 
   const clearPreview = useCallback((opts?: { openPicker?: boolean; keepNotice?: string }) => {
     setFileName("");
@@ -275,6 +348,10 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
   );
 
   const upload = useCallback(async () => {
+    if (!definitionsReady) {
+      setError("当前质量类型的模板说明仍在加载，请稍候再导入");
+      return;
+    }
     if (!preview.length || !columns.length) return;
     const localIssues = revalidateLocal(preview, columns);
     const localFailed = Object.keys(localIssues).length;
@@ -298,7 +375,6 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
         {
           method: "POST",
           headers: {
-            "x-api-key": getApiKey(),
             "Content-Type": "text/csv; charset=utf-8",
           },
           body: content,
@@ -311,7 +387,7 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
       const data = (await resp.json()) as ImportResult;
       setResult(data);
       if (data.failed > 0) {
-        const mapped = issuesFromImportErrors(data.errors);
+        const mapped = issuesFromImportErrors(data.errors, columnLabels);
         setRowIssues(mapped);
         setShowProblemsOnly(true);
         setError(`导入完成但有 ${data.failed} 行失败。可直接在预览表中改正后再次确认导入，或清除预览后重新上传。`);
@@ -330,9 +406,14 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
     } finally {
       setImporting(false);
     }
-  }, [columns, dirty, fileName, onImported, preview, revalidateLocal]);
+  }, [columnLabels, columns, definitionsReady, dirty, fileName, onImported, preview, revalidateLocal]);
 
   function parseFile(nextFile: File) {
+    if (!definitionsReady) {
+      setError("当前质量类型的模板说明仍在加载，请稍候再选择文件");
+      return;
+    }
+    const fileQualityType = qualityType;
     setFileName(nextFile.name);
     setResult(null);
     setError("");
@@ -341,6 +422,7 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
     setShowProblemsOnly(false);
     const reader = new FileReader();
     reader.onload = (event) => {
+      if (qualityTypeRef.current !== fileQualityType) return;
       const text = event.target?.result as string;
       const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
       if (lines.length < 2) {
@@ -350,7 +432,14 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
         setRowIssues({});
         return;
       }
-      const headers = parseCsvLine(lines[0]);
+      const rawHeaders = parseCsvLine(lines[0]).map((header) => header.trim());
+      const headers = rawHeaders.map((header) => columnAliases.get(header) ?? header);
+      if (new Set(headers).size !== headers.length) {
+        setError("文件中存在重复列，请重新下载中文模板填写");
+        setPreview([]);
+        setColumns([]);
+        return;
+      }
       const rows: PreviewRow[] = [];
       for (let i = 1; i < lines.length; i++) {
         const values = parseCsvLine(lines[i]);
@@ -470,7 +559,7 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
         <div className="quality-import-intro">
           <div>
             <strong>批量上传质量数据</strong>
-            <span>同一份 CSV 填写车号、工厂、车型、颜色与指标；生产事件不存在时自动创建。单条补录请切到「查看与判定」。</span>
+            <span>同一份表格填写车号、测量点与检测结果；工厂、车型和颜色优先使用页面顶部的当前范围。</span>
           </div>
           <Link className="button button-secondary" href="/process?tab=runs">
             补录工序实绩
@@ -514,7 +603,13 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
           <div className="import-setup">
             <label className="form-field">
               <span>质量类型</span>
-              <select value={qualityType} onChange={(event) => setQualityType(event.target.value as QualityType)}>
+              <select
+                value={qualityType}
+                onChange={(event) => {
+                  const nextType = event.target.value as QualityType;
+                  prepareQualityTypeChange(nextType);
+                }}
+              >
                 {QUALITY_TYPE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -534,8 +629,8 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
                 <span>{contextSummary}</span>
               </div>
             </div>
-            <button className="button button-secondary" type="button" onClick={downloadSample}>
-              <Download /> 下载 CSV 模板
+            <button className="button button-secondary" type="button" onClick={downloadSample} disabled={!definitionsReady}>
+              {loadingDefinitions ? <LoaderCircle className="spin" /> : <Download />} {loadingDefinitions ? "正在准备模板" : "下载中文模板"}
             </button>
           </div>
 
@@ -550,7 +645,7 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
                 if (next) parseFile(next);
               }}
             />
-            <button className="import-drop-zone" type="button" onClick={() => fileInput.current?.click()}>
+            <button className="import-drop-zone" type="button" disabled={!definitionsReady} onClick={() => fileInput.current?.click()}>
               <FileSpreadsheet />
               {fileName ? (
                 <>
@@ -561,7 +656,7 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
                 </>
               ) : (
                 <>
-                  <strong>点击选择 CSV 文件</strong>
+                  <strong>点击选择填写好的 CSV 表格</strong>
                   <span>建议先下载模板，再按模板列填写后上传</span>
                 </>
               )}
@@ -580,28 +675,28 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
                 </thead>
                 <tbody>
                   <tr>
-                    <td className="mono">body_no</td>
-                    <td>车号，建议必填；未填生产事件编号时用于自动生成，并参与自动生成 data_no</td>
+                    <td>生产车号</td>
+                    <td>建议必填；未填写生产记录编号时，系统会按车号自动建立并关联生产记录</td>
                   </tr>
                   <tr>
-                    <td className="mono">factory_code / vehicle_model_code / color_code</td>
-                    <td>工厂、车型、颜色代码；生产事件不存在时必填，模板可按作业范围预填</td>
+                    <td>工厂 / 车型 / 颜色</td>
+                    <td>下载模板时自动带入页面顶部的当前范围，一般不需要再次查询或填写</td>
                   </tr>
                   <tr>
-                    <td className="mono">production_run_no</td>
-                    <td>可留空；留空时按 `RUN-车号` 自动创建。已存在则直接关联</td>
+                    <td>生产记录编号</td>
+                    <td>可以留空；系统优先按生产车号查找，找不到时自动建立生产记录</td>
                   </tr>
                   <tr>
-                    <td className="mono">data_no</td>
-                    <td>模板无需填写；后端按 `QM-车号-测量点-质量类型` 自动生成（如 QM-BODY-0001-PT1-OP）</td>
+                    <td>质量数据编号</td>
+                    <td>模板中无需填写，由系统按车号、测量点和检测类型自动生成</td>
                   </tr>
                   <tr>
-                    <td className="mono">shift / production_started_at</td>
+                    <td>班次 / 生产开始时间</td>
                     <td>班次与生产开始时间可选；开始时间留空时回落到测量时间</td>
                   </tr>
                   <tr>
-                    <td className="mono">measured_at + metric__*</td>
-                    <td>测量时间与质量指标数值；模板已带出点位与指标列</td>
+                    <td>检测时间 / 检测结果</td>
+                    <td>模板已按橘皮、色差或膜厚类型带出对应检测列</td>
                   </tr>
                 </tbody>
               </table>
@@ -645,12 +740,12 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
                     className="button button-secondary"
                     type="button"
                     onClick={() => clearPreview({ openPicker: true, keepNotice: "已清除预览，请重新选择文件。" })}
-                    disabled={importing}
+                    disabled={importing || !definitionsReady}
                   >
                     <Eraser />
                     清除并重选
                   </button>
-                  <button className="button button-primary" onClick={() => void upload()} disabled={importing}>
+                  <button className="button button-primary" onClick={() => void upload()} disabled={importing || !definitionsReady}>
                     {importing ? <LoaderCircle className="spin" /> : <Upload />}
                     {importing ? "导入中..." : dirty || problemCount ? "改正后确认导入" : "确认导入"}
                   </button>
@@ -686,7 +781,7 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
                           key={col}
                           className={CORE_COLUMNS.includes(col) || col.startsWith("metric__") ? "" : "col-extra"}
                         >
-                          {col}
+                          {columnLabels.get(col) ?? col}
                         </th>
                       ))}
                       <th>问题</th>
@@ -809,7 +904,7 @@ export function QualityImportPanel({ embedded = false, onImported }: QualityImpo
                         >
                           <Eraser /> 清除预览并重新导入
                         </button>
-                        <button className="button button-primary" type="button" onClick={() => void upload()} disabled={importing}>
+                        <button className="button button-primary" type="button" onClick={() => void upload()} disabled={importing || !definitionsReady}>
                           <Upload /> 改正后再次导入
                         </button>
                       </div>

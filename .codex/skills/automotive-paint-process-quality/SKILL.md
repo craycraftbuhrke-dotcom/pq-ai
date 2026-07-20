@@ -48,6 +48,13 @@ Use this skill for every change that touches process stages, parameters, materia
 27. Runtime MySQL operations must not perform physical `DELETE`, `CREATE`, `DROP`, `ALTER`, `TRUNCATE`, `REPLACE`, or application-authored `SET`. Use disable/archive/status/version workflows.
 28. Web users authenticate through personal username/password sessions stored as HttpOnly cookies. API Keys are reserved for system integration and server-side automation and must never be exposed to browser JavaScript.
 29. Reject or quarantine out-of-scope features before snapshot creation and training.
+30. Treat governed production snapshots and manually uploaded training-wide samples as equal candidate rows. Apply the same target scope, common-feature matrix, independent grouping, temporal split, leakage check, lineage, and model acceptance requirements to both.
+31. Training upload templates must use Chinese headers and form/spreadsheet inputs. Convert human labels to internal feature keys only in backend services; do not ask users for JSON, database IDs, or feature codes.
+32. Any brush parameter change must derive a complete new `SprayProgramVersion`: clone all applicability rows, brushes, parameters, and point contributions, then apply bounded edits. Never mutate the current/approved version for remote publication.
+33. Remote station writes require a strict two-phase workflow: approved release package -> remote staging -> local upper-computer confirmation -> explicit commit -> readback hash verification. Draft, submitted, approved-only, rejected, or failed records must have no production effect.
+34. Use mutual TLS TCP/IP, bounded length-prefixed messages, agent identity, nonce/time replay checks, full-package SHA-256, audit events, and runtime secret references. Never store private keys or credentials in business tables or source.
+35. Keep cloud, virtual-line, and upper-computer snapshots separate. Three-way comparison is read-only and any resolution must use version capture or controlled release.
+36. Do not implement undocumented direct Dürr/robot writes. Production adapters require factory/vendor approval and FAT/SAT; simulator/file-drop modes cannot be presented as verified robot execution without readback.
 
 ## Reference Loading
 
@@ -65,3 +72,5 @@ Use this skill for every change that touches process stages, parameters, materia
 - Database changes include an approved manual SQL workflow reference; code, scripts, Docker, and CI contain no automatic MySQL DDL or migration command, no physical foreign keys, and no runtime physical deletes.
 - Robot/trajectory changes cover device identity, program/path version, checksum matching, target-family contribution, actual execution, and rollback traceability.
 - Material changes cover characteristic semantics, canonical unit, method version, specification source/effective period, stage/target-family applicability, batch result reliability, production-time gate, and feature lineage.
+- Training changes prove source equality, Chinese wide-template conversion, grouped temporal leakage prevention, and per-row lineage.
+- Remote changes prove complete-version immutability, segregation of duties, staging isolation, local confirmation, mTLS transport, readback equality, and rollback traceability.

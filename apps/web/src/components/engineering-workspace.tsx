@@ -3,6 +3,7 @@
 import {
   ClipboardList,
   FileCheck2,
+  FileCog,
   GitBranch,
   LoaderCircle,
   MessageSquarePlus,
@@ -30,6 +31,7 @@ import { useWorkspaceContext } from "@/lib/workspace-context";
 type TabKey =
   | "issues"
   | "routes"
+  | "profiles"
   | "imports"
   | "measurement"
   | "supplier"
@@ -79,7 +81,7 @@ const statusOptions: Record<string, Array<[string, string]>> = {
   route: [["DRAFT", "草稿"], ["APPROVED", "已批准"], ["ACTIVE", "生效"], ["RETIRED", "退役"]],
   task: [["OPEN", "打开"], ["TRIAGE", "分诊"], ["IN_TRIAL", "试验中"], ["WAITING_SUPPLIER", "等待供应商"], ["VERIFIED", "已验证"], ["CLOSED", "关闭"]],
   severity: [["LOW", "低"], ["MEDIUM", "中"], ["HIGH", "高"], ["CRITICAL", "严重"]],
-  importJob: [["PREVIEWED", "已预览"], ["VALIDATED", "已校验"], ["IMPORTED", "已导入"], ["FAILED", "失败"], ["REPLAYED", "已重放"]],
+  importJob: [["PREVIEWED", "已预览"], ["VALIDATED", "已校验"], ["IMPORTING", "正在写入"], ["IMPORTED", "已导入"], ["FAILED", "失败"], ["REPLAYED", "已重放"]],
   supplier: [["SUBMITTED", "已提交"], ["VALIDATED", "已校验"], ["ACCEPTED", "接受"], ["REJECTED", "拒绝"], ["SUPERSEDED", "已替代"]],
   issue: [["OPEN", "打开"], ["WAITING_SUPPLIER", "等待供应商"], ["CONTAINED", "已遏制"], ["CLOSED", "关闭"]],
   approval: [["DRAFT", "草稿"], ["APPROVED", "已批准"], ["ACTIVE", "生效"], ["RETIRED", "退役"]],
@@ -152,6 +154,29 @@ const tabs: Record<TabKey, TabConfig> = {
       { name: "remark", label: "备注", type: "textarea" },
     ],
     table: [["route_code", "路线"], ["name", "名称"], ["version", "版本"], ["status", "状态"], ["bake_strategy", "策略"]],
+  },
+  profiles: {
+    label: "导入配置",
+    endpoint: "file-import-profiles",
+    bulkKey: "engineering.file-import-profiles",
+    bulkLabel: "设备/材料导入配置",
+    icon: FileCog,
+    fields: [
+      { name: "code", label: "配置编号", required: true, placeholder: "例如：DXQ-PATH-V1" },
+      { name: "name", label: "配置名称", required: true, placeholder: "例如：Dürr 轨迹文件" },
+      { name: "version", label: "配置版本", required: true, placeholder: "V1.0" },
+      { name: "domain_type", label: "文件来源", required: true, type: "select", options: [["DURR_DXQ", "Dürr DXQ"], ["DURR_PLC", "Dürr PLC"], ["BYK_COLOR", "BYK 色差仪"], ["BYK_ORANGE_PEEL", "BYK 橘皮仪"], ["FISCHER_THICKNESS", "Fischer 膜厚仪"], ["MATERIAL_COA", "材料 COA"], ["MATERIAL_TDS", "材料 TDS"]] },
+      { name: "parser_type", label: "文件格式", required: true, type: "select", options: [["CSV", "CSV"], ["XLSX", "Excel"], ["DXQ_EXPORT", "Dürr DXQ 导出"]] },
+      { name: "target_resource", label: "写入的数据类型", required: true, type: "select", options: [["robot-governance.path-segments", "Dürr 轨迹路径段"], ["engineering.trajectory-geometries", "轨迹几何与喷涂距离"], ["quality.measurements", "质量测量结果"], ["material-governance.results", "材料批次检测结果"], ["engineering.supplier-submissions", "供应商材料提交"]] },
+      { name: "field_mapping", label: "文件列与系统字段对应关系", required: true, type: "json" },
+      { name: "required_fields", label: "必须填写的系统字段", type: "json" },
+      { name: "validation_rules", label: "数据检查规则", type: "json" },
+      { name: "status", label: "配置状态", type: "select", options: statusOptions.approval },
+      { name: "approved_by", label: "审批人" },
+      { name: "source_uri", label: "原始格式说明地址" },
+      { name: "remark", label: "使用说明", type: "textarea" },
+    ],
+    table: [["code", "配置编号"], ["name", "配置名称"], ["domain_type", "文件来源"], ["version", "版本"], ["status", "状态"]],
   },
   imports: {
     label: "文件导入",
@@ -329,6 +354,7 @@ function emptyTabData(): Record<TabKey, Resource[]> {
   return {
     issues: [],
     routes: [],
+    profiles: [],
     imports: [],
     measurement: [],
     supplier: [],
@@ -457,7 +483,12 @@ function localDateTime(value?: unknown): string {
 function displayValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   if (Array.isArray(value)) return value.map((item) => displayValue(item)).join(", ");
-  if (typeof value === "object") return JSON.stringify(value);
+  if (typeof value === "object") {
+    const count = Array.isArray(value)
+      ? value.length
+      : Object.keys(value as Record<string, unknown>).length;
+    return count ? `共 ${count} 项明细` : "暂无明细";
+  }
   if (String(value).includes("T") && !Number.isNaN(new Date(String(value)).getTime())) {
     return new Date(String(value)).toLocaleString("zh-CN");
   }
@@ -565,7 +596,7 @@ export function EngineeringWorkspace({
   const selectedImportErrors = asRecord(selectedImportJob?.error_report);
   const selectedImportPreviewRows = asRecordArray(selectedImportPreview.preview_rows);
   const selectedImportErrorRows = asRecordArray(selectedImportErrors.errors);
-  const importProfiles = refs.importProfiles;
+  const importProfiles = refs.importProfiles.filter((profile) => profile.status === "ACTIVE");
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -616,7 +647,11 @@ export function EngineeringWorkspace({
         modelVersions,
         predictions,
       });
-      setImportProfileId((current) => current || nextProfiles[0]?.id || "");
+      const firstActiveProfile = nextProfiles.find((profile) => profile.status === "ACTIVE");
+      setImportProfileId((current) => {
+        if (nextProfiles.some((profile) => profile.id === current && profile.status === "ACTIVE")) return current;
+        return firstActiveProfile?.id || "";
+      });
       const nextData = emptyTabData();
       orderedTabs.forEach((key, index) => {
         nextData[key] = resources[index] ?? [];
@@ -761,6 +796,30 @@ export function EngineeringWorkspace({
     }
   }
 
+  async function commitImportJob() {
+    if (!selectedImportJobId || selectedImportJob?.status !== "VALIDATED") return;
+    setSubmitting(true);
+    try {
+      const imported = await request<Resource>(`/api/engineering/file-import-jobs/${selectedImportJobId}/commit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "upsert" }),
+      });
+      const result = asRecord(asRecord(imported.preview_payload).import_result);
+      setMessage({
+        type: imported.status === "IMPORTED" ? "success" : "error",
+        text: imported.status === "IMPORTED"
+          ? `导入完成：新增 ${displayValue(result.created)} 条，更新 ${displayValue(result.updated)} 条。`
+          : "部分数据未能写入，请根据错误报告修正关联数据后重新执行。",
+      });
+      await reload();
+    } catch (error) {
+      setMessage({ type: "error", text: error instanceof Error ? error.message : "确认导入失败" });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function replayImportJob() {
     if (!selectedImportJobId) return;
     setSubmitting(true);
@@ -771,7 +830,12 @@ export function EngineeringWorkspace({
         body: JSON.stringify({ submitted_by: importSubmittedBy || "engineer" }),
       });
       setSelectedImportJobId(replay.id);
-      setMessage({ type: "success", text: "导入任务已重放并生成新的审计记录" });
+      setMessage({
+        type: replay.status === "REPLAYED" ? "success" : "error",
+        text: replay.status === "REPLAYED"
+          ? "已使用原校验数据重新执行写入，并生成新的审计任务。"
+          : "重新执行后仍有失败数据，请查看错误报告。",
+      });
       await reload();
     } catch (error) {
       setMessage({ type: "error", text: error instanceof Error ? error.message : "导入任务重放失败" });
@@ -793,11 +857,13 @@ export function EngineeringWorkspace({
             <RefreshCw className={loading ? "spin" : ""} />
             刷新
           </button>
-          <BulkDataActions resourceKey={config.bulkKey} resourceLabel={config.bulkLabel} disabled={loading || submitting} onImported={reload} onResult={bulkResult} />
-          <button className="button button-primary" onClick={() => openCreate()}>
-            <Plus />
-            新建{config.bulkLabel}
-          </button>
+          {effectiveActive !== "imports" ? <BulkDataActions resourceKey={config.bulkKey} resourceLabel={config.bulkLabel} disabled={loading || submitting} onImported={reload} onResult={bulkResult} /> : null}
+          {effectiveActive !== "imports" ? (
+            <button className="button button-primary" onClick={() => openCreate()}>
+              <Plus />
+              新建{config.bulkLabel}
+            </button>
+          ) : null}
         </div>
       </header>
       ) : (
@@ -806,11 +872,13 @@ export function EngineeringWorkspace({
             <RefreshCw className={loading ? "spin" : ""} />
             刷新
           </button>
-          <BulkDataActions resourceKey={config.bulkKey} resourceLabel={config.bulkLabel} disabled={loading || submitting} onImported={reload} onResult={bulkResult} />
-          <button className="button button-primary" onClick={() => openCreate()}>
-            <Plus />
-            新建{config.bulkLabel}
-          </button>
+          {effectiveActive !== "imports" ? <BulkDataActions resourceKey={config.bulkKey} resourceLabel={config.bulkLabel} disabled={loading || submitting} onImported={reload} onResult={bulkResult} /> : null}
+          {effectiveActive !== "imports" ? (
+            <button className="button button-primary" onClick={() => openCreate()}>
+              <Plus />
+              新建{config.bulkLabel}
+            </button>
+          ) : null}
         </div>
       )}
 
@@ -906,20 +974,22 @@ export function EngineeringWorkspace({
         {effectiveActive === "imports" ? (
           <aside className="engineering-detail-card">
             <SectionHeader
-              eyebrow="文件预览"
-              title="设备/材料文件预览校验"
-              description="选择已审批的导入配置后上传 CSV/XLSX。系统只生成预览、字段映射和错误报告，不会自动写入目标表。"
+              eyebrow="两步安全导入"
+              title="导入设备或材料文件"
+              description="先上传并检查字段、格式和关联数据；全部通过后，再由你确认写入。系统不会跳过校验直接改业务数据。"
               titleAs="h3"
             />
             <label>
               <span>导入配置</span>
               <select value={importProfileId} onChange={(event) => setImportProfileId(event.target.value)}>
+                {!importProfiles.length ? <option value="">暂无生效配置</option> : null}
                 {importProfiles.map((profile) => (
                   <option key={profile.id} value={profile.id}>
                     {displayValue(profile.code)} / {displayValue(profile.version)} · {statusLabel(String(profile.domain_type ?? ""))}
                   </option>
                 ))}
               </select>
+              {!importProfiles.length ? <small>请先到“导入配置”完成字段映射和审批。</small> : null}
             </label>
             <label>
               <span>提交人</span>
@@ -936,18 +1006,26 @@ export function EngineeringWorkspace({
             </label>
             <button className="button button-primary" onClick={() => void previewImportFile()} disabled={submitting || !importProfileId || !importFile}>
               {submitting ? <LoaderCircle className="spin" /> : <FileCheck2 />}
-              预览并校验
+              第 1 步：检查文件
             </button>
             <div className="compact-list">
               <strong>选中任务</strong>
               {selectedImportJob ? (
                 <>
-                  <span>{displayValue(selectedImportJob.import_no)} · {displayValue(selectedImportJob.status)}</span>
+                  <span>{displayValue(selectedImportJob.import_no)} · {statusLabel(String(selectedImportJob.status ?? ""))}</span>
                   <span>行数：{displayValue(selectedImportJob.row_count)}，有效：{displayValue(selectedImportJob.valid_row_count)}，失败：{displayValue(selectedImportJob.failed_row_count)}</span>
-                  <button className="button button-secondary" onClick={() => void replayImportJob()} disabled={submitting}>
-                    <RotateCcw />
-                    重放任务
-                  </button>
+                  {selectedImportJob.status === "VALIDATED" ? (
+                    <button className="button button-primary" onClick={() => void commitImportJob()} disabled={submitting}>
+                      <Upload />
+                      第 2 步：确认写入
+                    </button>
+                  ) : null}
+                  {selectedImportPreview.validation_status === "PASSED" && ["FAILED", "IMPORTED", "REPLAYED"].includes(String(selectedImportJob.status ?? "")) ? (
+                    <button className="button button-secondary" onClick={() => void replayImportJob()} disabled={submitting}>
+                      <RotateCcw />
+                      重新执行写入
+                    </button>
+                  ) : null}
                 </>
               ) : <small>选择左侧导入任务后查看预览与错误报告</small>}
             </div>

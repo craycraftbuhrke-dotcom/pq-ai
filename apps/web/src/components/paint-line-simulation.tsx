@@ -20,6 +20,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import Image from "next/image";
 
 import { ModalShell } from "@/components/modal-shell";
 import { stageLabel } from "@/lib/display-labels";
@@ -266,8 +267,8 @@ function saveLayout(factoryId: string, layout: LineLayout) {
   window.localStorage.setItem(`${LAYOUT_STORAGE_KEY}:${factoryId || "default"}`, JSON.stringify(layout));
 }
 
-async function request<T>(path: string): Promise<T> {
-  const response = await fetch(path, { cache: "no-store" });
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, { cache: "no-store", ...init });
   const payload = (await response.json().catch(() => ({}))) as T & { error?: string; detail?: string };
   if (!response.ok) {
     throw new Error(payload.error ?? payload.detail ?? `请求失败（${response.status}）`);
@@ -469,8 +470,13 @@ export function PaintLineSimulation() {
   const [atomizers, setAtomizers] = useState<Atomizer[]>([]);
   const [programs, setPrograms] = useState<SprayProgram[]>([]);
   const [versionsByProgram, setVersionsByProgram] = useState<Record<string, ProgramVersion[]>>({});
-  const [layout, setLayout] = useState<LineLayout>(() => emptyLayout());
-  const [selection, setSelection] = useState<Selection>(null);
+  const [layout, setLayout] = useState<LineLayout>(() => loadLayout(factoryId));
+  const layoutFactoryRef = useRef(factoryId);
+  const [selection, setSelection] = useState<Selection>(() =>
+    contextStage && STAGE_ORDER.includes(contextStage as StageCode)
+      ? { kind: "stage", stage: contextStage as StageCode }
+      : null,
+  );
   const [installTarget, setInstallTarget] = useState<{ stage: StageCode; side: SlotCode } | null>(null);
   const [installForm, setInstallForm] = useState({
     robotId: "",
@@ -483,7 +489,6 @@ export function PaintLineSimulation() {
   const [boothBrushByStage, setBoothBrushByStage] = useState<Partial<Record<StageCode, string>>>({});
   const brushPackByVersionRef = useRef(brushPackByVersion);
   const brushPackLoadingRef = useRef<Set<string>>(new Set());
-  brushPackByVersionRef.current = brushPackByVersion;
   const [productionRuns, setProductionRuns] = useState<ProductionRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState("");
   const [stageRuns, setStageRuns] = useState<StageRun[]>([]);
@@ -505,6 +510,10 @@ export function PaintLineSimulation() {
   const lastTsRef = useRef<number | null>(null);
   const pathRafRef = useRef<number | null>(null);
   const pathLastTsRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    brushPackByVersionRef.current = brushPackByVersion;
+  }, [brushPackByVersion]);
 
   const filteredRobots = useMemo(
     () => robots.filter((item) => !factoryId || item.factory_id === factoryId),
@@ -564,6 +573,9 @@ export function PaintLineSimulation() {
   }, [activePathSegment, segmentExecutions]);
 
   const reload = useCallback(async () => {
+    const nextLayout = loadLayout(factoryId);
+    layoutFactoryRef.current = factoryId;
+    setLayout(nextLayout);
     setLoading(true);
     setError("");
     try {
@@ -577,7 +589,6 @@ export function PaintLineSimulation() {
       setAtomizers(nextAtomizers);
       setPrograms(nextPrograms);
       setProductionRuns(nextRuns);
-      setLayout(loadLayout(factoryId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载虚拟产线数据失败");
     } finally {
@@ -586,25 +597,28 @@ export function PaintLineSimulation() {
   }, [factoryId]);
 
   useEffect(() => {
-    void reload();
+    const timer = window.setTimeout(() => void reload(), 0);
+    return () => window.clearTimeout(timer);
   }, [reload]);
 
   useEffect(() => {
-    setLayout(loadLayout(factoryId));
-  }, [factoryId]);
-
-  useEffect(() => {
     if (!contextStage || !STAGE_ORDER.includes(contextStage as StageCode)) return;
-    setSelection({ kind: "stage", stage: contextStage as StageCode });
+    const timer = window.setTimeout(
+      () => setSelection({ kind: "stage", stage: contextStage as StageCode }),
+      0,
+    );
+    return () => window.clearTimeout(timer);
   }, [contextStage]);
 
   useEffect(() => {
+    if (layoutFactoryRef.current !== factoryId) return;
     saveLayout(factoryId, layout);
   }, [factoryId, layout]);
 
   useEffect(() => {
     if (selectedRunId && !filteredRuns.some((run) => run.id === selectedRunId)) {
-      setSelectedRunId("");
+      const timer = window.setTimeout(() => setSelectedRunId(""), 0);
+      return () => window.clearTimeout(timer);
     }
   }, [filteredRuns, selectedRunId]);
 
@@ -730,14 +744,17 @@ export function PaintLineSimulation() {
     const versionId = layout[selection.stage][selection.side]?.programVersionId;
     const pack = versionId ? brushPackByVersion[versionId] : null;
     if (!pack?.brushes.length) return;
-    setBoothBrushByStage((current) => {
-      const existing = current[selection.stage];
-      if (existing && pack.brushes.some((brush) => brush.id === existing)) return current;
-      return { ...current, [selection.stage]: pack.brushes[0].id };
-    });
+    const timer = window.setTimeout(() => {
+      setBoothBrushByStage((current) => {
+        const existing = current[selection.stage];
+        if (existing && pack.brushes.some((brush) => brush.id === existing)) return current;
+        return { ...current, [selection.stage]: pack.brushes[0].id };
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [selection, layout, brushPackByVersion]);
 
-  const loadTrajectory = useCallback(async (programVersionId?: string) => {
+  const loadTrajectory = useCallback(async (programVersionId?: string, signal?: AbortSignal) => {
     setTrajectoryProgram(null);
     setPathSegments([]);
     setPathProgress(0);
@@ -747,7 +764,9 @@ export function PaintLineSimulation() {
     try {
       const programsList = await request<TrajectoryProgram[]>(
         `/api/process/robot-governance/trajectory-programs?program_version_id=${encodeURIComponent(programVersionId)}`,
+        { signal },
       );
+      if (signal?.aborted) return;
       const preferred =
         programsList.find((item) => item.status === "ACTIVE") ??
         programsList.find((item) => item.status === "APPROVED") ??
@@ -757,26 +776,38 @@ export function PaintLineSimulation() {
       if (!preferred) return;
       const segments = await request<PathSegment[]>(
         `/api/process/robot-governance/path-segments?trajectory_program_id=${encodeURIComponent(preferred.id)}`,
+        { signal },
       );
+      if (signal?.aborted) return;
       setPathSegments(segments);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "加载轨迹路径失败");
+      if (!signal?.aborted) setError(err instanceof Error ? err.message : "加载轨迹路径失败");
     } finally {
-      setPathLoading(false);
+      if (!signal?.aborted) setPathLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadTrajectory(selectedAssignment?.programVersionId);
+    const controller = new AbortController();
+    const timer = window.setTimeout(
+      () => void loadTrajectory(selectedAssignment?.programVersionId, controller.signal),
+      0,
+    );
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [selectedAssignment?.programVersionId, loadTrajectory]);
 
   useEffect(() => {
     if (!selectedRunId) {
-      setStageRuns([]);
-      setActualParameters([]);
-      setDeviceExecution(null);
-      setSegmentExecutions([]);
-      return;
+      const timer = window.setTimeout(() => {
+        setStageRuns([]);
+        setActualParameters([]);
+        setDeviceExecution(null);
+        setSegmentExecutions([]);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
     let cancelled = false;
     (async () => {
@@ -800,12 +831,14 @@ export function PaintLineSimulation() {
   }, [selectedRunId]);
 
   useEffect(() => {
-    setActualParameters([]);
-    setDeviceExecution(null);
-    setSegmentExecutions([]);
-    if (!matchedStageRun) return;
     let cancelled = false;
-    (async () => {
+    void (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      setActualParameters([]);
+      setDeviceExecution(null);
+      setSegmentExecutions([]);
+      if (!matchedStageRun) return;
       setActualLoading(true);
       try {
         const [actuals, executions] = await Promise.all([
@@ -1415,10 +1448,12 @@ function RobotSlotButton({
       {assignment && robot ? (
         <>
           <span className="paint-line-arm-wrap">
-            <img
+            <Image
               className={`paint-line-robot-photo ${spraying ? "is-spraying" : ""}`}
               src={ROBOT_PHOTO_SRC}
               alt={`${side} ${robot.code}`}
+              width={500}
+              height={500}
               draggable={false}
             />
           </span>
@@ -1434,7 +1469,14 @@ function RobotSlotButton({
         </>
       ) : (
         <span className="paint-line-slot-empty">
-          <img className="paint-line-robot-photo is-ghost" src={ROBOT_PHOTO_SRC} alt="" draggable={false} />
+          <Image
+            className="paint-line-robot-photo is-ghost"
+            src={ROBOT_PHOTO_SRC}
+            alt=""
+            width={500}
+            height={500}
+            draggable={false}
+          />
           <strong>{side}</strong>
           <small>
             <Plus /> 安装
@@ -1665,7 +1707,7 @@ function StageSummary({
           ? "正在加载工序实绩…"
           : matchedStageRun
             ? `已匹配生产工序实绩（${matchedStageRun.status}）。选择槽位可对照刷子设定与实绩。`
-            : "本页仅做产线布局与参数只读仿真。选择生产事件后，可在槽位中对照设定与实绩；设备限值、TDS 与推荐变更仍以受控主数据 / AI 闭环为准，不在此编造。"}
+            : "本页用于查看产线布局并对照设定值与实际值；设备限值、材料技术文件和参数建议仍以已批准资料与现场试验为准。"}
       </p>
     </div>
   );

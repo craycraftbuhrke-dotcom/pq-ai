@@ -528,12 +528,20 @@ class BodyMapBrushParameter(BaseModel):
     configured_value: float | None = None
     actual_value: float | None = None
     unit: str
+    soft_min: float | None = None
+    soft_max: float | None = None
+    hard_min: float | None = None
+    hard_max: float | None = None
 
 
 class BodyMapBrushContribution(BaseModel):
     brush_id: str
     brush_no: str
     brush_table_no: str
+    program_version_id: str | None = None
+    program_version: str | None = None
+    program_code: str | None = None
+    program_name: str | None = None
     process_stage: str
     coating_system: str
     overlap_ratio: float
@@ -569,7 +577,10 @@ class BodyMap3DLayoutUpsert(BaseModel):
     normal_y: float | None = None
     normal_z: float | None = None
     model_asset_key: str | None = Field(default=None, max_length=120)
-    project_to_2d: bool = True
+    project_to_2d: bool = Field(
+        default=True,
+        description="执行时是否同步生成二维投影；该指令不持久化到三维布局表",
+    )
 
 
 class BodyMap3DLayoutRead(ResourceRead):

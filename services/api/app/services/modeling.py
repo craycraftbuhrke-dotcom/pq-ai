@@ -37,6 +37,8 @@ from app.models.domain import (
     ProductionRun,
     Recommendation,
     RecommendationAction,
+    TrainingDataUpload,
+    TrainingWideSample,
     VehicleModel,
     VehicleModelColor,
 )
@@ -900,16 +902,31 @@ def build_dataset_snapshot(db: Session, payload) -> DatasetSnapshot:
     ):
         raise HTTPException(status_code=409, detail="数据集代码与版本已存在")
 
-    rows = db.execute(
+    production_query = (
         select(PointFeatureSnapshot, ProductionRun)
         .join(ProductionRun, ProductionRun.id == PointFeatureSnapshot.production_run_id)
         .where(
             PointFeatureSnapshot.feature_set_version == payload.feature_set_version,
             PointFeatureSnapshot.target_family == _target_family(payload.target_metric),
         )
-        .order_by(ProductionRun.started_at, PointFeatureSnapshot.measurement_point_id)
+    )
+    if not payload.include_all_production:
+        if payload.production_snapshot_ids:
+            production_query = production_query.where(
+                PointFeatureSnapshot.id.in_(payload.production_snapshot_ids)
+            )
+        else:
+            production_query = production_query.where(PointFeatureSnapshot.id == "")
+    elif payload.production_snapshot_ids:
+        production_query = production_query.where(
+            PointFeatureSnapshot.id.in_(payload.production_snapshot_ids)
+        )
+    rows = db.execute(
+        production_query.order_by(
+            ProductionRun.started_at, PointFeatureSnapshot.measurement_point_id
+        )
     ).all()
-    candidates = []
+    candidates: list[dict] = []
     for snapshot, run in rows:
         target_observation = _target_observation(
             db, snapshot.production_run_id, snapshot.measurement_point_id, payload.target_metric
@@ -924,32 +941,93 @@ def build_dataset_snapshot(db: Session, payload) -> DatasetSnapshot:
         )
         candidates.append(
             {
+                "source_type": "PRODUCTION",
+                "source_ref": f"P:{snapshot.id}",
                 "snapshot": snapshot,
                 "run": run,
+                "manual_sample": None,
                 "target": float(target_observation["value"]),
                 "target_measurement_id": target_observation["measurement_id"],
                 "features": features,
                 "group_value": group_value,
+                "occurred_at": run.started_at,
             }
         )
+
+    selected_uploads: list[TrainingDataUpload] = []
+    if payload.manual_upload_ids:
+        selected_uploads = list(
+            db.scalars(
+                select(TrainingDataUpload).where(
+                    TrainingDataUpload.id.in_(payload.manual_upload_ids)
+                )
+            )
+        )
+        found_ids = {upload.id for upload in selected_uploads}
+        missing_ids = sorted(set(payload.manual_upload_ids) - found_ids)
+        if missing_ids:
+            raise HTTPException(status_code=404, detail="所选人工训练数据文件不存在")
+        incompatible = [
+            upload.name
+            for upload in selected_uploads
+            if upload.status != "VALIDATED"
+            or upload.target_metric != payload.target_metric
+            or upload.feature_set_version != payload.feature_set_version
+        ]
+        if incompatible:
+            raise HTTPException(
+                status_code=422,
+                detail=f"以下人工训练数据与目标指标或特征版本不一致：{', '.join(incompatible)}",
+            )
+        manual_rows = list(
+            db.scalars(
+                select(TrainingWideSample)
+                .where(
+                    TrainingWideSample.upload_id.in_(payload.manual_upload_ids),
+                    TrainingWideSample.is_valid.is_(True),
+                )
+                .order_by(TrainingWideSample.occurred_at, TrainingWideSample.sample_no)
+            )
+        )
+        for sample in manual_rows:
+            features = approved_numeric_values(sample.feature_values)
+            if not features:
+                continue
+            candidates.append(
+                {
+                    "source_type": "MANUAL_UPLOAD",
+                    "source_ref": f"M:{sample.id}",
+                    "snapshot": None,
+                    "run": None,
+                    "manual_sample": sample,
+                    "target": float(sample.target_value),
+                    "target_measurement_id": None,
+                    "features": features,
+                    "group_value": f"manual:{sample.group_value}",
+                    "occurred_at": sample.occurred_at,
+                }
+            )
     groups: dict[str, list[dict]] = {}
     for candidate in candidates:
         groups.setdefault(candidate["group_value"], []).append(candidate)
     if not candidates:
         raise HTTPException(
             status_code=422,
-            detail="没有同时具备受批准数值特征和 VERIFIED 目标质量结果的样本",
+            detail=(
+                "没有可用训练样本；请选择生产样本或已通过校验的人工训练数据文件。"
+                "两种来源可以单独使用或混合使用"
+            ),
         )
     ordered_groups = sorted(
         groups,
-        key=lambda group: min(_time_key(item["run"].started_at) for item in groups[group]),
+        key=lambda group: min(_time_key(item["occurred_at"]) for item in groups[group]),
     )
     required_groups = payload.min_train_groups + payload.min_validation_groups
     if len(ordered_groups) < required_groups:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"独立生产分组不足：训练至少 {payload.min_train_groups} 组、"
+                f"独立数据分组不足：训练至少 {payload.min_train_groups} 组、"
                 f"验证至少 {payload.min_validation_groups} 组，当前 {len(ordered_groups)} 组"
             ),
         )
@@ -973,13 +1051,13 @@ def build_dataset_snapshot(db: Session, payload) -> DatasetSnapshot:
 
     train_rows = [item for item in candidates if item["group_value"] in train_groups]
     validation_rows = [item for item in candidates if item["group_value"] in validation_groups]
-    train_snapshot_ids = {item["snapshot"].id for item in train_rows}
-    validation_snapshot_ids = {item["snapshot"].id for item in validation_rows}
+    train_source_refs = {item["source_ref"] for item in train_rows}
+    validation_source_refs = {item["source_ref"] for item in validation_rows}
     leakage_check = {
         "group_overlap_count": len(train_groups & validation_groups),
-        "snapshot_overlap_count": len(train_snapshot_ids & validation_snapshot_ids),
-        "temporal_order_valid": max(_time_key(item["run"].started_at) for item in train_rows)
-        <= min(_time_key(item["run"].started_at) for item in validation_rows),
+        "snapshot_overlap_count": len(train_source_refs & validation_source_refs),
+        "temporal_order_valid": max(_time_key(item["occurred_at"]) for item in train_rows)
+        <= min(_time_key(item["occurred_at"]) for item in validation_rows),
     }
     leakage_check["passed"] = (
         leakage_check["group_overlap_count"] == 0
@@ -998,7 +1076,7 @@ def build_dataset_snapshot(db: Session, payload) -> DatasetSnapshot:
         target_metric=payload.target_metric,
         feature_set_version=payload.feature_set_version,
         split_strategy="TEMPORAL_GROUPED_HOLDOUT",
-        group_key="BODY_OR_RUN",
+        group_key="BODY_RUN_OR_MANUAL_GROUP",
         holdout_ratio=payload.holdout_ratio,
         status="BUILT",
         sample_count=len(candidates),
@@ -1007,17 +1085,39 @@ def build_dataset_snapshot(db: Session, payload) -> DatasetSnapshot:
         validation_sample_count=len(validation_rows),
         train_group_count=len(train_groups),
         validation_group_count=len(validation_groups),
-        cutoff_at=min(validation_rows, key=lambda item: _time_key(item["run"].started_at))[
-            "run"
-        ].started_at,
+        cutoff_at=min(
+            validation_rows, key=lambda item: _time_key(item["occurred_at"])
+        )["occurred_at"],
         feature_names=feature_names,
         lineage={
-            "point_feature_snapshot_ids": [item["snapshot"].id for item in candidates],
-            "production_run_ids": sorted({item["run"].id for item in candidates}),
-            "target_measurement_ids": [
-                item["target_measurement_id"] for item in candidates
+            "source_policy": "PRODUCTION_AND_MANUAL_EQUAL_WEIGHT",
+            "source_counts": {
+                "PRODUCTION": sum(
+                    item["source_type"] == "PRODUCTION" for item in candidates
+                ),
+                "MANUAL_UPLOAD": sum(
+                    item["source_type"] == "MANUAL_UPLOAD" for item in candidates
+                ),
+            },
+            "point_feature_snapshot_ids": [
+                item["snapshot"].id for item in candidates if item["snapshot"]
             ],
-            "target_reliability_status": "VERIFIED",
+            "manual_upload_ids": [upload.id for upload in selected_uploads],
+            "manual_sample_ids": [
+                item["manual_sample"].id
+                for item in candidates
+                if item["manual_sample"]
+            ],
+            "production_run_ids": sorted(
+                {item["run"].id for item in candidates if item["run"]}
+            ),
+            "target_measurement_ids": [
+                item["target_measurement_id"]
+                for item in candidates
+                if item["target_measurement_id"]
+            ],
+            "production_target_reliability_status": "VERIFIED",
+            "manual_data_validation_status": "VALIDATED",
         },
         leakage_check=leakage_check,
         built_at=now,
@@ -1028,15 +1128,24 @@ def build_dataset_snapshot(db: Session, payload) -> DatasetSnapshot:
         db.add(
             DatasetSplitMember(
                 dataset_snapshot_id=dataset.id,
-                point_feature_snapshot_id=item["snapshot"].id,
-                production_run_id=item["run"].id,
-                measurement_point_id=item["snapshot"].measurement_point_id,
+                source_type=item["source_type"],
+                source_ref=item["source_ref"],
+                point_feature_snapshot_id=(
+                    item["snapshot"].id if item["snapshot"] else None
+                ),
+                manual_sample_id=(
+                    item["manual_sample"].id if item["manual_sample"] else None
+                ),
+                production_run_id=item["run"].id if item["run"] else None,
+                measurement_point_id=(
+                    item["snapshot"].measurement_point_id if item["snapshot"] else None
+                ),
                 target_measurement_id=item["target_measurement_id"],
                 group_value=item["group_value"],
                 split="VALIDATION" if item["group_value"] in validation_groups else "TRAIN",
                 target_value=item["target"],
                 feature_values={name: item["features"][name] for name in feature_names},
-                occurred_at=item["run"].started_at,
+                occurred_at=item["occurred_at"],
             )
         )
     db.commit()

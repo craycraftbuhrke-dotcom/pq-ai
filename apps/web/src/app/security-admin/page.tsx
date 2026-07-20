@@ -41,19 +41,11 @@ const TABS = [
   { key: "roles", label: "角色管理" },
 ];
 
-function getApiKeyFromCookie(): string {
-  const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
-
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     cache: "no-store",
     ...init,
-    headers: {
-      "x-api-key": getApiKeyFromCookie(),
-      ...(init?.headers ?? {}),
-    },
+    headers: init?.headers,
   });
   if (response.status === 204) return undefined as T;
   const payload = (await response.json().catch(() => ({}))) as T & { detail?: string };
@@ -118,7 +110,7 @@ function SecurityAdminInner() {
     setSubmitting(true);
     setError("");
     try {
-      await apiRequest("/api/auth/register", {
+      await apiRequest("/api/security/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -178,7 +170,7 @@ function SecurityAdminInner() {
           }),
         },
       );
-      setNotice(`API Key 已签发并复制到剪贴板：${result.name}`);
+      setNotice(`系统访问密钥已签发并复制到剪贴板：${result.name}`);
       await navigator.clipboard.writeText(result.raw_key);
     } catch (err) {
       setError(err instanceof Error ? err.message : "签发失败");
@@ -276,12 +268,12 @@ function SecurityAdminInner() {
                       <input
                         required
                         type="password"
+                        minLength={12}
                         value={newUserForm.password}
                         onChange={(event) =>
                           setNewUserForm({ ...newUserForm, password: event.target.value })
                         }
-                        placeholder="至少 6 位"
-                        minLength={6}
+                        placeholder="至少 12 位"
                       />
                     </label>
                     <label className="form-field">
@@ -415,7 +407,7 @@ function SecurityAdminInner() {
                                 onClick={() => void issueApiKey(user.id)}
                               >
                                 <Key />
-                                签发 API Key
+                                签发系统访问密钥
                               </button>
                             </div>
                           </td>

@@ -3,13 +3,20 @@
 import { Suspense } from "react";
 
 import IntegrationMonitorPage from "@/app/integration-monitor/page";
+import SecurityAdminPage from "@/app/security-admin/page";
 import { DomainHub } from "@/components/domain-hub";
+import { EngineeringWorkspace } from "@/components/engineering-workspace";
 import { IntegrationWorkspace } from "@/components/integration-workspace";
+import { RemoteStationWorkspace } from "@/components/remote-station-workspace";
 
 const TABS = [
-  { key: "integrations", label: "系统对接" },
-  { key: "monitor", label: "对接监控" },
-  { key: "audit", label: "操作审计" },
+  { key: "integrations", label: "外部数据" },
+  { key: "remote-stations", label: "机器人远程工作站" },
+  { key: "file-imports", label: "设备与材料文件" },
+  { key: "import-profiles", label: "文件填写规则" },
+  { key: "monitor", label: "数据接收情况" },
+  { key: "audit", label: "操作记录" },
+  { key: "security", label: "用户与权限" },
 ];
 
 function AuditEmbed({
@@ -27,7 +34,7 @@ function AuditEmbed({
     <div className="embedded-stack">
       <div className="freshness">
         <span className="live-dot" />
-        审计数据来源：{source === "api" ? "实时 API" : "回退占位"}
+        操作记录来源：{source === "api" ? "实时系统数据" : "暂未连接数据源"}
       </div>
       <section className="module-stat-strip">
         {stats.map((item) => (
@@ -79,12 +86,15 @@ function SettingsHubInner({
 }) {
   return (
     <DomainHub
-      title="系统设置中心"
+      title="系统设置"
       tabs={TABS}
       defaultTab="integrations"
     >
       {(tab) => {
         if (tab === "monitor") return <IntegrationMonitorPage embedded />;
+        if (tab === "remote-stations") return <RemoteStationWorkspace />;
+        if (tab === "file-imports") return <EngineeringWorkspace mode="embed" lockedTab="imports" />;
+        if (tab === "import-profiles") return <EngineeringWorkspace mode="embed" lockedTab="profiles" />;
         if (tab === "audit") {
           return (
             <AuditEmbed
@@ -95,6 +105,7 @@ function SettingsHubInner({
             />
           );
         }
+        if (tab === "security") return <SecurityAdminPage />;
         return <IntegrationWorkspace embedded />;
       }}
     </DomainHub>

@@ -13,9 +13,12 @@ import {
 } from "react";
 
 import Link from "next/link";
+import Image from "next/image";
 
 import { BodyMapImageEditor } from "@/components/body-map-image-editor";
 import { ModalShell } from "@/components/modal-shell";
+import { PointAiActions } from "@/components/point-ai-actions";
+import { PointParameterVersionEditor } from "@/components/point-parameter-version-editor";
 import { DEFAULT_BODY_MAP_IMAGES } from "@/lib/body-map-images";
 import { stageLabel } from "@/lib/display-labels";
 import { useWorkspaceContext } from "@/lib/workspace-context";
@@ -129,12 +132,20 @@ type BrushParameter = {
   configured_value?: number | null;
   actual_value?: number | null;
   unit: string;
+  soft_min?: number | null;
+  soft_max?: number | null;
+  hard_min?: number | null;
+  hard_max?: number | null;
 };
 
 type BrushContribution = {
   brush_id: string;
   brush_no: string;
   brush_table_no: string;
+  program_version_id?: string | null;
+  program_version?: string | null;
+  program_code?: string | null;
+  program_name?: string | null;
   process_stage: string;
   coating_system: string;
   overlap_ratio: number;
@@ -372,6 +383,8 @@ export function BodyPointMap() {
     view: BodyView;
   } | null>(null);
   const paneRefs = useRef<Partial<Record<BodyView, HTMLElement | null>>>({});
+  const canvasRequestIdRef = useRef(0);
+  const detailRequestIdRef = useRef(0);
 
   const closeCreateModal = useCallback(() => {
     if (submitting) return;
@@ -474,9 +487,11 @@ export function BodyPointMap() {
     setVehicleModelId((current) => current || modelId || nextModels[0]?.id || "");
   }, [modelId]);
 
-  const loadCanvas = useCallback(async () => {
+  const loadCanvas = useCallback(async (signal?: AbortSignal) => {
+    const requestId = ++canvasRequestIdRef.current;
     if (!vehicleModelId) {
       setCanvas(null);
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -485,15 +500,34 @@ export function BodyPointMap() {
       const params = new URLSearchParams({ vehicle_model_id: vehicleModelId });
       if (groupId) params.set("measurement_group_id", groupId);
       if (runId) params.set("production_run_id", runId);
-      const payload = await request<CanvasPayload>(`/api/quality/body-map/canvas?${params}`);
+      const payload = await request<CanvasPayload>(`/api/quality/body-map/canvas?${params}`, { signal });
+      if (signal?.aborted || requestId !== canvasRequestIdRef.current) return;
       setCanvas(payload);
     } catch (err) {
+      if (signal?.aborted || requestId !== canvasRequestIdRef.current) return;
       setError(err instanceof Error ? err.message : "加载车身点位图失败");
       setCanvas(null);
     } finally {
-      setLoading(false);
+      if (requestId === canvasRequestIdRef.current) setLoading(false);
     }
   }, [vehicleModelId, groupId, runId]);
+
+  const changeVehicleModel = useCallback((nextModelId: string) => {
+    canvasRequestIdRef.current += 1;
+    detailRequestIdRef.current += 1;
+    setCanvas(null);
+    setLoading(Boolean(nextModelId));
+    setGroupId("");
+    setRunId("");
+    setSelectedPointId("");
+    setDetail(null);
+    setDetailLoading(false);
+    setPendingPlaceId("");
+    setSelectedGovPointId("");
+    setSideTab("detail");
+    setSideTabPinned(false);
+    setVehicleModelId(nextModelId);
+  }, []);
 
   const reloadAll = useCallback(async () => {
     await loadRefs();
@@ -502,6 +536,7 @@ export function BodyPointMap() {
 
   const loadDetail = useCallback(
     async (pointId: string, scopedRunId?: string) => {
+      const requestId = ++detailRequestIdRef.current;
       setSelectedPointId(pointId);
       if (!sideTabPinned) setSideTab("detail");
       setDetailLoading(true);
@@ -513,26 +548,38 @@ export function BodyPointMap() {
         const payload = await request<PointDetail>(
           `/api/quality/body-map/points/${pointId}/detail${query ? `?${query}` : ""}`,
         );
+        if (requestId !== detailRequestIdRef.current) return;
         setDetail(payload);
       } catch (err) {
+        if (requestId !== detailRequestIdRef.current) return;
         setError(err instanceof Error ? err.message : "加载点位详情失败");
       } finally {
-        setDetailLoading(false);
+        if (requestId === detailRequestIdRef.current) setDetailLoading(false);
       }
     },
     [runId, sideTabPinned],
   );
 
   useEffect(() => {
-    void loadRefs().catch((err) => setError(err instanceof Error ? err.message : "加载主数据失败"));
+    const timer = window.setTimeout(() => {
+      void loadRefs().catch((err) => setError(err instanceof Error ? err.message : "加载主数据失败"));
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadRefs]);
 
   useEffect(() => {
-    if (modelId) setVehicleModelId(modelId);
-  }, [modelId]);
+    if (!modelId) return;
+    const timer = window.setTimeout(() => changeVehicleModel(modelId), 0);
+    return () => window.clearTimeout(timer);
+  }, [modelId, changeVehicleModel]);
 
   useEffect(() => {
-    void loadCanvas();
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void loadCanvas(controller.signal), 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [loadCanvas]);
 
   useEffect(() => {
@@ -542,19 +589,9 @@ export function BodyPointMap() {
   }, [message]);
 
   useEffect(() => {
-    setGroupId("");
-    setRunId("");
-    setSelectedPointId("");
-    setDetail(null);
-    setPendingPlaceId("");
-    setSelectedGovPointId("");
-    setSideTab("detail");
-    setSideTabPinned(false);
-  }, [vehicleModelId]);
-
-  useEffect(() => {
     if (!selectedPointId && !sideTabPinned) {
-      setSideTab("detail");
+      const timer = window.setTimeout(() => setSideTab("detail"), 0);
+      return () => window.clearTimeout(timer);
     }
   }, [selectedPointId, sideTabPinned]);
 
@@ -1032,7 +1069,7 @@ export function BodyPointMap() {
           <div className="governance-scope-fields body-map-scope-fields">
             <label className="form-field">
               <span>车型</span>
-              <select value={vehicleModelId} onChange={(event) => setVehicleModelId(event.target.value)}>
+              <select value={vehicleModelId} onChange={(event) => changeVehicleModel(event.target.value)}>
                 <option value="">请选择车型</option>
                 {models.map((item) => (
                   <option key={item.id} value={item.id}>
@@ -1184,10 +1221,13 @@ export function BodyPointMap() {
                         className={`body-map-stage ${editMode || pendingPlaceId ? "is-editing" : ""}`}
                         onPointerDown={(event) => onStagePointerDown(view, event)}
                       >
-                        <img
+                        <Image
                           className="body-map-bg"
                           src={backgroundUrl}
                           alt={viewLabel(view, viewLabels)}
+                          width={1600}
+                          height={900}
+                          unoptimized
                           draggable={false}
                         />
                         <div className="body-map-grid" aria-hidden="true" />
@@ -1473,6 +1513,11 @@ export function BodyPointMap() {
                     ))}
                   </div>
 
+                  <PointAiActions
+                    productionRunId={runId || canvas?.production_run_id}
+                    measurementPointId={detail.measurement_point_id}
+                  />
+
                   <div className="body-map-brush-block">
                     <div className="program-subheading compact">
                       <div>
@@ -1513,6 +1558,7 @@ export function BodyPointMap() {
                                 : ""}
                               {brush.is_approved ? " · 已审批" : " · 待审批"}
                             </small>
+                            <PointParameterVersionEditor contribution={brush} />
                           </div>
                           {brush.parameters.length ? (
                             <div className="body-map-param-table">
@@ -1520,7 +1566,7 @@ export function BodyPointMap() {
                                 <div className="body-map-param-row" key={parameter.parameter_code}>
                                   <span>
                                     <strong>{parameter.parameter_name}</strong>
-                                    <small className="mono">{parameter.parameter_code}</small>
+                                    <small>{parameter.unit || "无单位"}</small>
                                   </span>
                                   <span className="mono">
                                     <em>设定</em> {formatValue(parameter.configured_value, parameter.unit)}

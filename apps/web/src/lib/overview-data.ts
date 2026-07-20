@@ -2,23 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-function getApiKey(): string {
-  if (typeof document === "undefined") return "";
-  const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
-
-function apiUrl(): string {
-  return process.env.NEXT_PUBLIC_API_URL ?? "";
-}
-
 async function fetchJson<T>(path: string, fallback: T): Promise<T> {
-  const base = apiUrl();
-  if (!base) return fallback;
   try {
-    const resp = await fetch(`${base}${path}`, {
+    const resp = await fetch(path, {
       cache: "no-store",
-      headers: { "x-api-key": getApiKey() },
       signal: AbortSignal.timeout(3000),
     });
     if (!resp.ok) return fallback;
@@ -221,13 +208,13 @@ export function useOverviewData(): OverviewData {
     let cancelled = false;
     const run = async () => {
       const [d, p, a] = await Promise.all([
-        fetchJson("/dashboard", EMPTY_DASHBOARD as unknown as Record<string, unknown>).then((d) =>
+        fetchJson("/api/dashboard", EMPTY_DASHBOARD as unknown as Record<string, unknown>).then((d) =>
           mapDashboard(d as Record<string, unknown>),
         ),
-        fetchJson("/process/overview-summary", {} as Record<string, unknown>).then((d) =>
+        fetchJson("/api/process/overview-summary", {} as Record<string, unknown>).then((d) =>
           mapProcess(d as Record<string, unknown>),
         ),
-        fetchJson("/ai/overview-summary", {} as Record<string, unknown>).then((d) =>
+        fetchJson("/api/ai/overview-summary", {} as Record<string, unknown>).then((d) =>
           mapAi(d as Record<string, unknown>),
         ),
       ]);

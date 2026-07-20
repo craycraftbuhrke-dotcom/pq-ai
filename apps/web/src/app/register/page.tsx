@@ -7,6 +7,8 @@ import { useState, type FormEvent } from "react";
 
 import { useAuth } from "@/lib/auth-context";
 
+const allowSelfRegistration = process.env.NEXT_PUBLIC_ALLOW_SELF_REGISTRATION === "true";
+
 export default function RegisterPage() {
   const router = useRouter();
   const { register, loading } = useAuth();
@@ -25,8 +27,8 @@ export default function RegisterPage() {
       setError("两次输入的密码不一致");
       return;
     }
-    if (password.length < 6) {
-      setError("密码长度至少 6 位");
+    if (password.length < 12) {
+      setError("密码长度至少 12 位");
       return;
     }
     try {
@@ -35,6 +37,24 @@ export default function RegisterPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "注册失败，请重试");
     }
+  }
+
+  if (!allowSelfRegistration) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card">
+          <div className="auth-header">
+            <div className="brand-mark" aria-hidden="true">PQ</div>
+            <h1>账号由管理员开通</h1>
+            <p>为保护工艺与质量数据，当前系统未开放自助注册。</p>
+          </div>
+          <div className="auth-footer">
+            <span>请联系系统管理员创建账号并分配角色。</span>
+            <Link href="/login">返回登录</Link>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -86,8 +106,8 @@ export default function RegisterPage() {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="至少 6 位"
-              minLength={6}
+              placeholder="至少 12 位"
+              minLength={12}
             />
           </label>
           <label className="form-field">
@@ -101,7 +121,7 @@ export default function RegisterPage() {
               value={passwordConfirm}
               onChange={(event) => setPasswordConfirm(event.target.value)}
               placeholder="再次输入密码"
-              minLength={6}
+              minLength={12}
             />
           </label>
           <label className="form-field">

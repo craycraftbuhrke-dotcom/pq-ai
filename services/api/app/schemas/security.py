@@ -23,18 +23,15 @@ class LoginResponse(BaseModel):
     display_name: str
     roles: list[str]
     permissions: list[str]
-    api_key: str
-    api_key_name: str
     access_token: str
     token_type: str = "bearer"
     expires_at: datetime
     actor: ActorRead
-    warning: str = "API Key 仅在本次响应中显示，请安全保存。浏览器会话已通过 Cookie 保存认证状态。"
 
 
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=2, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
-    password: str = Field(min_length=6, max_length=128)
+    password: str = Field(min_length=12, max_length=128)
     display_name: str = Field(min_length=1, max_length=120)
     email: str | None = Field(default=None, max_length=255)
     department: str | None = Field(default=None, max_length=120)
@@ -42,7 +39,7 @@ class RegisterRequest(BaseModel):
 
 class PasswordChangeRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
-    new_password: str = Field(min_length=6, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -56,7 +53,7 @@ class UserCreate(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     email: str | None = Field(default=None, max_length=255)
     department: str | None = Field(default=None, max_length=120)
-    password: str | None = Field(default=None, min_length=8, max_length=200)
+    password: str | None = Field(default=None, min_length=12, max_length=200)
     is_active: bool = True
 
 

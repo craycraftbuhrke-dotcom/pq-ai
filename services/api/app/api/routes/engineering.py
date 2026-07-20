@@ -1,12 +1,15 @@
-from datetime import UTC, datetime
+import logging
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.core.config import settings
 from app.domain.scope_policy import ScopeViolation, require_approved_quality_type
 from app.models.domain import (
     AppUser,
@@ -44,15 +47,22 @@ from app.models.domain import (
     VehicleModel,
 )
 from app.schemas import engineering as schemas
-from app.services.file_imports import build_import_preview, decode_base64_file
+from app.services.file_imports import (
+    build_import_preview,
+    decode_base64_file,
+    execute_validated_import,
+)
 
 router = APIRouter(prefix="/engineering", tags=["engineering-workflow"])
+logger = logging.getLogger(__name__)
 
 APPROVAL_STATUSES = {"APPROVED", "ACTIVE"}
 CLOSED_TASK_STATUSES = {"VERIFIED", "CLOSED"}
 MATERIAL_REVIEW_STATUSES = {"ACCEPTED", "REJECTED"}
 DURR_IMPORT_DOMAINS = {"DURR_DXQ", "DURR_PLC"}
 MATERIAL_IMPORT_DOMAINS = {"MATERIAL_COA", "MATERIAL_TDS"}
+FILE_IMPORT_CLAIM_TTL = timedelta(hours=2)
+FILE_IMPORT_HEARTBEAT_INTERVAL = timedelta(minutes=5)
 
 
 def _required(db: Session, model: type, resource_id: str, label: str):
@@ -423,7 +433,12 @@ def preview_file_import_job(
     db: Session = Depends(get_db),
 ) -> FileImportJob:
     profile = _required(db, FileImportProfile, payload.profile_id, "文件导入 profile")
-    content = decode_base64_file(payload.content_base64)
+    if profile.status != "ACTIVE":
+        raise HTTPException(status_code=409, detail="只能使用已生效的导入配置")
+    content = decode_base64_file(
+        payload.content_base64,
+        max_bytes=settings.file_import_max_bytes,
+    )
     preview = build_import_preview(
         profile,
         content,
@@ -451,14 +466,171 @@ def preview_file_import_job(
     return _save(db, FileImportJob(**values))
 
 
-@router.post("/file-import-jobs", response_model=schemas.FileImportJobRead, status_code=status.HTTP_201_CREATED)
-def create_file_import_job(payload: schemas.FileImportJobCreate, db: Session = Depends(get_db)) -> FileImportJob:
-    values = payload.model_dump()
-    values["submitted_at"] = values.get("submitted_at") or datetime.now(UTC)
-    if values.get("status") == "IMPORTED" and not values.get("imported_at"):
-        values["imported_at"] = datetime.now(UTC)
-    _validate_file_job(db, values)
-    return _save(db, FileImportJob(**values))
+def _execute_file_import_job(
+    job: FileImportJob,
+    profile: FileImportProfile,
+    *,
+    mode: str,
+    success_status: str,
+    db: Session,
+) -> FileImportJob:
+    claim_at = datetime.now(UTC)
+    stale_before = claim_at - FILE_IMPORT_CLAIM_TTL
+    claim_token = str(uuid4())
+    claimed_preview = dict(job.preview_payload or {})
+    claimed_preview["_import_claim"] = {
+        "token": claim_token,
+        "claimed_at": claim_at.isoformat(),
+    }
+    claim = db.execute(
+        update(FileImportJob)
+        .where(
+            FileImportJob.id == job.id,
+            or_(
+                FileImportJob.status == "VALIDATED",
+                and_(
+                    FileImportJob.status == "IMPORTING",
+                    FileImportJob.updated_at < stale_before,
+                ),
+            ),
+        )
+        .values(status="IMPORTING", preview_payload=claimed_preview, updated_at=claim_at)
+        .execution_options(synchronize_session=False)
+    )
+    if claim.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="该导入任务已被处理，请刷新后查看最新状态")
+    db.commit()
+    db.refresh(job)
+
+    next_heartbeat_at = claim_at + FILE_IMPORT_HEARTBEAT_INTERVAL
+
+    def heartbeat() -> None:
+        nonlocal next_heartbeat_at
+        heartbeat_at = datetime.now(UTC)
+        if heartbeat_at < next_heartbeat_at:
+            return
+        renewal = db.execute(
+            update(FileImportJob)
+            .where(
+                FileImportJob.id == job.id,
+                FileImportJob.status == "IMPORTING",
+                FileImportJob.preview_payload["_import_claim"]["token"].as_string()
+                == claim_token,
+            )
+            .values(updated_at=heartbeat_at)
+            .execution_options(synchronize_session=False)
+        )
+        if renewal.rowcount != 1:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="导入任务执行租约已失效，请刷新任务状态")
+        db.commit()
+        next_heartbeat_at = heartbeat_at + FILE_IMPORT_HEARTBEAT_INTERVAL
+
+    def finalize_claim(**values) -> FileImportJob:
+        finalization = db.execute(
+            update(FileImportJob)
+            .where(
+                FileImportJob.id == job.id,
+                FileImportJob.status == "IMPORTING",
+                FileImportJob.preview_payload["_import_claim"]["token"].as_string()
+                == claim_token,
+            )
+            .values(**values, updated_at=datetime.now(UTC))
+            .execution_options(synchronize_session=False)
+        )
+        if finalization.rowcount != 1:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="导入任务所有权已变化，当前结果未写入")
+        db.commit()
+        return _required(db, FileImportJob, job.id, "文件导入任务")
+
+    completed_preview = dict(claimed_preview)
+    completed_preview.pop("_import_claim", None)
+
+    try:
+        result = execute_validated_import(
+            profile,
+            claimed_preview,
+            source_filename=job.source_filename,
+            mode=mode,
+            heartbeat=heartbeat,
+            db=db,
+        )
+    except HTTPException as exc:
+        db.rollback()
+        return finalize_claim(
+            status="FAILED",
+            preview_payload=completed_preview,
+            error_report={"error_count": 1, "errors": [{"row": 0, "message": str(exc.detail)}]},
+        )
+    except Exception:
+        logger.exception("file import execution failed", extra={"file_import_job_id": job.id})
+        db.rollback()
+        return finalize_claim(
+            status="FAILED",
+            preview_payload=completed_preview,
+            error_report={
+                "error_count": 1,
+                "errors": [{"row": 0, "message": "导入执行异常，请检查服务日志后重试"}],
+            },
+        )
+
+    preview_payload = dict(completed_preview)
+    preview_payload["import_result"] = result
+    if result.get("failed", 0):
+        failed_row_count = int(result["failed"])
+        return finalize_claim(
+            status="FAILED",
+            preview_payload=preview_payload,
+            failed_row_count=failed_row_count,
+            valid_row_count=max(0, job.row_count - failed_row_count),
+            error_report={
+                "error_count": failed_row_count,
+                "errors": result.get("errors", []),
+                "truncated_errors": bool(result.get("truncated_errors")),
+            },
+        )
+    return finalize_claim(
+        status=success_status,
+        preview_payload=preview_payload,
+        failed_row_count=0,
+        valid_row_count=job.row_count,
+        error_report=None,
+        imported_at=datetime.now(UTC),
+    )
+
+
+@router.post(
+    "/file-import-jobs/{job_id}/commit",
+    response_model=schemas.FileImportJobRead,
+)
+def commit_file_import_job(
+    job_id: str,
+    payload: schemas.FileImportCommitRequest,
+    db: Session = Depends(get_db),
+) -> FileImportJob:
+    job = _required(db, FileImportJob, job_id, "文件导入任务")
+    if job.status not in {"VALIDATED", "IMPORTING"}:
+        raise HTTPException(status_code=409, detail="只有校验通过且尚未写入的任务可以确认导入")
+    profile = _required(db, FileImportProfile, job.profile_id, "文件导入 profile")
+    if profile.status != "ACTIVE":
+        raise HTTPException(status_code=409, detail="导入配置已失效，请重新选择配置并预览")
+    return _execute_file_import_job(
+        job,
+        profile,
+        mode=payload.mode,
+        success_status="IMPORTED",
+        db=db,
+    )
+
+
+def reject_direct_file_import_job_create(
+    payload: schemas.FileImportJobCreate,
+    db: Session,
+) -> FileImportJob:
+    del payload, db
+    raise HTTPException(status_code=405, detail="导入任务只能通过文件预览流程创建")
 
 
 @router.post(
@@ -472,6 +644,11 @@ def replay_file_import_job(
     db: Session = Depends(get_db),
 ) -> FileImportJob:
     original = _required(db, FileImportJob, job_id, "文件导入任务")
+    profile = _required(db, FileImportProfile, original.profile_id, "文件导入 profile")
+    if profile.status != "ACTIVE":
+        raise HTTPException(status_code=409, detail="导入配置已失效，不能重放")
+    if not original.preview_payload or original.preview_payload.get("validation_status") != "PASSED":
+        raise HTTPException(status_code=409, detail="原任务未通过字段校验，修正配置后请重新上传")
     values = {
         "import_no": payload.import_no or _default_import_no(f"REPLAY-{original.import_no}"),
         "profile_id": original.profile_id,
@@ -479,7 +656,7 @@ def replay_file_import_job(
         "source_filename": original.source_filename,
         "source_uri": original.source_uri,
         "source_checksum": original.source_checksum,
-        "status": "REPLAYED",
+        "status": "VALIDATED",
         "row_count": original.row_count,
         "valid_row_count": original.valid_row_count,
         "failed_row_count": original.failed_row_count,
@@ -491,25 +668,20 @@ def replay_file_import_job(
         "remark": payload.remark,
     }
     _validate_file_job(db, values)
-    return _save(db, FileImportJob(**values))
+    replay = _save(db, FileImportJob(**values))
+    return _execute_file_import_job(
+        replay,
+        profile,
+        mode="upsert",
+        success_status="REPLAYED",
+        db=db,
+    )
 
 
 @router.patch("/file-import-jobs/{job_id}", response_model=schemas.FileImportJobRead)
 def update_file_import_job(job_id: str, payload: schemas.FileImportJobUpdate, db: Session = Depends(get_db)) -> FileImportJob:
     resource = _required(db, FileImportJob, job_id, "文件导入任务")
-    changes = payload.model_dump(exclude_unset=True)
-    merged = {
-        "profile_id": resource.profile_id,
-        "domain_type": resource.domain_type,
-        "replay_of_job_id": resource.replay_of_job_id,
-        "row_count": changes.get("row_count", resource.row_count),
-        "valid_row_count": changes.get("valid_row_count", resource.valid_row_count),
-        "failed_row_count": changes.get("failed_row_count", resource.failed_row_count),
-    }
-    _validate_file_job(db, merged)
     _apply_changes(resource, payload)
-    if resource.status == "IMPORTED" and resource.imported_at is None:
-        resource.imported_at = datetime.now(UTC)
     return _commit_update(db, resource)
 
 

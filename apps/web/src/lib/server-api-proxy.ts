@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { apiRequestHeaders } from "@/lib/auth-data";
+import { apiRequestHeaders, isUpstreamTimeout, upstreamRequestSignal } from "@/lib/auth-data";
 
 const resourcePaths: Record<string, string> = {
   factories: "/factories",
@@ -48,7 +48,13 @@ export async function proxyMasterDataRequest(
   }
 
   try {
-    const response = await fetch(target, { method, headers, body, cache: "no-store" });
+    const response = await fetch(target, {
+      method,
+      headers,
+      body,
+      cache: "no-store",
+      signal: upstreamRequestSignal(request),
+    });
     if (response.status === 204) {
       return new NextResponse(null, { status: 204 });
     }
@@ -60,7 +66,14 @@ export async function proxyMasterDataRequest(
       );
     }
     return NextResponse.json(result, { status: response.status });
-  } catch {
-    return NextResponse.json({ error: "无法连接后端服务，请确认 API 已启动" }, { status: 502 });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: isUpstreamTimeout(error)
+          ? "后端服务响应超时"
+          : "无法连接后端服务，请确认 API 已启动",
+      },
+      { status: isUpstreamTimeout(error) ? 504 : 502 },
+    );
   }
 }

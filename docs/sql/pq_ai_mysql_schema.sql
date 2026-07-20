@@ -1,9 +1,9 @@
 -- PQ-AI MySQL 建表总表审批 SQL
--- 生成日期：2026-07-05
+-- 生成日期：2026-07-17
 -- 用途：提交数据库审批工单后由授权 DBA 人工执行。
 -- 范围：仅包含数据表定义；不包含建库语句、物理外键、视图、触发器、存储过程或事件。
 -- 规则：应用、Docker、CI、测试和种子脚本不得自动执行本文件。
--- 统计：数据表 90 张；应用层逻辑引用 156 个。
+-- 统计：数据表 99 张；应用层逻辑引用 172 个。
 
 
 CREATE TABLE `actual_parameter` (
@@ -235,10 +235,13 @@ CREATE TABLE `dataset_snapshot` (
 
 CREATE TABLE `dataset_split_member` (
   `dataset_snapshot_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '数据集快照ID；应用层逻辑引用 dataset_snapshot.id',
-  `point_feature_snapshot_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '业务字段：point_feature_snapshot_id；应用层逻辑引用 point_feature_snapshot.id',
-  `production_run_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '生产事件ID；应用层逻辑引用 production_run.id',
-  `measurement_point_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '测量点ID；应用层逻辑引用 measurement_point.id',
-  `target_measurement_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '目标测量ID；应用层逻辑引用 quality_measurement.id',
+  `source_type` VARCHAR(24) NOT NULL DEFAULT '' COMMENT '样本来源：生产记录或人工训练宽表',
+  `source_ref` VARCHAR(100) NOT NULL DEFAULT '' COMMENT '来源内唯一标识',
+  `point_feature_snapshot_id` VARCHAR(36) NULL COMMENT '生产点位特征快照ID；应用层逻辑引用 point_feature_snapshot.id',
+  `manual_sample_id` VARCHAR(36) NULL COMMENT '人工训练宽表样本ID；应用层逻辑引用 training_wide_sample.id',
+  `production_run_id` VARCHAR(36) NULL COMMENT '生产事件ID；应用层逻辑引用 production_run.id',
+  `measurement_point_id` VARCHAR(36) NULL COMMENT '测量点ID；应用层逻辑引用 measurement_point.id',
+  `target_measurement_id` VARCHAR(36) NULL COMMENT '目标测量ID；应用层逻辑引用 quality_measurement.id',
   `group_value` VARCHAR(100) NOT NULL DEFAULT '' COMMENT '编组值',
   `split` VARCHAR(24) NOT NULL DEFAULT '' COMMENT '业务字段：split',
   `target_value` DECIMAL(18,6) NOT NULL DEFAULT 0 COMMENT '目标值',
@@ -248,7 +251,7 @@ CREATE TABLE `dataset_split_member` (
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_dataset_feature_snapshot` (`dataset_snapshot_id`, `point_feature_snapshot_id`),
+  UNIQUE KEY `uk_dataset_source_member` (`dataset_snapshot_id`, `source_type`, `source_ref`),
   KEY `idx_dataset_split_group` (`dataset_snapshot_id`, `split`, `group_value`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='数据集训练验证成员';
 
@@ -380,7 +383,7 @@ CREATE TABLE `file_import_job` (
   `source_filename` VARCHAR(240) NOT NULL DEFAULT '' COMMENT '业务字段：source_filename',
   `source_uri` VARCHAR(500) NULL COMMENT '来源文件URI',
   `source_checksum` VARCHAR(128) NULL COMMENT '业务字段：source_checksum',
-  `row_status` VARCHAR(24) NOT NULL DEFAULT 'PREVIEWED' COMMENT '状态',
+  `row_status` VARCHAR(24) NOT NULL DEFAULT 'PREVIEWED' COMMENT '状态：PREVIEWED/VALIDATED/IMPORTING/IMPORTED/FAILED/REPLAYED',
   `row_count` INT NOT NULL DEFAULT 0 COMMENT '业务字段：row_count',
   `valid_row_count` INT NOT NULL DEFAULT 0 COMMENT '业务字段：valid_row_count',
   `failed_row_count` INT NOT NULL DEFAULT 0 COMMENT '业务字段：failed_row_count',
@@ -738,6 +741,25 @@ CREATE TABLE `measurement_point_layout` (
   UNIQUE KEY `uk_point_layout_view` (`measurement_point_id`, `body_view`),
   KEY `idx_point_layout_view_status` (`body_view`, `row_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='测量点白车身布局坐标';
+
+CREATE TABLE `measurement_point_3d_layout` (
+  `measurement_point_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '逻辑引用 measurement_point.id',
+  `pos_x` DOUBLE NOT NULL COMMENT '车身局部坐标 X',
+  `pos_y` DOUBLE NOT NULL COMMENT '车身局部坐标 Y',
+  `pos_z` DOUBLE NOT NULL COMMENT '车身局部坐标 Z',
+  `normal_x` DOUBLE NULL COMMENT '表面法向 X（可选）',
+  `normal_y` DOUBLE NULL COMMENT '表面法向 Y（可选）',
+  `normal_z` DOUBLE NULL COMMENT '表面法向 Z（可选）',
+  `model_asset_key` VARCHAR(120) NULL COMMENT '绑定数模版本/路径键，换模后提示重标定',
+  -- project_to_2d 是 API/批量导入执行指令，仅控制是否同步二维投影，不是持久化字段。
+  `row_status` VARCHAR(24) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/INACTIVE；移除仅停用',
+  `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_point_3d_layout_point` (`measurement_point_id`),
+  KEY `idx_point_3d_layout_status` (`row_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='测量点白车身三维布局坐标';
 
 CREATE TABLE `measurement_probe` (
   `instrument_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '测量仪器ID；应用层逻辑引用 measurement_instrument.id',
@@ -1461,6 +1483,117 @@ CREATE TABLE `recommendation_action` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='推荐参数动作';
 
+CREATE TABLE `remote_parameter_snapshot` (
+  `connection_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '远程工作站连接ID；应用层逻辑引用 remote_station_connection.id',
+  `source_type` VARCHAR(24) NOT NULL DEFAULT '' COMMENT '来源：云端、虚拟线或上位机',
+  `program_version_id` VARCHAR(36) NULL COMMENT '喷涂程序版本ID；应用层逻辑引用 spray_program_version.id',
+  `version_label` VARCHAR(80) NOT NULL DEFAULT '' COMMENT '来源侧版本标识',
+  `payload_hash` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '完整刷子表SHA-256',
+  `parameter_payload` JSON NULL COMMENT '完整刷子表快照',
+  `collection_ref` VARCHAR(160) NULL COMMENT '采集来源标识',
+  `row_status` VARCHAR(24) NOT NULL DEFAULT 'VERIFIED' COMMENT '状态',
+  `collected_by` VARCHAR(80) NOT NULL DEFAULT '' COMMENT '采集人',
+  `collected_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '采集时间',
+  `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_remote_snapshot_source` (`connection_id`, `source_type`, `collected_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='云端虚拟线与上位机完整参数快照';
+
+CREATE TABLE `remote_program_release` (
+  `release_no` VARCHAR(80) NOT NULL DEFAULT '' COMMENT '远程发布单号',
+  `connection_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '远程工作站连接ID；应用层逻辑引用 remote_station_connection.id',
+  `base_program_version_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '原喷涂程序版本ID；应用层逻辑引用 spray_program_version.id',
+  `candidate_program_version_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '候选喷涂程序版本ID；应用层逻辑引用 spray_program_version.id',
+  `row_status` VARCHAR(32) NOT NULL DEFAULT 'DRAFT' COMMENT '发布状态',
+  `package_hash` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '完整发布包SHA-256',
+  `package_payload` JSON NULL COMMENT '完整刷子表发布包',
+  `risk_summary` TEXT NULL COMMENT '调整原因、风险与回退条件',
+  `requested_by` VARCHAR(80) NOT NULL DEFAULT '' COMMENT '申请人',
+  `requested_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '申请时间',
+  `approved_by` VARCHAR(80) NULL COMMENT '审批人',
+  `approved_at` TIMESTAMP NULL COMMENT '审批时间',
+  `staged_at` TIMESTAMP NULL COMMENT '远程暂存时间',
+  `local_confirmed_at` TIMESTAMP NULL COMMENT '上位机现场确认时间',
+  `applied_at` TIMESTAMP NULL COMMENT '正式提交时间',
+  `verified_at` TIMESTAMP NULL COMMENT '回读核验时间',
+  `readback_hash` VARCHAR(64) NULL COMMENT '回读完整刷子表SHA-256',
+  `rollback_program_version_id` VARCHAR(36) NULL COMMENT '回退程序版本ID；应用层逻辑引用 spray_program_version.id',
+  `last_error` TEXT NULL COMMENT '最后错误',
+  `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_remote_program_release` (`release_no`),
+  KEY `idx_remote_release_status` (`connection_id`, `row_status`, `requested_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='上位机完整喷涂程序受控发布单';
+
+CREATE TABLE `remote_release_event` (
+  `release_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '远程发布单ID；应用层逻辑引用 remote_program_release.id',
+  `event_type` VARCHAR(48) NOT NULL DEFAULT '' COMMENT '发布事件类型',
+  `status` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '事件发生后状态',
+  `message` TEXT NULL COMMENT '通俗事件说明',
+  `event_payload` JSON NULL COMMENT '非敏感事件证据',
+  `actor` VARCHAR(80) NOT NULL DEFAULT '' COMMENT '操作人',
+  `occurred_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发生时间',
+  `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_remote_release_event` (`release_id`, `occurred_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='远程程序发布审计事件';
+
+CREATE TABLE `remote_station_connection` (
+  `connection_code` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '连接编号',
+  `name` VARCHAR(160) NOT NULL DEFAULT '' COMMENT '连接名称',
+  `factory_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '工厂ID；应用层逻辑引用 factory.id',
+  `station_code` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '工作站编号',
+  `station_name` VARCHAR(120) NOT NULL DEFAULT '' COMMENT '工作站名称',
+  `process_stage` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '喷涂执行阶段',
+  `host` VARCHAR(255) NOT NULL DEFAULT '' COMMENT '目标上位机地址',
+  `port` INT UNSIGNED NOT NULL DEFAULT 9443 COMMENT '双向TLS通信端口',
+  `transport` VARCHAR(24) NOT NULL DEFAULT 'TLS_TCP' COMMENT '传输方式',
+  `adapter_mode` VARCHAR(32) NOT NULL DEFAULT 'SIMULATOR' COMMENT '目标机适配方式',
+  `agent_id` VARCHAR(80) NOT NULL DEFAULT '' COMMENT '目标代理编号',
+  `server_name` VARCHAR(255) NULL COMMENT '服务端证书名称',
+  `client_certificate_ref` VARCHAR(160) NULL COMMENT '客户端证书运行时配置引用名',
+  `client_private_key_ref` VARCHAR(160) NULL COMMENT '客户端私钥运行时配置引用名',
+  `trusted_ca_ref` VARCHAR(160) NULL COMMENT '受信任根证书运行时配置引用名',
+  `row_status` VARCHAR(24) NOT NULL DEFAULT 'DRAFT' COMMENT '连接审批状态',
+  `operating_mode` VARCHAR(24) NOT NULL DEFAULT 'READ_ONLY' COMMENT '只读或仅已审批发布',
+  `local_confirmation_required` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '是否要求上位机现场确认',
+  `connect_timeout_seconds` INT UNSIGNED NOT NULL DEFAULT 5 COMMENT '连接超时秒数',
+  `max_package_bytes` INT UNSIGNED NOT NULL DEFAULT 5242880 COMMENT '最大参数包字节数',
+  `last_seen_at` TIMESTAMP NULL COMMENT '最后连通时间',
+  `last_inventory_hash` VARCHAR(64) NULL COMMENT '最后回读完整刷子表SHA-256',
+  `approved_by` VARCHAR(80) NULL COMMENT '审批人',
+  `approved_at` TIMESTAMP NULL COMMENT '审批时间',
+  `remark` TEXT NULL COMMENT '备注',
+  `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_remote_station_connection` (`connection_code`),
+  KEY `idx_remote_station_factory` (`factory_id`, `process_stage`, `row_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='目标机器人上位机受控连接配置';
+
+CREATE TABLE `remote_station_reconciliation` (
+  `connection_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '远程工作站连接ID；应用层逻辑引用 remote_station_connection.id',
+  `cloud_snapshot_id` VARCHAR(36) NULL COMMENT '云端快照ID；应用层逻辑引用 remote_parameter_snapshot.id',
+  `virtual_snapshot_id` VARCHAR(36) NULL COMMENT '虚拟生产线快照ID；应用层逻辑引用 remote_parameter_snapshot.id',
+  `upper_snapshot_id` VARCHAR(36) NULL COMMENT '上位机快照ID；应用层逻辑引用 remote_parameter_snapshot.id',
+  `row_status` VARCHAR(24) NOT NULL DEFAULT 'GENERATED' COMMENT '对账状态',
+  `diff_payload` JSON NULL COMMENT '按刷子号和参数生成的三方差异',
+  `generated_by` VARCHAR(80) NOT NULL DEFAULT '' COMMENT '生成人',
+  `generated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '生成时间',
+  `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_remote_reconcile_time` (`connection_id`, `generated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='云端虚拟线与上位机参数三方对账';
+
 CREATE TABLE `role_code` (
   `code` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '编码',
   `name` VARCHAR(120) NOT NULL DEFAULT '' COMMENT '名称',
@@ -1561,6 +1694,45 @@ CREATE TABLE `supplier_mat_submission` (
   UNIQUE KEY `uk_supplier_mat_submission` (`submission_no`),
   KEY `idx_supplier_mat_status` (`supplier`, `row_status`, `submitted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='供应商材料资料提交';
+
+CREATE TABLE `training_data_upload` (
+  `upload_no` VARCHAR(80) NOT NULL DEFAULT '' COMMENT '人工训练数据上传编号',
+  `name` VARCHAR(160) NOT NULL DEFAULT '' COMMENT '人工训练数据名称',
+  `target_metric` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '目标质量指标',
+  `feature_set_version` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '特征集合版本',
+  `source_type` VARCHAR(24) NOT NULL DEFAULT 'MANUAL_UPLOAD' COMMENT '数据来源类型',
+  `file_name` VARCHAR(255) NOT NULL DEFAULT '' COMMENT '原始文件名',
+  `file_hash` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '原始文件SHA-256',
+  `row_status` VARCHAR(24) NOT NULL DEFAULT 'VALIDATED' COMMENT '校验状态',
+  `sample_count` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '样本数量',
+  `feature_names` JSON NULL COMMENT '统一训练特征名称',
+  `validation_report` JSON NULL COMMENT '导入校验结果',
+  `uploaded_by` VARCHAR(80) NOT NULL DEFAULT '' COMMENT '上传人',
+  `uploaded_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '上传时间',
+  `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_training_data_upload_no` (`upload_no`),
+  KEY `idx_training_upload_target` (`target_metric`, `row_status`, `uploaded_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='人工上传训练宽表治理记录';
+
+CREATE TABLE `training_wide_sample` (
+  `upload_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '人工训练数据上传ID；应用层逻辑引用 training_data_upload.id',
+  `sample_no` VARCHAR(100) NOT NULL DEFAULT '' COMMENT '样本编号',
+  `group_value` VARCHAR(100) NOT NULL DEFAULT '' COMMENT '独立车身批次或试验分组',
+  `occurred_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '样本实际发生时间',
+  `target_value` DECIMAL(18,6) NOT NULL DEFAULT 0 COMMENT '目标质量实测值',
+  `feature_values` JSON NULL COMMENT '经中文列名转换后的统一特征值',
+  `lineage` JSON NULL COMMENT '原始文件哈希和行号血缘',
+  `is_valid` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '是否通过校验',
+  `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_training_upload_sample` (`upload_id`, `sample_no`),
+  KEY `idx_training_sample_group` (`upload_id`, `group_value`, `occurred_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='人工训练数据宽表样本';
 
 CREATE TABLE `trajectory_path_segment` (
   `trajectory_program_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '轨迹程序ID；应用层逻辑引用 trajectory_program.id',
@@ -1696,6 +1868,7 @@ CREATE TABLE `vehicle_model_color` (
 -- controlled_trial.measurement_point_id -> measurement_point.id
 -- dataset_split_member.dataset_snapshot_id -> dataset_snapshot.id
 -- dataset_split_member.point_feature_snapshot_id -> point_feature_snapshot.id
+-- dataset_split_member.manual_sample_id -> training_wide_sample.id
 -- dataset_split_member.production_run_id -> production_run.id
 -- dataset_split_member.measurement_point_id -> measurement_point.id
 -- dataset_split_member.target_measurement_id -> quality_measurement.id
@@ -1815,6 +1988,18 @@ CREATE TABLE `vehicle_model_color` (
 -- recommendation.measurement_point_id -> measurement_point.id
 -- recommendation_action.recommendation_id -> recommendation.id
 -- recommendation_action.constraint_source_id -> parameter_constraint_source.id
+-- remote_parameter_snapshot.connection_id -> remote_station_connection.id
+-- remote_parameter_snapshot.program_version_id -> spray_program_version.id
+-- remote_program_release.connection_id -> remote_station_connection.id
+-- remote_program_release.base_program_version_id -> spray_program_version.id
+-- remote_program_release.candidate_program_version_id -> spray_program_version.id
+-- remote_program_release.rollback_program_version_id -> spray_program_version.id
+-- remote_release_event.release_id -> remote_program_release.id
+-- remote_station_connection.factory_id -> factory.id
+-- remote_station_reconciliation.connection_id -> remote_station_connection.id
+-- remote_station_reconciliation.cloud_snapshot_id -> remote_parameter_snapshot.id
+-- remote_station_reconciliation.virtual_snapshot_id -> remote_parameter_snapshot.id
+-- remote_station_reconciliation.upper_snapshot_id -> remote_parameter_snapshot.id
 -- role_permission.role_id -> role_code.id
 -- role_permission.permission_id -> permission.id
 -- spray_program.factory_id -> factory.id
@@ -1823,6 +2008,7 @@ CREATE TABLE `vehicle_model_color` (
 -- supplier_mat_issue.material_batch_id -> material_batch.id
 -- supplier_mat_submission.material_batch_id -> material_batch.id
 -- supplier_mat_submission.profile_id -> file_import_profile.id
+-- training_wide_sample.upload_id -> training_data_upload.id
 -- trajectory_path_segment.trajectory_program_id -> trajectory_program.id
 -- trajectory_path_segment.brush_id -> brush.id
 -- trajectory_path_segment.part_id -> part.id

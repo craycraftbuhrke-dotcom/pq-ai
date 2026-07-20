@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { apiRequestHeaders } from "@/lib/auth-data";
+import { apiRequestHeaders, isUpstreamTimeout, upstreamRequestSignal } from "@/lib/auth-data";
+import { parseBoundedJson } from "@/lib/bounded-request-body";
 
 type ApprovalRequest = {
   approvedBy?: string;
@@ -12,7 +13,6 @@ export async function POST(
   context: { params: Promise<{ recommendationId: string }> },
 ) {
   const { recommendationId } = await context.params;
-  const payload = (await request.json().catch(() => ({}))) as ApprovalRequest;
   const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
 
   if (!apiUrl) {
@@ -20,6 +20,7 @@ export async function POST(
   }
 
   try {
+    const payload = await parseBoundedJson<ApprovalRequest>(request, 32 * 1024);
     const authHeaders = await apiRequestHeaders(request);
     const response = await fetch(
       `${apiUrl}/ai/recommendations/${encodeURIComponent(recommendationId)}/approval`,
@@ -32,6 +33,7 @@ export async function POST(
           comment: payload.comment,
         }),
         cache: "no-store",
+        signal: upstreamRequestSignal(request),
       },
     );
     const result = (await response.json()) as Record<string, unknown>;
@@ -42,7 +44,17 @@ export async function POST(
       );
     }
     return NextResponse.json(result);
-  } catch {
-    return NextResponse.json({ error: "无法连接审批服务，请稍后重试" }, { status: 502 });
+  } catch (error) {
+    const clientStatus = (error as { status?: number }).status;
+    if (typeof clientStatus === "number" && clientStatus >= 400 && clientStatus < 500) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "审批请求无效" },
+        { status: clientStatus },
+      );
+    }
+    return NextResponse.json(
+      { error: isUpstreamTimeout(error) ? "审批服务响应超时" : "无法连接审批服务，请稍后重试" },
+      { status: isUpstreamTimeout(error) ? 504 : 502 },
+    );
   }
 }

@@ -105,6 +105,27 @@ class SprayProgramVersionUpdate(BaseModel):
     color_ids: list[str] | None = None
 
 
+class ProgramParameterEdit(BaseModel):
+    brush_no: str = Field(min_length=1, max_length=32)
+    parameter_code: str = Field(min_length=1, max_length=64)
+    new_value: float
+
+
+class ProgramVersionDeriveRequest(BaseModel):
+    version: str = Field(min_length=1, max_length=32)
+    edits: list[ProgramParameterEdit] = Field(min_length=1, max_length=5000)
+
+
+class ProgramVersionDeriveResult(BaseModel):
+    program_version_id: str
+    version: str
+    status: str
+    brush_count: int
+    parameter_count: int
+    contribution_count: int
+    changed_parameter_count: int
+
+
 class BrushCreate(BaseModel):
     brush_no: str = Field(min_length=1, max_length=32)
     brush_table_no: str = Field(min_length=1, max_length=64)
@@ -621,4 +642,3 @@ class RecipeWideImportResult(BaseModel):
     skipped: int
     failed: int
     errors: list[RecipeWideImportError] = Field(default_factory=list)
-

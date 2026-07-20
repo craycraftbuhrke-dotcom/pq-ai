@@ -3,15 +3,23 @@ from __future__ import annotations
 import base64
 import csv
 import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO, StringIO
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import HTTPException
 from openpyxl import load_workbook
 
 from app.models.domain import FileImportProfile
+
+MAX_PERSISTED_IMPORT_ROWS = 20_000
+TARGET_RESOURCE_ALIASES = {
+    "quality_measurement": "quality.measurements",
+    "supplier-submissions": "engineering.supplier-submissions",
+    "trajectory-geometries": "engineering.trajectory-geometries",
+}
 
 
 @dataclass(frozen=True)
@@ -24,7 +32,7 @@ class ImportPreview:
     source_checksum: str
 
 
-def decode_base64_file(content_base64: str) -> bytes:
+def decode_base64_file(content_base64: str, *, max_bytes: int | None = None) -> bytes:
     if "," in content_base64 and content_base64.split(",", 1)[0].startswith("data:"):
         content_base64 = content_base64.split(",", 1)[1]
     try:
@@ -33,7 +41,13 @@ def decode_base64_file(content_base64: str) -> bytes:
         raise HTTPException(status_code=422, detail="文件内容不是有效 base64") from exc
     if not content:
         raise HTTPException(status_code=422, detail="导入文件为空")
+    if max_bytes is not None and len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail="导入文件超过系统允许的大小")
     return content
+
+
+def resolve_target_resource(target_resource: str) -> str:
+    return TARGET_RESOURCE_ALIASES.get(target_resource, target_resource)
 
 
 def build_import_preview(
@@ -56,6 +70,14 @@ def build_import_preview(
                 "message": f"文件行数 {len(rows)} 超过 profile 限制 {max_rows}",
             }
         )
+    if len(rows) > MAX_PERSISTED_IMPORT_ROWS:
+        errors.append(
+            {
+                "row": 0,
+                "field": "file",
+                "message": f"文件行数超过单任务上限 {MAX_PERSISTED_IMPORT_ROWS}",
+            }
+        )
 
     mapped_rows: list[dict[str, Any]] = []
     source_headers = sorted({key for row in rows for key in row})
@@ -63,13 +85,15 @@ def build_import_preview(
         mapped = _map_row(row, profile.field_mapping or {})
         mapped_rows.append(mapped)
         errors.extend(_validate_row(mapped, index, profile.required_fields or [], rules))
+    errors.extend(_validate_target_rows(profile.target_resource, mapped_rows))
 
+    has_file_error = any(error.get("row") == 0 for error in errors)
     failed_row_numbers = {
         int(error["row"])
         for error in errors
         if isinstance(error.get("row"), int) and int(error["row"]) > 0
     }
-    failed_row_count = len(failed_row_numbers)
+    failed_row_count = len(rows) if has_file_error else len(failed_row_numbers)
     preview_payload = {
         "profile_id": profile.id,
         "profile_code": profile.code,
@@ -77,13 +101,16 @@ def build_import_preview(
         "domain_type": profile.domain_type,
         "parser_type": profile.parser_type,
         "target_resource": profile.target_resource,
+        "resolved_target_resource": resolve_target_resource(profile.target_resource),
         "source_filename": source_filename,
         "source_headers": source_headers,
         "target_fields": sorted({key for row in mapped_rows for key in row}),
         "field_mapping": profile.field_mapping or {},
         "required_fields": profile.required_fields or [],
         "validation_rules": rules,
+        "row_count": len(mapped_rows),
         "preview_rows": mapped_rows[: max(preview_limit, 0)],
+        "validated_rows": mapped_rows if len(mapped_rows) <= MAX_PERSISTED_IMPORT_ROWS else [],
         "truncated_preview": len(mapped_rows) > max(preview_limit, 0),
         "validation_status": "PASSED" if not errors else "FAILED",
     }
@@ -100,6 +127,101 @@ def build_import_preview(
         error_report=error_report,
         source_checksum=source_checksum or hashlib.sha256(content).hexdigest(),
     )
+
+
+def execute_validated_import(
+    profile: FileImportProfile,
+    preview_payload: dict[str, Any] | None,
+    *,
+    source_filename: str,
+    mode: str,
+    heartbeat: Callable[[], None] | None = None,
+    db,
+) -> dict[str, Any]:
+    if not preview_payload or preview_payload.get("validation_status") != "PASSED":
+        raise HTTPException(status_code=409, detail="导入任务未通过预览校验，不能写入业务数据")
+    rows = preview_payload.get("validated_rows")
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=409, detail="导入任务缺少可重放的规范化数据")
+    if len(rows) != int(preview_payload.get("row_count", len(rows))):
+        raise HTTPException(status_code=409, detail="导入任务规范化数据不完整，请重新上传并校验")
+    preview_target = preview_payload.get("resolved_target_resource")
+    current_target = resolve_target_resource(profile.target_resource)
+    if not isinstance(preview_target, str) or not preview_target:
+        raise HTTPException(status_code=409, detail="导入预览缺少冻结的目标资源，请重新上传并校验")
+    if preview_target != current_target:
+        raise HTTPException(status_code=409, detail="导入配置的目标资源已变化，请重新上传并校验")
+
+    from app.services.bulk_io import import_resource
+
+    if heartbeat:
+        heartbeat()
+    result = import_resource(
+        preview_target,
+        _rows_to_csv(rows),
+        filename=f"{source_filename}.normalized.csv",
+        mode=mode,
+        progress_callback=heartbeat,
+        db=db,
+    )
+    if heartbeat:
+        heartbeat()
+    return result
+
+
+def _validate_target_rows(
+    target_resource: str,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    from app.services.bulk_io import get_resource
+
+    try:
+        resource = get_resource(resolve_target_resource(target_resource))
+    except HTTPException as exc:
+        return [{"row": 0, "field": "target_resource", "message": str(exc.detail)}]
+    if not resource.importable:
+        return [{"row": 0, "field": "target_resource", "message": "目标资源不允许批量导入"}]
+
+    allowed = {field.name for field in resource.fields if field.name != "id"}
+    required = {field.name for field in resource.fields if field.required and field.name != "id"}
+    errors: list[dict[str, Any]] = []
+    unknown = sorted({field for row in rows for field in row if field not in allowed})
+    if unknown:
+        errors.append(
+            {
+                "row": 0,
+                "field": "field_mapping",
+                "message": f"映射后的字段不属于目标资源：{', '.join(unknown)}",
+            }
+        )
+    for row_index, row in enumerate(rows, start=2):
+        missing = sorted(field for field in required if _blank(row.get(field)))
+        if missing:
+            errors.append(
+                {
+                    "row": row_index,
+                    "field": ",".join(missing),
+                    "message": "目标资源必填字段缺失",
+                }
+            )
+    return errors
+
+
+def _rows_to_csv(rows: list[dict[str, Any]]) -> bytes:
+    headers = sorted({str(key) for row in rows for key in row})
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=headers)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(
+            {
+                header: json.dumps(row.get(header), ensure_ascii=False, default=str)
+                if isinstance(row.get(header), (dict, list))
+                else row.get(header)
+                for header in headers
+            }
+        )
+    return ("\ufeff" + output.getvalue()).encode("utf-8")
 
 
 def _parse_rows(content: bytes, filename: str, parser_type: str) -> list[dict[str, Any]]:

@@ -14,7 +14,7 @@ export type CurrentActor = {
   connectionError?: string;
 };
 
-type ApiActor = {
+export type ApiActor = {
   user_id: string | null;
   username: string;
   display_name: string;
@@ -23,11 +23,103 @@ type ApiActor = {
   auth_enabled: boolean;
 };
 
-// 认证总开关：兼容 API_AUTH_ENABLED（服务端）与 NEXT_PUBLIC_AUTH_ENABLED（客户端）。
-// 默认关闭 —— 测试期直接进入系统，未来正式投用改为 true 即可恢复完整登录流程。
-const authEnabledEnv =
-  process.env.API_AUTH_ENABLED === "true" ||
-  process.env.NEXT_PUBLIC_AUTH_ENABLED === "true";
+function isApiActor(value: unknown): value is ApiActor {
+  if (!value || typeof value !== "object") return false;
+  const actor = value as Partial<ApiActor>;
+  return (
+    (typeof actor.user_id === "string" || actor.user_id === null) &&
+    typeof actor.username === "string" &&
+    typeof actor.display_name === "string" &&
+    Array.isArray(actor.roles) &&
+    actor.roles.every((item) => typeof item === "string") &&
+    Array.isArray(actor.permissions) &&
+    actor.permissions.every((item) => typeof item === "string") &&
+    typeof actor.auth_enabled === "boolean"
+  );
+}
+
+async function parseApiActor(response: Response): Promise<ApiActor> {
+  let value: unknown;
+  try {
+    value = await response.json();
+  } catch {
+    throw Object.assign(new Error("后端认证服务返回了无法识别的结果"), { status: 502 });
+  }
+  if (!isApiActor(value)) {
+    throw Object.assign(new Error("后端认证服务返回了不完整的账号信息"), { status: 502 });
+  }
+  return value;
+}
+
+// 默认启用认证；生产环境不能通过环境变量取得 SYSTEM 通配权限。
+const authEnabledEnv = !(
+  process.env.NODE_ENV === "test" &&
+  process.env.AUTH_ENABLED === "false" &&
+  process.env.API_AUTH_ENABLED === "false"
+);
+
+export function upstreamRequestSignal(request: Request, timeoutMs = 10_000): AbortSignal {
+  return AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]);
+}
+
+export function isUpstreamTimeout(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
+}
+
+export async function requireApiActor(request: Request, permission?: string): Promise<ApiActor> {
+  if (!authEnabledEnv) {
+    return {
+      user_id: "isolated-test-mode",
+      username: "system",
+      display_name: "测试模式（认证已关闭）",
+      roles: ["SYSTEM"],
+      permissions: ["*"],
+      auth_enabled: false,
+    };
+  }
+  const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
+  if (!apiUrl) {
+    throw Object.assign(new Error("后端认证服务未配置"), { status: 503 });
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/auth/me`, {
+      headers: await apiRequestHeaders(request),
+      cache: "no-store",
+      signal: upstreamRequestSignal(request, 2500),
+    });
+  } catch (error) {
+    throw Object.assign(
+      new Error(isUpstreamTimeout(error) ? "后端认证服务响应超时" : "无法连接后端认证服务"),
+      { status: isUpstreamTimeout(error) ? 504 : 502 },
+    );
+  }
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw Object.assign(new Error("登录已失效，请重新登录"), { status: 401 });
+    }
+    if (response.status === 403) {
+      throw Object.assign(new Error("当前账号没有访问权限"), { status: 403 });
+    }
+    throw Object.assign(new Error("后端认证服务异常"), { status: response.status });
+  }
+  const actor = await parseApiActor(response);
+  if (!actor.user_id) {
+    throw Object.assign(new Error("请先登录"), { status: 401 });
+  }
+  if (
+    permission &&
+    !actor.permissions.includes("*") &&
+    !actor.permissions.includes(permission)
+  ) {
+    throw Object.assign(new Error("当前账号没有执行此操作的权限"), { status: 403 });
+  }
+  return actor;
+}
+
+export async function requireApiPermission(request: Request, permission: string): Promise<ApiActor> {
+  return requireApiActor(request, permission);
+}
 
 export const fallbackActor: CurrentActor = {
   userId: null,
@@ -94,23 +186,10 @@ function withConnectionError(message: string): CurrentActor {
   return { ...fallbackActor, connectionError: message };
 }
 
-async function apiKeyFromRequest(request?: Request): Promise<string | null> {
-  if (request) {
-    return cookieFromHeader(request.headers.get("cookie"), "pq_api_key");
-  }
-  const store = await cookies();
-  return store.get("pq_api_key")?.value ?? null;
-}
-
 export async function apiRequestHeaders(request?: Request): Promise<HeadersInit> {
   const token = await sessionToken(request);
   if (token) return { Authorization: `Bearer ${token}` };
-
-  const cookieApiKey = await apiKeyFromRequest(request);
-  if (cookieApiKey) return { "x-api-key": cookieApiKey };
-
-  const apiKey = process.env.API_KEY;
-  return apiKey ? { "x-api-key": apiKey } : {};
+  return {};
 }
 
 export async function getCurrentActor(): Promise<CurrentActor> {
@@ -136,7 +215,7 @@ export async function getCurrentActor(): Promise<CurrentActor> {
           `后端认证接口返回错误（HTTP ${response.status}）`,
       );
     }
-    return mapActor((await response.json()) as ApiActor);
+    return mapActor(await parseApiActor(response));
   } catch (error) {
     const message = error instanceof Error ? error.message : "无法连接后端认证接口";
     return withConnectionError(`无法连接后端认证接口：${message}`);

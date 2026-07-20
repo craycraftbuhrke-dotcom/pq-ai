@@ -63,6 +63,8 @@ from app.schemas.process import (
     ProductionStageRunCreate,
     ProductionStageRunRead,
     ProductionStageRunUpdate,
+    ProgramVersionDeriveRequest,
+    ProgramVersionDeriveResult,
     SprayProgramCreate,
     SprayProgramRead,
     SprayProgramUpdate,
@@ -71,8 +73,32 @@ from app.schemas.process import (
     SprayProgramVersionUpdate,
 )
 from app.services.catalog_seed import seed_parameter_catalog
+from app.services.point_optimization import point_optimization_workbench
+from app.services.program_versioning import derive_complete_program_version
 
 router = APIRouter(tags=["process-data"])
+
+
+@router.get("/point-optimization-workbench")
+def get_point_optimization_workbench(
+    production_run_id: str,
+    measurement_point_id: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    return point_optimization_workbench(db, production_run_id, measurement_point_id)
+
+
+@router.post(
+    "/program-versions/{version_id}/derive-complete",
+    response_model=ProgramVersionDeriveResult,
+    status_code=status.HTTP_201_CREATED,
+)
+def derive_program_version(
+    version_id: str,
+    payload: ProgramVersionDeriveRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    return derive_complete_program_version(db, version_id, payload.version, payload.edits)
 
 
 PROCESS_STAGE_LABELS = {

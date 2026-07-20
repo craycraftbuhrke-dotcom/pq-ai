@@ -7,9 +7,9 @@ import { ProductionWorkspace } from "@/components/production-workspace";
 import { MaterialTrendsPanel } from "@/components/material-trends-panel";
 
 const TABS = [
-  { key: "overview", label: "概览与 SPC" },
+  { key: "overview", label: "材料趋势" },
   { key: "batches", label: "材料批次" },
-  { key: "governance", label: "特性治理" },
+  { key: "governance", label: "材料规格与检测" },
 ];
 
 function MaterialsHubInner() {

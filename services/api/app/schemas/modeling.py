@@ -14,6 +14,9 @@ class DatasetBuildRequest(BaseModel):
     holdout_ratio: float = Field(default=0.25, ge=0.1, le=0.5)
     min_train_groups: int = Field(default=3, ge=2)
     min_validation_groups: int = Field(default=2, ge=1)
+    include_all_production: bool = True
+    production_snapshot_ids: list[str] = Field(default_factory=list, max_length=5000)
+    manual_upload_ids: list[str] = Field(default_factory=list, max_length=500)
 
 
 class DatasetSnapshotRead(BaseModel):
@@ -46,15 +49,53 @@ class DatasetSnapshotRead(BaseModel):
 class DatasetSplitMemberRead(BaseModel):
     id: str
     dataset_snapshot_id: str
-    point_feature_snapshot_id: str
-    production_run_id: str
-    measurement_point_id: str
-    target_measurement_id: str
+    source_type: str
+    source_ref: str
+    point_feature_snapshot_id: str | None
+    manual_sample_id: str | None
+    production_run_id: str | None
+    measurement_point_id: str | None
+    target_measurement_id: str | None
     group_value: str
     split: str
     target_value: float
     feature_values: dict
     occurred_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TrainingDataUploadRead(BaseModel):
+    id: str
+    upload_no: str
+    name: str
+    target_metric: str
+    feature_set_version: str
+    source_type: str
+    file_name: str
+    file_hash: str
+    status: str
+    sample_count: int
+    feature_names: list[str]
+    validation_report: dict
+    uploaded_by: str
+    uploaded_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TrainingWideSampleRead(BaseModel):
+    id: str
+    upload_id: str
+    sample_no: str
+    group_value: str
+    occurred_at: datetime
+    target_value: float
+    feature_values: dict
+    lineage: dict
+    is_valid: bool
 
     model_config = ConfigDict(from_attributes=True)
 

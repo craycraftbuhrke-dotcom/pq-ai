@@ -2,14 +2,19 @@ FROM comfyui-local:latest
 
 WORKDIR /app
 ENV NODE_ENV=production
+ENV AUTH_ENABLED=true
 # 前端容器监听端口，默认 80（nginx 惯例）
 ENV PORT=80
 ENV LISTEN_HOST=0.0.0.0
-COPY .runtime/node /usr/local/bin/node
-COPY .next/standalone ./
-COPY .next/static ./apps/web/.next/static
-COPY public ./apps/web/public
+COPY --chown=node:node .runtime/node /usr/local/bin/node
+COPY --chown=node:node .next/standalone ./
+COPY --chown=node:node .next/static ./apps/web/.next/static
+COPY --chown=node:node public ./apps/web/public
+RUN test -f /app/apps/web/server.js
 
 ENTRYPOINT []
+WORKDIR /app/apps/web
+ENV WEB_PUBLIC_DIR=/app/apps/web/public
+USER node
 EXPOSE 80
-CMD ["sh", "-c", "HOSTNAME=\"${LISTEN_HOST:-0.0.0.0}\" PORT=\"${PORT:-80}\" node apps/web/server.js"]
+CMD ["sh", "-c", ": \"${AUTH_ENABLED:?AUTH_ENABLED must be true}\"; [ \"$AUTH_ENABLED\" = \"true\" ] || exit 1; : \"${NEXT_PUBLIC_AUTH_ENABLED:?NEXT_PUBLIC_AUTH_ENABLED must be true}\"; [ \"$NEXT_PUBLIC_AUTH_ENABLED\" = \"true\" ] || exit 1; HOSTNAME=\"${LISTEN_HOST:-0.0.0.0}\" PORT=\"${PORT:-80}\" node /app/apps/web/server.js"]

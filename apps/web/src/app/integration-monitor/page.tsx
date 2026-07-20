@@ -21,7 +21,6 @@ type IntegrationHealth = {
 
 const SYSTEM_ICONS: Record<string, string> = { MES: "🏭", QMS: "✅", ROBOT: "🤖", MATERIAL: "🧪", MEASUREMENT: "📐" };
 
-function getApiKey(): string { const m = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/); return m ? decodeURIComponent(m[1]) : ""; }
 function timeSince(d: string | null): string {
   if (!d) return "—"; const diff = Date.now() - new Date(d).getTime(); const mins = Math.floor(diff / 60000);
   if (mins < 1) return "刚刚"; if (mins < 60) return `${mins} 分钟前`;
@@ -36,11 +35,10 @@ export default function IntegrationMonitorPage({ embedded = false }: { embedded?
   const reload = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const key = getApiKey();
       const [epR, evR, smR] = await Promise.all([
-        fetch("/api/integrations/endpoints", { headers: { "x-api-key": key }, cache: "no-store" }),
-        fetch("/api/integrations/events?limit=500", { headers: { "x-api-key": key }, cache: "no-store" }),
-        fetch("/api/integrations/summary", { headers: { "x-api-key": key }, cache: "no-store" }),
+        fetch("/api/integrations/endpoints", { cache: "no-store" }),
+        fetch("/api/integrations/events?limit=500", { cache: "no-store" }),
+        fetch("/api/integrations/summary", { cache: "no-store" }),
       ]);
       const eps = (await epR.json()) as Array<{ id: string; code: string; name: string; system_type: string; is_active: boolean; last_success_at: string | null; last_failure_at: string | null }>;
       const evts = (await evR.json()) as Array<{ event_no: string; endpoint_id: string; event_type: string; status: string; last_error: string | null; created_at: string }>;

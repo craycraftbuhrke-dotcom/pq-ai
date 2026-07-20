@@ -1,0 +1,10 @@
+{
+  "main": "agent.cjs",
+  "mainFormat": "commonjs",
+  "output": "dist/pq-upper-agent.exe",
+  "disableExperimentalSEAWarning": true,
+  "useSnapshot": false,
+  "useCodeCache": true,
+  "execArgv": ["--no-warnings"],
+  "execArgvExtension": "none"
+}

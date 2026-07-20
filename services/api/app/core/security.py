@@ -298,8 +298,32 @@ def required_permission(method: str, path: str) -> str | None:
         return "features.build"
     if path.startswith("/api/v1/integrations"):
         return "integration.manage"
+    if path.startswith("/api/v1/remote-stations/connections"):
+        return "integration.manage"
+    if path.startswith("/api/v1/remote-stations/releases"):
+        if path.endswith(("/approve", "/reject")):
+            return "ai.approve"
+        if path.endswith("/commit"):
+            return "ai.execute"
+        if path.endswith(("/stage", "/refresh", "/verify-readback")):
+            return "integration.manage"
+        return "process.write"
     if path.startswith("/api/v1/engineering"):
         return "engineering.manage"
+    if path.startswith(
+        (
+            "/api/v1/spray-programs",
+            "/api/v1/program-versions",
+            "/api/v1/brushes",
+            "/api/v1/brush-parameters",
+            "/api/v1/parameter-definitions",
+            "/api/v1/production-runs",
+            "/api/v1/production-stage-runs",
+            "/api/v1/actual-parameters",
+            "/api/v1/material-batches",
+        )
+    ):
+        return "process.write"
     if path.startswith("/api/v1/bulk/"):
         if path.startswith("/api/v1/bulk/master."):
             return "master.write"
@@ -313,6 +337,8 @@ def required_permission(method: str, path: str) -> str | None:
             return "engineering.manage"
         return "process.write"
     if path in {"/api/v1/ai/models/train", "/api/v1/ai/models/datasets"}:
+        return "ai.train"
+    if path.startswith("/api/v1/ai/models/training-wide"):
         return "ai.train"
     if path.startswith("/api/v1/ai/models/acceptance-policies"):
         return "ai.train"

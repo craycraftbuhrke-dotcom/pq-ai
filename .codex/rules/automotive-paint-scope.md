@@ -29,6 +29,7 @@ These rules are mandatory for code, schema, APIs, UI, seed data, tests, analytic
 - Material definition, test method, specification, applicability, batch result, and production use are separate facts. Never infer an approved material feature from a legacy batch field or free-form COA JSON.
 - Approved material features require an active stage/target-family applicability and a `VERIFIED` batch result tested no later than production start. A missing required result blocks feature generation and AI use.
 - Random point-row train/test splits are prohibited.
+- Governed production samples and separately uploaded training-wide samples are equal sources. Both use the same feature matrix, independent grouping, temporal split, leakage check, lineage, and acceptance gates; no hidden priority or weighting is allowed.
 - An approved dataset snapshot must freeze feature values, target values, source quality-measurement IDs, group membership, temporal split, and leakage-check result.
 - Models are trained only on the training split. Training metrics are never acceptance evidence; activation requires independent validation plus a recorded human acceptance decision.
 - Candidate models must generate multi-axis validation evidence: primary temporal holdout, production-group leave-one-out, and factory/model/color axes when the dataset has diversity. Single-value axes must be recorded as insufficient diversity, not treated as validated.
@@ -43,6 +44,11 @@ These rules are mandatory for code, schema, APIs, UI, seed data, tests, analytic
 - Physical foreign keys are forbidden. Use application-enforced `logical_fk` metadata, create/update existence checks, and reference checks instead.
 - Runtime MySQL operations must not execute physical `DELETE`, `CREATE`, `DROP`, `ALTER`, `TRUNCATE`, `REPLACE`, or application-authored `SET`. Removal workflows must use disable, archive, status transition, or version replacement.
 - Human web access must use personal username/password sessions stored in HttpOnly cookies; API Keys are for system integration and server-side automation only. Never expose session tokens or API Keys to browser JavaScript.
+- A robot-parameter edit always derives a complete draft program version containing every brush, parameter, applicability relation, and point contribution before applying the requested edits.
+- Remote upper-computer writes are forbidden until connection approval, separate release approval, remote staging, local upper-computer confirmation, explicit commit, and readback hash verification all succeed.
+- Remote transport uses mutual TLS TCP/IP, bounded length-prefixed packets, target-agent identity, replay protection, full-package hashes, and runtime-injected certificate/key paths. Plain TCP and source/database secrets are forbidden.
+- Cloud, virtual-line, and upper-computer snapshots remain independent; three-way reconciliation is read-only.
+- Undocumented direct Dürr/robot writes are forbidden. Production adapters require factory/vendor approval and FAT/SAT.
 - Unit tests may create transient SQLite schemas only through the guarded test helper; this exception never applies to MySQL or shared databases.
 - Never invent factory limits, TDS values, device semantics, instrument fields, or standards.
 

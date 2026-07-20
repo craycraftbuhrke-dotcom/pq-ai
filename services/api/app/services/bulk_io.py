@@ -12,15 +12,16 @@ from typing import Any, Callable, Literal, Union, get_args, get_origin
 from fastapi import HTTPException
 from fastapi.responses import Response
 from openpyxl import Workbook, load_workbook
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.routes.body_map import upsert_body_map_3d_layout, upsert_body_map_layout
 from app.api.routes.factories import create_factory, update_factory
-from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
 from app.api.routes.engineering import (
     create_contribution_validation,
-    create_file_import_job,
+    reject_direct_file_import_job_create,
     create_file_import_profile,
     create_issue_task,
     create_issue_task_comment,
@@ -137,8 +138,11 @@ from app.api.routes.robot_governance import (
     update_robot,
     update_trajectory_program,
 )
+from app.core.referential_integrity import check_fk
+from app.domain.quality_metric_catalog import QUALITY_METRIC_CATALOG
 from app.models.domain import (
     ActualParameter,
+    AppUser,
     Brush,
     BrushParameter,
     BrushPointContribution,
@@ -168,6 +172,8 @@ from app.models.domain import (
     MeasurementMethod,
     MeasurementMsaStudy,
     MeasurementPoint,
+    MeasurementPoint3DLayout,
+    MeasurementPointLayout,
     MeasurementProbe,
     MeasurementReferenceStandard,
     ModelExplanation,
@@ -307,6 +313,8 @@ from app.schemas.process import (
     TrajectoryProgramUpdate,
 )
 from app.schemas.quality import (
+    BodyMap3DLayoutUpsert,
+    BodyMapLayoutUpsert,
     MeasurementCalibrationCreate,
     MeasurementCalibrationUpdate,
     MeasurementImportProfileCreate,
@@ -325,6 +333,16 @@ from app.schemas.quality import (
 
 FileFormat = Literal["csv", "xlsx"]
 ImportMode = Literal["create", "upsert"]
+
+
+class ProgramVehicleModelBulkCreate(BaseModel):
+    program_version_id: str = Field(min_length=1, max_length=36)
+    vehicle_model_id: str = Field(min_length=1, max_length=36)
+
+
+class ProgramColorBulkCreate(BaseModel):
+    program_version_id: str = Field(min_length=1, max_length=36)
+    color_id: str = Field(min_length=1, max_length=36)
 
 
 @dataclass(frozen=True)
@@ -366,6 +384,60 @@ class BulkResource:
         )
 
 
+@dataclass(frozen=True)
+class BusinessReference:
+    model: type
+    label: str
+    lookup_fields: tuple[str, ...]
+    display_fields: tuple[str, ...] = ()
+
+
+_BUSINESS_REFERENCES: dict[str, BusinessReference] = {
+    "factory_id": BusinessReference(Factory, "工厂", ("code", "name"), ("code", "name")),
+    "vehicle_model_id": BusinessReference(VehicleModel, "车型", ("code", "name"), ("code", "name")),
+    "color_id": BusinessReference(Color, "颜色", ("code", "name"), ("code", "name")),
+    "part_id": BusinessReference(Part, "零件", ("code", "name"), ("code", "name")),
+    "measurement_group_id": BusinessReference(MeasurementGroup, "测量编组", ("code", "name"), ("code", "name")),
+    "measurement_point_id": BusinessReference(MeasurementPoint, "测量点", ("code", "name"), ("code", "name")),
+    "spray_program_id": BusinessReference(SprayProgram, "喷涂程序", ("program_code", "name"), ("program_code", "name")),
+    "program_version_id": BusinessReference(SprayProgramVersion, "喷涂程序版本", ("version",), ("version",)),
+    "brush_id": BusinessReference(Brush, "刷子号", ("brush_no", "brush_table_no"), ("brush_no", "brush_table_no")),
+    "parameter_definition_id": BusinessReference(ParameterDefinition, "工艺参数", ("code", "name"), ("code", "name")),
+    "material_batch_id": BusinessReference(MaterialBatch, "材料批次", ("batch_no", "material_code", "material_name"), ("batch_no", "material_name")),
+    "production_run_id": BusinessReference(ProductionRun, "生产记录", ("run_no", "body_no"), ("run_no", "body_no")),
+    "production_stage_run_id": BusinessReference(ProductionStageRun, "生产工序记录", ("process_stage",), ("process_stage",)),
+    "instrument_id": BusinessReference(MeasurementInstrument, "测量仪器", ("code", "serial_no", "name"), ("code", "name")),
+    "measurement_probe_id": BusinessReference(MeasurementProbe, "测量探头", ("code", "serial_no", "name"), ("code", "name")),
+    "measurement_method_id": BusinessReference(MeasurementMethod, "测量方法", ("code", "name", "version"), ("code", "version")),
+    "calibration_record_id": BusinessReference(MeasurementCalibrationRecord, "校准记录", ("calibration_no",), ("calibration_no",)),
+    "reference_standard_id": BusinessReference(MeasurementReferenceStandard, "参考件", ("code", "name", "serial_no"), ("code", "name")),
+    "import_profile_id": BusinessReference(MeasurementImportProfile, "导入规则", ("code", "name", "version"), ("code", "version")),
+    "process_route_id": BusinessReference(ProcessRoute, "工艺路线", ("route_code", "name", "version"), ("route_code", "version")),
+    "task_id": BusinessReference(QualityIssueTask, "问题任务", ("task_no", "title"), ("task_no", "title")),
+    "quality_measurement_id": BusinessReference(QualityMeasurement, "质量检测记录", ("data_no",), ("data_no",)),
+    "characteristic_definition_id": BusinessReference(MaterialCharacteristicDefinition, "材料特性", ("code", "name"), ("code", "name")),
+    "robot_id": BusinessReference(DurrRobot, "机器人", ("code", "name"), ("code", "name")),
+    "controller_id": BusinessReference(DurrApplicationController, "应用控制器", ("code", "name"), ("code", "name")),
+    "atomizer_id": BusinessReference(DurrRotaryAtomizer, "静电旋杯", ("code", "name"), ("code", "name")),
+    "trajectory_program_id": BusinessReference(TrajectoryProgram, "轨迹程序", ("trajectory_code", "name", "version"), ("trajectory_code", "version")),
+    "path_segment_id": BusinessReference(TrajectoryPathSegment, "轨迹段", ("segment_no", "name"), ("segment_no", "name")),
+    "contribution_version_id": BusinessReference(PointContributionVersion, "贡献关系版本", ("version",), ("version",)),
+    "endpoint_id": BusinessReference(IntegrationEndpoint, "对接系统", ("code", "name"), ("code", "name")),
+    "owner_user_id": BusinessReference(AppUser, "负责人", ("username", "display_name", "email"), ("username", "display_name")),
+    "profile_id": BusinessReference(FileImportProfile, "文件导入规则", ("code", "name", "version"), ("code", "version")),
+    "source_import_job_id": BusinessReference(FileImportJob, "来源导入任务", ("import_no",), ("import_no",)),
+    "replay_of_job_id": BusinessReference(FileImportJob, "原导入任务", ("import_no",), ("import_no",)),
+}
+
+
+def _business_reference_for(resource: BulkResource, field_name: str) -> BusinessReference | None:
+    if field_name == "method_id":
+        if resource.key.startswith("material-governance."):
+            return BusinessReference(MaterialTestMethod, "材料检测方法", ("code", "name", "version"), ("code", "version"))
+        return BusinessReference(MeasurementMethod, "测量方法", ("code", "name", "version"), ("code", "version"))
+    return _BUSINESS_REFERENCES.get(field_name)
+
+
 def list_bulk_resources() -> list[dict[str, str | bool]]:
     return [
         {
@@ -375,6 +447,30 @@ def list_bulk_resources() -> list[dict[str, str | bool]]:
             "importable": resource.importable,
         }
         for resource in RESOURCES.values()
+    ]
+
+
+def describe_bulk_columns(
+    resource_key: str,
+    *,
+    quality_type: str | None = None,
+) -> list[dict[str, str | bool]]:
+    resource = get_resource(resource_key)
+    if resource.key == "quality.measurements":
+        fields = _quality_measurement_template_fields(quality_type)
+    elif resource.key == "process.brush-contributions":
+        fields = _brush_contribution_template_fields()
+    else:
+        fields = _upload_template_fields(resource.fields)
+    return [
+        {
+            "key": field.name,
+            "label": _display_field_label(field),
+            "kind": field.kind,
+            "required": field.required,
+            "description": field.description,
+        }
+        for field in fields
     ]
 
 
@@ -396,6 +492,7 @@ def render_template(
     vehicle_model_code: str | None = None,
     shift: str | None = None,
     brush_id: str | None = None,
+    default_values: dict[str, Any] | None = None,
 ) -> Response:
     resource = get_resource(resource_key)
     if resource.key == "quality.measurements":
@@ -434,6 +531,10 @@ def render_template(
         rows,
         purpose="template",
         include_metadata=True,
+        fields=_upload_template_fields(
+            resource.fields,
+            hidden_fields=set((default_values or {}).keys()),
+        ),
     )
 
 
@@ -446,7 +547,11 @@ def export_resource(
 ) -> Response:
     resource = get_resource(resource_key)
     if resource.key == "quality.measurements":
-        fields = _quality_measurement_bulk_fields(quality_type)
+        fields = tuple(
+            field
+            for field in _quality_measurement_bulk_fields(quality_type)
+            if field.name != "id"
+        )
         rows = _quality_measurement_export_rows(db, quality_type=quality_type)
         return _file_response(
             resource,
@@ -463,6 +568,7 @@ def export_resource(
         rows,
         purpose="export",
         include_metadata=file_format == "xlsx",
+        fields=_upload_template_fields(resource.fields),
     )
 
 
@@ -473,22 +579,30 @@ def import_resource(
     filename: str,
     mode: ImportMode,
     default_values: dict[str, Any] | None = None,
+    progress_callback: Callable[[], None] | None = None,
     db: Session,
 ) -> dict[str, Any]:
     resource = get_resource(resource_key)
     if not resource.importable:
         raise HTTPException(status_code=405, detail=f"{resource.label}不支持批量导入")
     if resource.key == "quality.measurements":
-        return _import_quality_measurements(content, filename=filename, mode=mode, db=db)
+        return _import_quality_measurements(
+            content,
+            filename=filename,
+            mode=mode,
+            progress_callback=progress_callback,
+            db=db,
+        )
     if resource.key == "process.brush-contributions":
         return _import_brush_contributions(
             content,
             filename=filename,
             mode=mode,
             default_values=default_values,
+            progress_callback=progress_callback,
             db=db,
         )
-    rows = _parse_rows(content, filename)
+    rows = _parse_rows(content, filename, fields=resource.fields)
     field_names = {field.name for field in resource.fields}
     required = {field.name for field in resource.fields if field.required}
     default_values = default_values or {}
@@ -506,20 +620,37 @@ def import_resource(
     updated = 0
     skipped = 0
     errors: list[dict[str, Any]] = []
+    reference_cache: dict[tuple[str, ...], str] = {}
+    reference_candidate_cache: dict[
+        tuple[type, tuple[str, ...], tuple[str, ...]], list[tuple[Any, set[str]]]
+    ] = {}
     for row_index, raw_row in enumerate(rows, start=2):
-        merged_row = _apply_default_values(raw_row, default_values)
-        if not any(str(value or "").strip() for value in merged_row.values()):
+        if progress_callback:
+            progress_callback()
+        if not any(str(value or "").strip() for value in raw_row.values()):
             skipped += 1
             continue
+        merged_row = _apply_default_values(raw_row, default_values)
         try:
-            normalized = _normalize_row(resource, merged_row)
+            resolved_row = _resolve_business_references(
+                resource,
+                db,
+                merged_row,
+                cache=reference_cache,
+                candidate_cache=reference_candidate_cache,
+            )
+            normalized = _normalize_row(resource, resolved_row)
             missing = sorted(
                 name
                 for name in required
                 if name != "id" and _is_blank(normalized.get(name))
             )
             if missing:
-                raise ValueError(f"缺少必填字段：{', '.join(missing)}")
+                labels = [
+                    _display_field_label(next(field for field in resource.fields if field.name == name))
+                    for name in missing
+                ]
+                raise ValueError(f"缺少必填内容：{', '.join(labels)}")
             existing_id = _resolve_existing_id(resource, db, normalized) if mode == "upsert" else None
             if existing_id:
                 if not resource.update_func or not resource.update_schema:
@@ -565,7 +696,7 @@ def _build_fields(
             fields.append(
                 BulkField(
                     name=name,
-                    label=name,
+                    label=_human_field_label(name),
                     kind=_kind_from_annotation(model_field.annotation),
                     required=schema is create_schema and model_field.is_required(),
                     example=_example_for(name, model_field.annotation),
@@ -579,9 +710,9 @@ def _build_fields(
 def _kind_from_annotation(annotation: Any) -> str:
     annotation = _strip_optional(annotation)
     origin = get_origin(annotation)
-    if origin is list:
+    if annotation is list or origin is list:
         return "list"
-    if origin is dict:
+    if annotation is dict or origin is dict:
         return "json"
     if annotation in {int}:
         return "integer"
@@ -606,37 +737,450 @@ def _strip_optional(annotation: Any) -> Any:
 def _example_for(name: str, annotation: Any) -> str:
     kind = _kind_from_annotation(annotation)
     if name.endswith("_id"):
-        return "填对应资源 id"
+        return "由页面范围自动带入，或填写业务编号"
     if kind == "boolean":
-        return "true"
+        return "是"
     if kind == "number":
         return "12.34"
     if kind == "integer":
         return "1"
     if kind == "datetime":
-        return "2026-06-10T08:00:00+08:00"
+        return "2026-06-10 08:00:00"
     if kind == "json":
-        return "{}"
+        return "项目=数值；项目=数值"
     if kind == "list":
-        return "A,B 或 JSON 数组"
+        return "多个内容用逗号分隔"
     if "quality_type" in name or name == "target_family":
-        return "ORANGE_PEEL"
+        return "橘皮"
     if "process_stage" in name:
-        return "MIDCOAT_EXT"
+        return "中涂外喷"
     return ""
 
 
 def _description_for(name: str) -> str:
     descriptions = {
-        "id": "存在 id 时可用于 upsert 更新。",
-        "metrics": "质量指标数组 JSON，例如 [{\"metric_code\":\"doi\",\"metric_name\":\"DOI\",\"raw_value\":82.5}]。",
-        "repeat_readings": "逐次读数数组 JSON，可留空 []。",
-        "vehicle_model_ids": "程序版本适用车型 id 列表，逗号分隔或 JSON 数组。",
-        "color_ids": "程序版本适用颜色 id 列表，逗号分隔或 JSON 数组。",
-        "supported_quality_types": "仪器支持质量类型，逗号分隔或 JSON 数组。",
-        "target_families": "材料特性批准目标族，逗号分隔或 JSON 数组。",
+        "id": "系统内部记录号；新增模板不会要求填写。",
+        "metrics": "质量指标请使用质量数据专用中文模板填写。",
+        "repeat_readings": "逐次读数请使用仪器文件导入或逐行表格填写。",
+        "vehicle_model_ids": "适用车型；多个内容用逗号分隔。",
+        "color_ids": "适用颜色；多个内容用逗号分隔。",
+        "supported_quality_types": "支持的质量类型；多个内容用逗号分隔。",
+        "target_families": "批准的质量目标；多个内容用逗号分隔。",
     }
+    if name.endswith("_id"):
+        return "填写页面中看到的业务代码或名称；系统会自动查找对应记录，不需要查询内部编号。"
+    if name.endswith("_ids"):
+        return "填写页面中看到的业务代码或名称；多个内容用逗号分隔，系统会自动查找对应记录。"
     return descriptions.get(name, "")
+
+
+_FIELD_LABEL_OVERRIDES = {
+    "id": "系统记录号",
+    "code": "业务代码",
+    "name": "名称",
+    "remark": "备注",
+    "description": "说明",
+    "factory_id": "工厂",
+    "vehicle_model_id": "车型",
+    "vehicle_model_ids": "适用车型",
+    "color_id": "颜色",
+    "color_ids": "适用颜色",
+    "part_id": "零件",
+    "measurement_group_id": "测量编组",
+    "measurement_point_id": "测量点",
+    "production_run_id": "生产记录",
+    "production_stage_run_id": "生产工序记录",
+    "program_version_id": "喷涂程序版本",
+    "spray_program_id": "喷涂程序",
+    "brush_id": "刷子号",
+    "instrument_id": "测量仪器",
+    "measurement_probe_id": "测量探头",
+    "measurement_method_id": "测量方法",
+    "calibration_record_id": "校准记录",
+    "reference_standard_id": "参考件",
+    "import_profile_id": "导入规则",
+    "process_route_id": "工艺路线",
+    "task_id": "问题任务",
+    "material_batch_id": "材料批次",
+    "characteristic_definition_id": "材料特性",
+    "method_id": "检测方法",
+    "robot_id": "机器人",
+    "controller_id": "应用控制器",
+    "atomizer_id": "静电旋杯",
+    "path_segment_id": "轨迹段",
+    "trajectory_program_id": "轨迹程序",
+    "contribution_version_id": "贡献关系版本",
+    "endpoint_id": "对接系统",
+    "body_no": "生产车号",
+    "run_no": "生产记录编号",
+    "batch_no": "材料批次号",
+    "process_stage": "喷涂工序",
+    "quality_type": "质量指标类型",
+    "quality_types": "适用质量类型",
+    "is_match_point": "是否匹配点",
+    "data_type": "数据用途",
+    "measured_at": "检测时间",
+    "measured_by": "检测人员",
+    "started_at": "开始时间",
+    "completed_at": "完成时间",
+    "created_by": "创建人员",
+    "approved_by": "批准人员",
+    "status": "当前状态",
+    "is_active": "是否启用",
+    "is_valid": "数据是否有效",
+    "is_approved": "是否已批准",
+    "version": "版本号",
+    "unit": "单位",
+    "supplier": "供应商",
+    "viscosity": "粘度",
+    "solid_ratio": "固含量",
+    "actual_value": "实际值",
+    "configured_value": "设定值",
+    "parameter_code": "参数代码",
+    "parameter_name": "参数名称",
+    "brush_no": "刷子号",
+    "brush_table_no": "刷子表号",
+    "spray_position": "喷涂位置",
+    "overlap_ratio": "重叠率",
+    "contribution_weight": "贡献权重",
+    "data_no": "质量数据编号",
+    "status_score": "状态评分",
+    "site_owner": "现场调试负责人",
+    "material_code": "材料代码",
+    "material_name": "材料名称",
+    "material_type": "材料类型",
+    "process_immediately": "是否立即处理",
+    "project_to_2d": "同步到二维点位图",
+    "target_family": "目标质量类型",
+    "target_families": "目标质量类型",
+    "source_filename": "来源文件名",
+    "error_report": "错误明细",
+    "replay_of_job_id": "原导入任务",
+    "target_resource": "导入到哪个业务模块",
+    "field_mapping": "文件列对应关系",
+    "required_fields": "必须填写的列",
+    "validation_rules": "数据检查规则",
+    "causality_status": "原因验证状态",
+    "owner_user_id": "负责人账号",
+    "problem_statement": "问题描述",
+    "suspected_cause": "疑似原因",
+    "data_quality_status": "数据检查状态",
+    "material_status": "材料检查状态",
+    "durr_execution_status": "杜尔设备执行检查状态",
+    "symptom_pattern": "异常表现规律",
+    "diagnosis_rule": "诊断规则",
+    "recommended_checks": "建议检查项",
+    "related_parameters": "相关工艺参数",
+    "evidence_level": "证据等级",
+    "grr_percent": "重复性与再现性占比",
+    "raw_results": "原始结果明细",
+    "geometry_class": "几何形状类别",
+    "layer_scope": "适用涂层范围",
+    "valid_until": "有效截止时间",
+    "feature_impacts": "影响因素明细",
+    "control_requirements": "管控要求",
+    "bake_strategy": "烘烤节点说明",
+    "containment_action": "临时控制措施",
+    "supplier_response": "供应商回复",
+    "deviation_decision": "偏差处置决定",
+    "source_import_job_id": "来源导入任务",
+    "start_position": "开始位置",
+    "end_position": "结束位置",
+    "normal_vector": "表面法向量",
+    "gun_distance": "喷枪距离",
+    "path_spacing": "轨迹间距",
+    "collision_risk_score": "碰撞风险评分",
+    "base_url": "服务地址",
+    "max_attempts": "最多尝试次数",
+    "canonical_unit": "标准单位",
+    "result_unit": "结果单位",
+    "supported_quality_types": "支持的质量类型",
+    "minimum_repeats": "最少重复测量次数",
+    "parameter_definition_id": "工艺参数",
+    "is_recommendable": "是否允许系统建议调整",
+    "actual_parameters": "实际工艺参数明细",
+    "is_master_sample": "是否封样版本",
+    "model_asset_key": "车身模型文件标识",
+    "body_view": "车身视图",
+    "grid_col": "网格列",
+    "raw_file_uri": "原始文件位置",
+    "bell_cup_type": "旋杯类型",
+    "bell_cup_code": "旋杯代码",
+    "deviation_details": "执行偏差明细",
+    "configured_speed": "设定速度",
+    "speed_unit": "速度单位",
+    "trigger_state": "喷涂触发状态",
+    "trigger_start_ms": "喷涂触发开始时间（毫秒）",
+    "trigger_end_ms": "喷涂触发结束时间（毫秒）",
+    "controller_software_version": "控制器软件版本",
+}
+
+_FIELD_TOKEN_LABELS = {
+    "actual": "实际", "aggregation": "汇总", "ai": "智能分析", "approved": "批准",
+    "auth": "认证", "author": "编写人", "bake": "烘烤", "base": "服务地址", "batch": "批次",
+    "bell": "旋杯", "body": "车身", "brush": "刷子", "calibrated": "校准时间",
+    "calibration": "校准", "canonical": "标准", "category": "类别", "causality": "原因验证",
+    "certificate": "证书", "characteristic": "特性", "check": "检查", "checksum": "文件校验值",
+    "coa": "批次检验报告", "coating": "涂层", "collision": "碰撞", "color": "颜色",
+    "comment": "协作记录", "conditions": "适用条件", "confidence": "可信度", "config": "配置",
+    "configuration": "配置", "constraint": "约束", "containment": "临时控制措施", "context": "生产上下文",
+    "control": "管控", "controlled": "受控", "coordinate": "坐标", "data": "数据", "deviation": "偏差处置",
+    "device": "设备", "diagnosis": "诊断", "digital": "数字标准", "direction": "方向",
+    "document": "文件", "doe": "试验设计文件", "domain": "业务类别", "downstream": "下游",
+    "due": "要求完成时间", "durr": "杜尔设备", "effective": "生效", "end": "结束",
+    "endpoint": "对接系统", "entry": "知识条目", "error": "错误报告", "event": "事件",
+    "evidence": "证据", "executed": "实际执行", "expected": "应有", "explanation": "解释",
+    "factory": "工厂", "failed": "失败", "feature": "影响因素", "field": "字段",
+    "firmware": "固件", "generated": "生成", "geometry": "几何", "grid": "网格",
+    "grr": "重复性与再现性", "gun": "喷枪", "hard": "强制", "hypothesis": "原因假设",
+    "import": "导入", "imported": "导入", "instructions": "操作说明", "instrument": "仪器", "issue": "问题",
+    "layer": "涂层", "layout": "位置", "limit": "限值", "lower": "下限", "manufacturer": "制造商",
+    "material": "材料", "max": "最大", "measured": "检测", "measurement": "测量",
+    "method": "方法", "metric": "指标", "min": "最小", "minimum": "最少", "model": "模型",
+    "msds": "安全说明文件", "ndc": "非离散度", "normal": "法向", "operator": "操作人员",
+    "orientation": "姿态", "owner": "负责人", "parameter": "参数", "parser": "解析方式",
+    "part": "零件", "path": "轨迹", "payload": "业务内容", "performed": "执行人员",
+    "point": "点位", "pos": "位置", "prediction": "预测", "preview": "预览",
+    "probe": "探头", "problem": "问题描述", "procedure": "作业文件", "process": "工艺",
+    "production": "生产", "profile": "导入规则", "program": "程序", "quality": "质量",
+    "raw": "原始", "recommendation": "建议", "recommended": "建议", "reference": "参考件",
+    "region": "区域", "related": "相关", "repeat": "重复", "replay": "重放来源",
+    "trial": "试验", "conclusion": "结论",
+    "required": "必填", "requires": "是否需要", "resolution": "解决方案", "result": "结果",
+    "reviewed": "复核", "robot": "机器人", "role": "角色", "route": "路线", "row": "行数",
+    "sample": "样本", "sampled": "采集", "schema": "文件格式版本", "segment": "轨迹段", "sensitivity": "敏感性",
+    "sequence": "顺序", "serial": "序列号", "severity": "严重程度", "shift": "班次",
+    "site": "现场", "soft": "建议", "software": "软件", "solid": "固含量", "source": "来源",
+    "speed": "速度", "spray": "喷涂", "standard": "标准", "start": "开始", "station": "工位",
+    "step": "步骤", "study": "研究", "submission": "供应商提交", "submitted": "提交",
+    "substrate": "基材", "summary": "摘要", "supplier": "供应商", "supported": "支持",
+    "suspected": "疑似", "symptom": "异常表现", "system": "系统", "tags": "标签",
+    "target": "目标", "task": "任务", "tcp": "工具中心点", "tds": "材料技术文件",
+    "tested": "检测", "title": "标题", "trajectory": "轨迹", "trigger": "喷涂触发",
+    "uncertainty": "不确定度", "upper": "上限", "upstream": "上游", "valid": "有效",
+    "validation": "验证", "vehicle": "车型", "version": "版本", "viscosity": "粘度",
+    "x": "横向", "y": "纵向", "z": "高度", "no": "编号", "type": "类型",
+    "value": "值", "values": "数值", "uri": "文件位置", "score": "评分", "count": "数量",
+    "time": "时间", "date": "日期", "at": "时间", "from": "开始", "to": "结束", "by": "人员",
+    "is": "是否", "id": "", "ids": "", "code": "代码", "name": "名称",
+}
+
+
+def _human_field_label(name: str) -> str:
+    if name in _FIELD_LABEL_OVERRIDES:
+        return _FIELD_LABEL_OVERRIDES[name]
+    translated = "".join(_FIELD_TOKEN_LABELS.get(token, token.upper()) for token in name.split("_"))
+    return translated or "业务信息"
+
+
+def _display_field_label(field_spec: BulkField) -> str:
+    configured = field_spec.label.strip()
+    if configured and configured != field_spec.name:
+        return (
+            configured.replace(" ID", "")
+            .replace("id ", "")
+            .replace("id时", "记录号时")
+        )
+    return _human_field_label(field_spec.name)
+
+
+def _upload_template_fields(
+    fields: tuple[BulkField, ...],
+    *,
+    hidden_fields: set[str] | None = None,
+) -> tuple[BulkField, ...]:
+    hidden = {"id", *(hidden_fields or set())}
+    return tuple(field for field in fields if field.name not in hidden)
+
+
+_REFERENCE_CONTEXT_FIELDS = (
+    "factory_id",
+    "vehicle_model_id",
+    "color_id",
+    "part_id",
+    "spray_program_id",
+    "program_version_id",
+    "instrument_id",
+    "characteristic_definition_id",
+    "process_route_id",
+    "production_run_id",
+    "trajectory_program_id",
+)
+
+
+def _normalize_reference_text(value: Any) -> str:
+    return re.sub(r"\s*[/|:]\s*", "/", str(value or "").strip()).casefold()
+
+
+def _business_reference_item_display(db: Session, reference: BusinessReference, item: Any) -> str:
+    if isinstance(item, SprayProgramVersion):
+        program = db.get(SprayProgram, item.spray_program_id)
+        return " / ".join(value for value in [getattr(program, "program_code", ""), item.version] if value)
+    if isinstance(item, Brush):
+        version = db.get(SprayProgramVersion, item.program_version_id)
+        program = db.get(SprayProgram, version.spray_program_id) if version else None
+        return " / ".join(
+            value
+            for value in [getattr(program, "program_code", ""), getattr(version, "version", ""), item.brush_no]
+            if value
+        )
+    if isinstance(item, ProductionStageRun):
+        production_run = db.get(ProductionRun, item.production_run_id)
+        return " / ".join(value for value in [getattr(production_run, "run_no", ""), item.process_stage] if value)
+    if isinstance(item, TrajectoryPathSegment):
+        trajectory = db.get(TrajectoryProgram, item.trajectory_program_id)
+        return " / ".join(
+            str(value)
+            for value in [getattr(trajectory, "trajectory_code", ""), getattr(trajectory, "version", ""), item.segment_no]
+            if value not in {None, ""}
+        )
+    values = [getattr(item, field_name, None) for field_name in reference.display_fields]
+    return " / ".join(str(value) for value in values if value not in {None, ""})
+
+
+def _business_reference_display(db: Session, reference: BusinessReference, value: Any) -> str:
+    item = db.get(reference.model, str(value))
+    if not item:
+        return str(value)
+    return _business_reference_item_display(db, reference, item) or str(value)
+
+
+def _reference_candidate_tokens(db: Session, reference: BusinessReference, item: Any) -> set[str]:
+    values = {
+        _normalize_reference_text(getattr(item, field_name, ""))
+        for field_name in reference.lookup_fields
+        if getattr(item, field_name, None) not in {None, ""}
+    }
+    display = _business_reference_item_display(db, reference, item)
+    if display:
+        values.add(_normalize_reference_text(display))
+    return values
+
+
+def _resolve_business_reference_value(
+    resource: BulkResource,
+    db: Session,
+    field_name: str,
+    value: Any,
+    row: dict[str, Any],
+    *,
+    cache: dict[tuple[str, ...], str],
+    candidate_cache: dict[
+        tuple[type, tuple[str, ...], tuple[str, ...]], list[tuple[Any, set[str]]]
+    ],
+) -> str:
+    reference = _business_reference_for(resource, field_name)
+    if not reference:
+        return str(value)
+    value_text = str(value).strip()
+    existing = db.get(reference.model, value_text)
+    if existing:
+        return str(existing.id)
+
+    context_values = tuple(
+        str(row.get(context_field) or "")
+        for context_field in _REFERENCE_CONTEXT_FIELDS
+        if context_field != field_name
+    )
+    cache_key = (resource.key, field_name, _normalize_reference_text(value_text), *context_values)
+    if cache_key in cache:
+        return cache[cache_key]
+
+    candidate_cache_key = (
+        reference.model,
+        reference.lookup_fields,
+        reference.display_fields,
+    )
+    candidate_entries = candidate_cache.get(candidate_cache_key)
+    if candidate_entries is None:
+        candidate_entries = [
+            (item, _reference_candidate_tokens(db, reference, item))
+            for item in db.scalars(select(reference.model))
+        ]
+        candidate_cache[candidate_cache_key] = candidate_entries
+    for context_field in _REFERENCE_CONTEXT_FIELDS:
+        context_value = row.get(context_field)
+        if context_field == field_name or _is_blank(context_value):
+            continue
+        if not hasattr(reference.model, context_field):
+            continue
+        narrowed = [
+            entry
+            for entry in candidate_entries
+            if str(getattr(entry[0], context_field, "")) == str(context_value)
+        ]
+        if narrowed:
+            candidate_entries = narrowed
+
+    normalized_value = _normalize_reference_text(value_text)
+    matches = [
+        item
+        for item, tokens in candidate_entries
+        if normalized_value in tokens
+    ]
+    if not matches:
+        raise ValueError(f"{reference.label}“{value_text}”不存在，请检查业务代码或名称")
+    if len(matches) > 1:
+        examples = "、".join(
+            _business_reference_item_display(db, reference, item)
+            for item in matches[:3]
+        )
+        raise ValueError(
+            f"{reference.label}“{value_text}”对应多条记录，请填写完整的代码和版本，例如：{examples}"
+        )
+    resolved_id = str(matches[0].id)
+    cache[cache_key] = resolved_id
+    return resolved_id
+
+
+def _resolve_business_references(
+    resource: BulkResource,
+    db: Session,
+    row: dict[str, Any],
+    *,
+    cache: dict[tuple[str, ...], str],
+    candidate_cache: dict[
+        tuple[type, tuple[str, ...], tuple[str, ...]], list[tuple[Any, set[str]]]
+    ],
+) -> dict[str, Any]:
+    resolved = dict(row)
+    ordered_fields = list(_REFERENCE_CONTEXT_FIELDS) + [
+        field_name for field_name in resolved if field_name not in _REFERENCE_CONTEXT_FIELDS
+    ]
+    for field_name in ordered_fields:
+        if field_name not in resolved or _is_blank(resolved[field_name]):
+            continue
+        singular_name = {
+            "vehicle_model_ids": "vehicle_model_id",
+            "color_ids": "color_id",
+        }.get(field_name, field_name)
+        reference = _business_reference_for(resource, singular_name)
+        if not reference:
+            continue
+        if field_name.endswith("_ids"):
+            resolved[field_name] = [
+                _resolve_business_reference_value(
+                    resource,
+                    db,
+                    singular_name,
+                    item,
+                    resolved,
+                    cache=cache,
+                    candidate_cache=candidate_cache,
+                )
+                for item in _coerce_list(resolved[field_name])
+            ]
+        else:
+            resolved[field_name] = _resolve_business_reference_value(
+                resource,
+                db,
+                field_name,
+                resolved[field_name],
+                resolved,
+                cache=cache,
+                candidate_cache=candidate_cache,
+            )
+    return resolved
 
 
 def _query_resources(resource: BulkResource, db: Session) -> list[Any]:
@@ -657,7 +1201,23 @@ def _resource_row(resource: BulkResource, db: Session, item: Any) -> dict[str, A
     else:
         row = {field.name: getattr(item, field.name, None) for field in resource.fields}
     row.setdefault("id", getattr(item, "id", ""))
-    return {field.name: row.get(field.name) for field in resource.fields}
+    exported: dict[str, Any] = {}
+    for field_spec in resource.fields:
+        value = row.get(field_spec.name)
+        if field_spec.name in {"vehicle_model_ids", "color_ids"} and isinstance(value, list):
+            reference = _BUSINESS_REFERENCES[
+                "vehicle_model_id" if field_spec.name == "vehicle_model_ids" else "color_id"
+            ]
+            value = [
+                _business_reference_display(db, reference, item_id)
+                for item_id in value
+            ]
+        else:
+            reference = _business_reference_for(resource, field_spec.name)
+            if reference and not _is_blank(value):
+                value = _business_reference_display(db, reference, value)
+        exported[field_spec.name] = value
+    return exported
 
 
 def _file_response(
@@ -687,10 +1247,17 @@ def _file_response(
 
 def _csv_bytes(fields: tuple[BulkField, ...], rows: list[dict[str, Any]]) -> bytes:
     output = StringIO()
-    writer = csv.DictWriter(output, fieldnames=[field.name for field in fields])
+    headers = [_display_field_label(field) for field in fields]
+    _ensure_unique_display_labels(fields, headers)
+    writer = csv.DictWriter(output, fieldnames=headers)
     writer.writeheader()
     for row in rows:
-        writer.writerow({field.name: _cell_to_string(row.get(field.name)) for field in fields})
+        writer.writerow(
+            {
+                _display_field_label(field): _cell_to_string(row.get(field.name))
+                for field in fields
+            }
+        )
     return ("\ufeff" + output.getvalue()).encode("utf-8")
 
 
@@ -702,8 +1269,9 @@ def _xlsx_bytes(
 ) -> bytes:
     workbook = Workbook()
     data_sheet = workbook.active
-    data_sheet.title = "data"
-    headers = [field.name for field in fields]
+    data_sheet.title = "数据"
+    headers = [_display_field_label(field) for field in fields]
+    _ensure_unique_display_labels(fields, headers)
     data_sheet.append(headers)
     for row in rows:
         data_sheet.append([_cell_to_string(row.get(field.name)) for field in fields])
@@ -713,15 +1281,14 @@ def _xlsx_bytes(
         data_sheet.column_dimensions[column[0].column_letter].width = min(max(max_length + 2, 12), 60)
 
     if include_metadata:
-        meta = workbook.create_sheet("fields")
-        meta.append(["field", "label", "type", "required", "example", "description"])
+        meta = workbook.create_sheet("填写说明")
+        meta.append(["列名", "填写类型", "是否必填", "填写示例", "填写说明"])
         for field_spec in fields:
             meta.append(
                 [
-                    field_spec.name,
-                    field_spec.label,
-                    field_spec.kind,
-                    "yes" if field_spec.required else "no",
+                    _display_field_label(field_spec),
+                    _kind_label(field_spec.kind),
+                    "是" if field_spec.required else "否",
                     field_spec.example,
                     field_spec.description,
                 ]
@@ -732,13 +1299,20 @@ def _xlsx_bytes(
     return output.getvalue()
 
 
-def _parse_rows(content: bytes, filename: str) -> list[dict[str, Any]]:
+def _parse_rows(
+    content: bytes,
+    filename: str,
+    *,
+    fields: tuple[BulkField, ...],
+) -> list[dict[str, Any]]:
     if not content:
         raise HTTPException(status_code=422, detail="导入文件为空")
     lowered = filename.lower()
     if lowered.endswith(".xlsx"):
-        return _parse_xlsx(content)
-    return _parse_csv(content)
+        rows = _parse_xlsx(content)
+    else:
+        rows = _parse_csv(content)
+    return _canonicalize_input_rows(rows, fields)
 
 
 def _parse_csv(content: bytes) -> list[dict[str, Any]]:
@@ -751,10 +1325,15 @@ def _parse_csv(content: bytes) -> list[dict[str, Any]]:
 
 def _parse_xlsx(content: bytes) -> list[dict[str, Any]]:
     workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
-    sheet = workbook["data"] if "data" in workbook.sheetnames else workbook.active
+    if "数据" in workbook.sheetnames:
+        sheet = workbook["数据"]
+    elif "data" in workbook.sheetnames:
+        sheet = workbook["data"]
+    else:
+        sheet = workbook.active
     rows = list(sheet.iter_rows(values_only=True))
     if not rows:
-        raise HTTPException(status_code=422, detail="Excel 缺少 data 工作表表头")
+        raise HTTPException(status_code=422, detail="Excel 缺少“数据”工作表表头")
     headers = [str(value).strip() if value is not None else "" for value in rows[0]]
     if not any(headers):
         raise HTTPException(status_code=422, detail="Excel 表头为空")
@@ -762,6 +1341,46 @@ def _parse_xlsx(content: bytes) -> list[dict[str, Any]]:
     for values in rows[1:]:
         parsed.append({headers[index]: values[index] if index < len(values) else None for index in range(len(headers)) if headers[index]})
     return parsed
+
+
+def _kind_label(kind: str) -> str:
+    return {
+        "boolean": "是/否",
+        "integer": "整数",
+        "number": "数值",
+        "datetime": "日期时间",
+        "json": "分项内容",
+        "list": "多个内容",
+        "string": "文字",
+    }.get(kind, "文字")
+
+
+def _ensure_unique_display_labels(fields: tuple[BulkField, ...], headers: list[str]) -> None:
+    duplicates = sorted({header for header in headers if headers.count(header) > 1})
+    if duplicates:
+        names = [field.name for field in fields if _display_field_label(field) in duplicates]
+        raise ValueError(f"批量文件中文列名重复，请修正字段配置：{', '.join(names)}")
+
+
+def _canonicalize_input_rows(
+    rows: list[dict[str, Any]],
+    fields: tuple[BulkField, ...],
+) -> list[dict[str, Any]]:
+    aliases: dict[str, str] = {}
+    for field_spec in fields:
+        aliases[field_spec.name] = field_spec.name
+        aliases[_display_field_label(field_spec)] = field_spec.name
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        normalized: dict[str, Any] = {}
+        for raw_header, value in row.items():
+            header = str(raw_header or "").strip()
+            canonical = aliases.get(header, header)
+            if canonical in normalized and not _is_blank(value):
+                raise HTTPException(status_code=422, detail=f"文件中重复填写了列：{header}")
+            normalized[canonical] = value
+        normalized_rows.append(normalized)
+    return normalized_rows
 
 
 def _normalize_row(resource: BulkResource, raw_row: dict[str, Any]) -> dict[str, Any]:
@@ -774,14 +1393,45 @@ def _normalize_row(resource: BulkResource, raw_row: dict[str, Any]) -> dict[str,
     return normalized
 
 
+_BUSINESS_VALUE_ALIASES: dict[str, dict[str, str]] = {
+    "quality_type": {"橘皮": "ORANGE_PEEL", "色差": "COLOR_DIFFERENCE", "膜厚": "THICKNESS"},
+    "quality_types": {"橘皮": "ORANGE_PEEL", "色差": "COLOR_DIFFERENCE", "膜厚": "THICKNESS"},
+    "supported_quality_types": {"橘皮": "ORANGE_PEEL", "色差": "COLOR_DIFFERENCE", "膜厚": "THICKNESS"},
+    "target_quality_type": {"橘皮": "ORANGE_PEEL", "色差": "COLOR_DIFFERENCE", "膜厚": "THICKNESS"},
+    "target_family": {"橘皮": "ORANGE_PEEL", "色差": "COLOR_DIFFERENCE", "膜厚": "THICKNESS"},
+    "target_families": {"橘皮": "ORANGE_PEEL", "色差": "COLOR_DIFFERENCE", "膜厚": "THICKNESS"},
+    "process_stage": {
+        "中涂外喷": "MIDCOAT_EXT",
+        "色漆一站": "BASECOAT_1",
+        "色漆二站": "BASECOAT_2",
+        "清漆一站": "CLEARCOAT_1",
+        "清漆二站": "CLEARCOAT_2",
+    },
+    "material_type": {"中涂": "MIDCOAT", "色漆": "BASECOAT", "清漆": "CLEARCOAT"},
+    "coating_system": {"中涂": "MIDCOAT", "色漆": "BASECOAT", "清漆": "CLEARCOAT"},
+    "color_type": {"中涂颜色": "MIDCOAT", "色漆颜色": "BASECOAT"},
+    "data_type": {"测试数据": "TEST", "封样数据": "MASTER_SAMPLE", "标准数据": "STANDARD"},
+    "point_type": {"质量检测": "QUALITY", "工艺检查": "PROCESS", "材料检查": "MATERIAL"},
+    "measurement_direction": {"纵向": "LONGITUDINAL", "横向": "TRANSVERSE", "多方向": "MULTI_DIRECTION"},
+    "source": {"专家评估": "EXPERT", "设备仿真": "SIMULATION", "现场试验": "DOE", "沉积模型": "DEPOSITION_MODEL"},
+}
+
+
+def _translate_business_value(field_name: str, value: Any) -> Any:
+    aliases = _BUSINESS_VALUE_ALIASES.get(field_name)
+    if not aliases or not isinstance(value, str):
+        return value
+    return aliases.get(value.strip(), value)
+
+
 def _apply_default_values(
     raw_row: dict[str, Any],
     default_values: dict[str, Any],
 ) -> dict[str, Any]:
     merged = dict(raw_row)
     for key, value in default_values.items():
-      if key not in merged or _is_blank(merged.get(key)):
-          merged[key] = value
+        if key not in merged or _is_blank(merged.get(key)):
+            merged[key] = value
     return merged
 
 
@@ -801,7 +1451,11 @@ def _coerce_value(value: Any, field_spec: BulkField) -> Any:
     if field_spec.kind == "json":
         return _coerce_json(value, object_required=True)
     if field_spec.kind == "list":
-        return _coerce_list(value)
+        return [
+            _translate_business_value(field_spec.name, item)
+            for item in _coerce_list(value)
+        ]
+    value = _translate_business_value(field_spec.name, value)
     return str(value) if not isinstance(value, str) else value
 
 
@@ -828,10 +1482,33 @@ def _coerce_json(value: Any, *, object_required: bool) -> Any:
     if isinstance(value, (dict, list)):
         parsed = value
     else:
-        parsed = json.loads(str(value))
+        text = str(value).strip()
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            pairs = [part.strip() for part in re.split(r"[;；]", text) if part.strip()]
+            if not pairs or any("=" not in pair for pair in pairs):
+                raise ValueError("分项内容格式不正确，请按“项目=值；项目=值”填写") from None
+            parsed = {
+                key.strip(): _infer_business_scalar(item_value.strip())
+                for key, item_value in (pair.split("=", 1) for pair in pairs)
+                if key.strip()
+            }
     if object_required and not isinstance(parsed, dict):
-        raise ValueError("JSON 字段必须是对象")
+        raise ValueError("分项内容格式不正确，请按模板逐项填写")
     return parsed
+
+
+def _infer_business_scalar(value: str) -> Any:
+    if value in {"是", "true", "True"}:
+        return True
+    if value in {"否", "false", "False"}:
+        return False
+    try:
+        numeric = float(value)
+        return int(numeric) if numeric.is_integer() else numeric
+    except ValueError:
+        return value
 
 
 def _coerce_list(value: Any) -> list[Any]:
@@ -841,9 +1518,9 @@ def _coerce_list(value: Any) -> list[Any]:
     if text.startswith("["):
         parsed = json.loads(text)
         if not isinstance(parsed, list):
-            raise ValueError("列表字段必须是 JSON 数组或逗号分隔值")
+            raise ValueError("多个内容请使用逗号分隔")
         return parsed
-    return [item.strip() for item in text.split(",") if item.strip()]
+    return [item.strip() for item in re.split(r"[,，]", text) if item.strip()]
 
 
 def _cell_to_string(value: Any) -> str:
@@ -853,11 +1530,38 @@ def _cell_to_string(value: Any) -> str:
         return value.isoformat()
     if isinstance(value, date):
         return value.isoformat()
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False, default=str)
+    if isinstance(value, dict):
+        text = "；".join(
+            f"{key}={_human_cell_value(item_value)}"
+            for key, item_value in value.items()
+        )
+    elif isinstance(value, list):
+        text = "，".join(_human_cell_value(item) for item in value)
+    elif isinstance(value, bool):
+        text = "是" if value else "否"
+    else:
+        text = str(value)
+    return _escape_spreadsheet_text(text)
+
+
+def _human_cell_value(value: Any) -> str:
+    if value is None:
+        return ""
     if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
+        text = "是" if value else "否"
+    elif isinstance(value, dict):
+        text = "；".join(f"{key}={_human_cell_value(item)}" for key, item in value.items())
+    elif isinstance(value, list):
+        text = "，".join(_human_cell_value(item) for item in value)
+    else:
+        text = str(value)
+    return _escape_spreadsheet_text(text)
+
+
+def _escape_spreadsheet_text(value: str) -> str:
+    if value.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
+        return f"'{value}"
+    return value
 
 
 def _is_blank(value: Any) -> bool:
@@ -1071,36 +1775,41 @@ def _quality_measurement_base_fields() -> tuple[BulkField, ...]:
         BulkField("vehicle_model_name", "车型名称", "string", False, "", "模板说明列，帮助用户确认当前测量点所属车型。"),
         BulkField("part_code", "零件代码", "string", False, "", "模板说明列，帮助用户确认当前测量点所属零件。"),
         BulkField("part_name", "零件名称", "string", False, "", "模板说明列，帮助用户确认当前测量点所属零件。"),
-        BulkField("quality_type", "质量类型", "string", True, "ORANGE_PEEL", "模板会自动预填当前质量类型，导入时按批准质量类型校验。"),
+        BulkField("quality_type", "质量类型", "string", True, "橘皮", "可填写橘皮、色差或膜厚；模板会根据当前页面自动预填。"),
         BulkField("color_code", "颜色代码", "string", False, "C01", "当生产事件尚不存在时必填，用于自动创建生产事件。"),
         BulkField("shift", "班次", "string", False, "A", "可选；自动创建生产事件时会一并写入。"),
         BulkField("production_started_at", "生产开始时间", "datetime", False, "2026-07-08T07:30:00+08:00", "当生产事件尚不存在时建议填写；留空时默认回落到测量时间。"),
         BulkField("production_completed_at", "生产结束时间", "datetime", False, "2026-07-08T08:10:00+08:00", "可选；自动创建生产事件时会一并写入。"),
         BulkField("measured_at", "测量时间", "datetime", True, "2026-07-08T08:00:00+08:00", "支持 Excel 日期单元格或 ISO 时间。"),
         BulkField("measured_by", "测量人", "string", False, "张三", "可选。"),
-        BulkField("data_type", "数据类型", "string", False, "TEST", "默认 TEST；可填写 TEST / MASTER_SAMPLE / STANDARD。"),
+        BulkField("data_type", "数据用途", "string", False, "测试数据", "可填写测试数据、封样数据或标准数据；未填写时按测试数据处理。"),
         BulkField("device_code", "设备编码", "string", False, "BYK-WAVE-01", "可选，未填写时如绑定仪器会自动带出仪器编码。"),
         BulkField("instrument_code", "仪器编码", "string", False, "BYK-WAVE-01", "按仪器编码解析，不要求用户手填 instrument_id。"),
         BulkField("measurement_method_code", "测量方法编码", "string", False, "BYK-WAVE-DOI:1", "可填写 code 或 code:version；若同编码存在多版本，必须带版本。"),
         BulkField("calibration_no", "校准记录编号", "string", False, "CAL-OP-1", "按校准记录编号解析。"),
         BulkField("reference_standard_code", "参考件编码", "string", False, "REF-OP-1", "按参考件编码解析。"),
         BulkField("import_profile_code", "导入模板编码", "string", False, "BYK-IMPORT:1", "可填写 code 或 code:version；若同编码存在多版本，必须带版本。"),
-        BulkField("measurement_direction", "测量方向", "string", False, "LONGITUDINAL", "可选。"),
-        BulkField("raw_file_uri", "原始文件 URI", "string", False, "", "可选。"),
+        BulkField("measurement_direction", "测量方向", "string", False, "纵向", "可填写纵向、横向或多方向。"),
+        BulkField("raw_file_uri", "原始文件位置", "string", False, "", "可选，用于追溯仪器原始文件。"),
         BulkField("status_score", "状态分数", "number", False, "98.6", "可选。"),
         BulkField("is_valid", "数据有效", "boolean", False, "true", "默认 true。"),
     )
 
 
 def _quality_measurement_bulk_fields(quality_type: str | None = None) -> tuple[BulkField, ...]:
+    quality_labels = {
+        "ORANGE_PEEL": "橘皮指标",
+        "COLOR_DIFFERENCE": "色差指标",
+        "THICKNESS": "膜厚指标",
+    }
     metric_fields = tuple(
         BulkField(
             _quality_metric_field_name(metric["code"]),
-            f"{metric['name']}（{metric['code']}）",
+            f"{quality_labels.get(metric['quality_type'], '质量指标')}：{metric['name']}（{metric['code']}）",
             "number",
             False,
             "82.5",
-            f"{metric['quality_type']} 指标列，用户直接填写数值，后端自动组装为 metrics JSON。单位：{metric.get('unit') or '无'}",
+            f"用户直接填写检测数值，系统会自动归入对应质量指标。单位：{metric.get('unit') or '无'}",
         )
         for metric in _quality_metric_catalog_for(quality_type)
     )
@@ -1520,10 +2229,12 @@ def _import_quality_measurements(
     *,
     filename: str,
     mode: ImportMode,
+    progress_callback: Callable[[], None] | None,
     db: Session,
 ) -> dict[str, Any]:
-    rows = _parse_rows(content, filename)
-    allowed_fields = {field.name for field in _quality_measurement_bulk_fields()}
+    quality_fields = _quality_measurement_bulk_fields()
+    rows = _parse_rows(content, filename, fields=quality_fields)
+    allowed_fields = {field.name for field in quality_fields}
     unknown = sorted({key for row in rows for key in row if key and key not in allowed_fields})
     if unknown:
         raise HTTPException(status_code=422, detail=f"模板字段不匹配，未知字段：{', '.join(unknown)}")
@@ -1559,6 +2270,8 @@ def _import_quality_measurements(
     skipped = 0
     errors: list[dict[str, Any]] = []
     for row_index, raw_row in enumerate(rows, start=2):
+        if progress_callback:
+            progress_callback()
         if not any(str(value or "").strip() for value in raw_row.values()):
             skipped += 1
             continue
@@ -1569,9 +2282,9 @@ def _import_quality_measurements(
             point_code = str(raw_row.get("measurement_point_code") or "").strip()
             measured_at_value = raw_row.get("measured_at")
             if not point_code or _is_blank(measured_at_value):
-                raise ValueError("缺少必填字段：measurement_point_code, measured_at")
+                raise ValueError("请填写测量点代码和测量时间")
             if not run_no and not body_no:
-                raise ValueError("请填写 production_run_no，或填写 body_no 以便自动生成生产事件编号与 data_no")
+                raise ValueError("请填写生产记录编号，或填写车号让系统自动生成生产记录")
 
             run = _resolve_or_create_quality_production_run(
                 db=db,
@@ -1596,14 +2309,16 @@ def _import_quality_measurements(
             if not point:
                 raise ValueError(f"测量点 {point_code} 不存在或不属于当前生产事件车型")
 
-            quality_type = str(raw_row.get("quality_type") or "").strip().upper()
+            quality_type = str(
+                _translate_business_value("quality_type", raw_row.get("quality_type") or "")
+            ).strip().upper()
             if not quality_type and group:
                 quality_type = str(group.quality_type).strip().upper()
             if not quality_type:
                 if len(point.quality_types or []) == 1:
                     quality_type = str(point.quality_types[0]).upper()
                 else:
-                    raise ValueError("缺少必填字段：quality_type")
+                    raise ValueError("请选择质量指标类型")
             metric_catalog = {item["code"]: item for item in _quality_metric_catalog_for(quality_type)}
             metrics = []
             for name, raw_value in raw_row.items():
@@ -1627,7 +2342,7 @@ def _import_quality_measurements(
             if not data_no:
                 resolved_body = body_no or str(run.body_no or "").strip()
                 if not resolved_body:
-                    raise ValueError("自动生成 data_no 需要车号；请填写 body_no，或使用已维护车号的生产事件")
+                    raise ValueError("自动生成质量数据编号需要车号；请填写车号，或选择已维护车号的生产记录")
                 data_no = _build_quality_data_no(
                     body_no=resolved_body,
                     point_code=point_code,
@@ -1640,7 +2355,9 @@ def _import_quality_measurements(
                 "measurement_group_id": group.id if group else None,
                 "measurement_point_id": point.id,
                 "quality_type": quality_type,
-                "data_type": str(raw_row.get("data_type") or "TEST").strip() or "TEST",
+                "data_type": str(
+                    _translate_business_value("data_type", raw_row.get("data_type") or "TEST")
+                ).strip() or "TEST",
                 "measured_at": _coerce_datetime(measured_at_value),
                 "measured_by": str(raw_row.get("measured_by") or "").strip() or None,
                 "device_code": str(raw_row.get("device_code") or "").strip() or None,
@@ -1702,8 +2419,8 @@ def _import_quality_measurements(
     }
 
 
-def _brush_contribution_template_fields() -> tuple[BulkField, ...]:
-    """Friendly template: business codes + lineage labels; IDs optional for advanced use."""
+def _brush_contribution_bulk_fields() -> tuple[BulkField, ...]:
+    """Accepted brush contribution columns, including legacy internal references."""
     return (
         BulkField(
             "id",
@@ -1860,6 +2577,14 @@ def _brush_contribution_template_fields() -> tuple[BulkField, ...]:
         BulkField("source", "来源", "string", False, "EXPERT", "默认 EXPERT"),
         BulkField("version", "贡献版本", "string", False, "1.0", "默认 1.0"),
         BulkField("is_approved", "是否已审批", "boolean", False, "false", "true/false"),
+    )
+
+
+def _brush_contribution_template_fields() -> tuple[BulkField, ...]:
+    """Business-facing columns; parent brush and point are resolved from context/codes."""
+    hidden = {"id", "brush_id", "measurement_point_id"}
+    return tuple(
+        field for field in _brush_contribution_bulk_fields() if field.name not in hidden
     )
 
 
@@ -2030,11 +2755,13 @@ def _import_brush_contributions(
     filename: str,
     mode: ImportMode,
     default_values: dict[str, Any] | None,
+    progress_callback: Callable[[], None] | None,
     db: Session,
 ) -> dict[str, Any]:
     resource = get_resource("process.brush-contributions")
-    rows = _parse_rows(content, filename)
-    allowed_fields = {field.name for field in _brush_contribution_template_fields()}
+    contribution_fields = _brush_contribution_bulk_fields()
+    rows = _parse_rows(content, filename, fields=contribution_fields)
+    allowed_fields = {field.name for field in contribution_fields}
     unknown = sorted({key for row in rows for key in row if key and key not in allowed_fields})
     if unknown:
         raise HTTPException(status_code=422, detail=f"模板字段不匹配，未知字段：{', '.join(unknown)}")
@@ -2082,6 +2809,8 @@ def _import_brush_contributions(
         "brush_no",
     }
     for row_index, raw_row in enumerate(rows, start=2):
+        if progress_callback:
+            progress_callback()
         merged_row = _apply_default_values(raw_row, default_values)
         if not any(str(merged_row.get(key) or "").strip() for key in data_keys):
             skipped += 1
@@ -2104,12 +2833,14 @@ def _import_brush_contributions(
             if _is_blank(merged_row.get("overlap_ratio")) or _is_blank(
                 merged_row.get("contribution_weight")
             ):
-                raise ValueError("缺少必填字段：overlap_ratio, contribution_weight")
+                raise ValueError("请填写重叠率和贡献权重")
 
             payload = BrushPointContributionUpsert(
                 overlap_ratio=float(merged_row["overlap_ratio"]),
                 contribution_weight=float(merged_row["contribution_weight"]),
-                source=str(merged_row.get("source") or "EXPERT").strip() or "EXPERT",
+                source=str(
+                    _translate_business_value("source", merged_row.get("source") or "EXPERT")
+                ).strip() or "EXPERT",
                 version=str(merged_row.get("version") or "1.0").strip() or "1.0",
                 is_approved=(
                     False
@@ -2180,6 +2911,72 @@ def _contribution_entry_match(db: Session, row: dict[str, Any]) -> str | None:
     return existing.id if existing else None
 
 
+def _bind_program_vehicle_model(
+    payload: ProgramVehicleModelBulkCreate,
+    db: Session,
+) -> ProgramVehicleModel:
+    check_fk(db, SprayProgramVersion, payload.program_version_id, label="喷涂程序版本")
+    check_fk(db, VehicleModel, payload.vehicle_model_id, label="车型")
+    existing = db.scalar(
+        select(ProgramVehicleModel).where(
+            ProgramVehicleModel.program_version_id == payload.program_version_id,
+            ProgramVehicleModel.vehicle_model_id == payload.vehicle_model_id,
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="程序版本已关联该车型")
+    resource = ProgramVehicleModel(**payload.model_dump())
+    db.add(resource)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="程序版本已关联该车型") from exc
+    db.refresh(resource)
+    return resource
+
+
+def _bind_program_color(payload: ProgramColorBulkCreate, db: Session) -> ProgramColor:
+    check_fk(db, SprayProgramVersion, payload.program_version_id, label="喷涂程序版本")
+    check_fk(db, Color, payload.color_id, label="颜色")
+    existing = db.scalar(
+        select(ProgramColor).where(
+            ProgramColor.program_version_id == payload.program_version_id,
+            ProgramColor.color_id == payload.color_id,
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="程序版本已关联该颜色")
+    resource = ProgramColor(**payload.model_dump())
+    db.add(resource)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="程序版本已关联该颜色") from exc
+    db.refresh(resource)
+    return resource
+
+
+def _body_map_3d_export_row(
+    db: Session,
+    layout: MeasurementPoint3DLayout,
+) -> dict[str, Any]:
+    del db
+    return {
+        "id": layout.id,
+        "measurement_point_id": layout.measurement_point_id,
+        "pos_x": layout.pos_x,
+        "pos_y": layout.pos_y,
+        "pos_z": layout.pos_z,
+        "normal_x": layout.normal_x,
+        "normal_y": layout.normal_y,
+        "normal_z": layout.normal_z,
+        "model_asset_key": layout.model_asset_key,
+        "project_to_2d": False,
+    }
+
+
 def _resource(
     key: str,
     label: str,
@@ -2237,6 +3034,8 @@ RESOURCES: dict[str, BulkResource] = {
         _resource("process.parameter-constraint-sources", "参数约束来源", "工艺", ParameterConstraintSource, ParameterConstraintSourceCreate, ParameterConstraintSourceUpdate, create_parameter_constraint_source, update_parameter_constraint_source, unique_fields=("constraint_code",), order_by=("constraint_code",)),
         _resource("process.spray-programs", "喷涂程序", "工艺", SprayProgram, SprayProgramCreate, SprayProgramUpdate, create_spray_program, update_spray_program, unique_fields=("factory_id", "program_code"), order_by=("program_code",)),
         _resource("process.program-versions", "喷涂程序版本", "工艺", SprayProgramVersion, SprayProgramVersionCreate, SprayProgramVersionUpdate, create_program_version, update_program_version, unique_fields=("spray_program_id", "version"), create_arg_fields=("spray_program_id",), extra_fields=(BulkField("spray_program_id", "喷涂程序 ID", "string", True, "填 spray_program.id", "创建版本所需父级程序 ID"),), export_row=_program_version_row, order_by=("created_at",)),
+        _resource("process.program-vehicle-models", "程序适用车型", "工艺关系", ProgramVehicleModel, ProgramVehicleModelBulkCreate, None, _bind_program_vehicle_model, unique_fields=("program_version_id", "vehicle_model_id"), order_by=("created_at",)),
+        _resource("process.program-colors", "程序适用颜色", "工艺关系", ProgramColor, ProgramColorBulkCreate, None, _bind_program_color, unique_fields=("program_version_id", "color_id"), order_by=("created_at",)),
         _resource("process.brushes", "刷子表/刷子号", "工艺", Brush, BrushCreate, BrushUpdate, create_brush, update_brush, unique_fields=("program_version_id", "brush_no"), create_arg_fields=("program_version_id",), extra_fields=(BulkField("program_version_id", "程序版本 ID", "string", True),), order_by=("brush_no",)),
         _resource("process.brush-parameters", "刷子参数", "工艺", BrushParameter, BrushParameterCreate, BrushParameterUpdate, create_brush_parameter, update_brush_parameter, unique_fields=("brush_id", "parameter_code"), create_arg_fields=("brush_id",), extra_fields=(BulkField("brush_id", "刷子 ID", "string", True),), order_by=("parameter_code",)),
         _resource("process.brush-contributions", "刷子点位贡献", "工艺", BrushPointContribution, BrushPointContributionUpsert, BrushPointContributionUpsert, upsert_brush_point_contribution, upsert_brush_point_contribution, create_arg_fields=("brush_id", "measurement_point_id"), update_arg_fields=("brush_id", "measurement_point_id"), update_uses_resource_id=False, extra_fields=(BulkField("brush_id", "刷子 ID", "string", True), BulkField("measurement_point_id", "测量点 ID", "string", True)), match_existing=_brush_contribution_match, order_by=("created_at",)),
@@ -2246,6 +3045,8 @@ RESOURCES: dict[str, BulkResource] = {
         _resource("process.actual-parameters", "实际参数", "生产", ActualParameter, ActualParameterCreate, ActualParameterUpdate, create_actual_parameter, update_actual_parameter, create_arg_fields=("production_stage_run_id",), extra_fields=(BulkField("production_stage_run_id", "生产工序实绩 ID", "string", True),), order_by=("sampled_at",)),
         _resource("quality.measurements", "质量测量", "质量", QualityMeasurement, QualityMeasurementCreate, QualityMeasurementUpdate, create_quality_measurement, update_quality_measurement, unique_fields=("data_no",), order_by=("measured_at",), export_row=_quality_measurement_row),
         _resource("quality.standards", "质量标准", "质量", QualityStandard, QualityStandardCreate, QualityStandardUpdate, create_quality_standard, update_quality_standard, unique_fields=("standard_no", "version", "quality_type", "metric_code"), order_by=("standard_no",)),
+        _resource("quality.body-map-layouts", "检测点二维位置", "质量点位", MeasurementPointLayout, BodyMapLayoutUpsert, BodyMapLayoutUpsert, upsert_body_map_layout, upsert_body_map_layout, unique_fields=("measurement_point_id", "body_view"), create_arg_fields=("measurement_point_id",), update_arg_fields=("measurement_point_id",), update_uses_resource_id=False, extra_fields=(BulkField("measurement_point_id", "检测点 ID", "string", True, "填 measurement_point.id", "检测点的逻辑引用"),), order_by=("body_view", "created_at")),
+        _resource("quality.body-map-3d-layouts", "检测点三维位置", "质量点位", MeasurementPoint3DLayout, BodyMap3DLayoutUpsert, BodyMap3DLayoutUpsert, upsert_body_map_3d_layout, upsert_body_map_3d_layout, unique_fields=("measurement_point_id",), create_arg_fields=("measurement_point_id",), update_arg_fields=("measurement_point_id",), update_uses_resource_id=False, extra_fields=(BulkField("measurement_point_id", "检测点 ID", "string", True, "填 measurement_point.id", "检测点的逻辑引用"),), export_row=_body_map_3d_export_row, order_by=("created_at",)),
         _resource("measurement-governance.instruments", "测量仪器", "仪器治理", MeasurementInstrument, MeasurementInstrumentCreate, MeasurementInstrumentUpdate, create_instrument, update_instrument, unique_fields=("code",), order_by=("code",)),
         _resource("measurement-governance.methods", "测量方法", "仪器治理", MeasurementMethod, MeasurementMethodCreate, MeasurementMethodUpdate, create_measurement_method, update_measurement_method, unique_fields=("code", "version"), order_by=("code", "version")),
         _resource("measurement-governance.references", "参考件", "仪器治理", MeasurementReferenceStandard, MeasurementReferenceStandardCreate, MeasurementReferenceStandardUpdate, create_reference, update_reference, unique_fields=("code",), order_by=("code",)),
@@ -2255,7 +3056,7 @@ RESOURCES: dict[str, BulkResource] = {
         _resource("engineering.process-route-steps", "3C3B 路线步骤", "工程闭环", ProcessRouteStep, ProcessRouteStepCreate, ProcessRouteStepUpdate, create_process_route_step, update_process_route_step, unique_fields=("process_route_id", "step_code"), order_by=("process_route_id", "sequence_no")),
         _resource("engineering.process-route-applicabilities", "路线适用车型颜色", "工程闭环", ProcessRouteApplicability, ProcessRouteApplicabilityCreate, ProcessRouteApplicabilityUpdate, create_process_route_applicability, update_process_route_applicability, unique_fields=("process_route_id", "vehicle_model_id", "color_id"), order_by=("created_at",)),
         _resource("engineering.file-import-profiles", "设备/材料文件导入 Profile", "工程闭环", FileImportProfile, FileImportProfileCreate, FileImportProfileUpdate, create_file_import_profile, update_file_import_profile, unique_fields=("code", "version"), order_by=("domain_type", "code", "version")),
-        _resource("engineering.file-import-jobs", "设备/材料文件导入任务", "工程闭环", FileImportJob, FileImportJobCreate, FileImportJobUpdate, create_file_import_job, update_file_import_job, unique_fields=("import_no",), order_by=("submitted_at",)),
+        _resource("engineering.file-import-jobs", "设备/材料文件导入任务", "工程闭环", FileImportJob, FileImportJobCreate, FileImportJobUpdate, reject_direct_file_import_job_create, update_file_import_job, unique_fields=("import_no",), order_by=("submitted_at",), importable=False),
         _resource("engineering.measurement-probes", "测量探头", "工程闭环", MeasurementProbe, MeasurementProbeCreate, MeasurementProbeUpdate, create_measurement_probe, update_measurement_probe, unique_fields=("instrument_id", "code"), order_by=("instrument_id", "code")),
         _resource("engineering.measurement-msa-studies", "测量 MSA/GRR", "工程闭环", MeasurementMsaStudy, MeasurementMsaStudyCreate, MeasurementMsaStudyUpdate, create_measurement_msa_study, update_measurement_msa_study, unique_fields=("study_no",), order_by=("study_at",)),
         _resource("engineering.issue-tasks", "质量问题/调试工单", "工程闭环", QualityIssueTask, QualityIssueTaskCreate, QualityIssueTaskUpdate, create_issue_task, update_issue_task, unique_fields=("task_no",), order_by=("created_at",)),

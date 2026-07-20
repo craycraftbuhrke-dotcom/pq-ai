@@ -32,17 +32,17 @@ def step_to_glb(
     use_parallel: bool = True,
 ) -> Path:
     """Convert a STEP file to GLB. Returns the output path."""
+    src = Path(input_path)
+    dst = Path(output_path)
+    if not src.is_file():
+        raise StpConvertError(f"STEP 文件不存在: {src}")
+
     try:
         import cascadio
     except ImportError as exc:
         raise StpConvertError(
             "服务器未安装 STEP 转换依赖 cascadio，请执行 pip install cascadio==0.0.17"
         ) from exc
-
-    src = Path(input_path)
-    dst = Path(output_path)
-    if not src.is_file():
-        raise StpConvertError(f"STEP 文件不存在: {src}")
 
     dst.parent.mkdir(parents=True, exist_ok=True)
     status = cascadio.step_to_glb(

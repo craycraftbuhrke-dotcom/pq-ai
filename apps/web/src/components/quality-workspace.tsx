@@ -487,14 +487,17 @@ export function QualityWorkspace({
 
   useEffect(() => {
     if (tab !== "analytics") return;
-    try {
-      const saved = window.localStorage.getItem(QUALITY_ANALYTICS_TYPE_KEY);
-      if (saved && ["ORANGE_PEEL", "COLOR_DIFFERENCE", "THICKNESS"].includes(saved)) {
-        setTypeFilter((current) => current || saved);
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = window.localStorage.getItem(QUALITY_ANALYTICS_TYPE_KEY);
+        if (saved && ["ORANGE_PEEL", "COLOR_DIFFERENCE", "THICKNESS"].includes(saved)) {
+          setTypeFilter((current) => current || saved);
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
-    }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [tab]);
 
   useEffect(() => {
@@ -864,7 +867,7 @@ export function QualityWorkspace({
           </button>
           <button className={tab === "measurements" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("measurements")}>查看与判定 <span>{measurements.length}</span></button>
           <button className={tab === "standards" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("standards")}>质量标准 <span>{standards.length}</span></button>
-          <button className={tab === "analytics" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("analytics")}>SPC 与趋势 <span>{filteredAnalytics?.series.length ?? analytics?.statistics.samples ?? 0}</span></button>
+          <button className={tab === "analytics" ? "master-tab master-tab-active" : "master-tab"} onClick={() => setTab("analytics")}>质量趋势 <span>{filteredAnalytics?.series.length ?? analytics?.statistics.samples ?? 0}</span></button>
         </div>
         ) : null}
         {tab === "upload" ? (
@@ -1038,7 +1041,7 @@ function SpcTrendChart({ analytics }: { analytics: Analytics }) {
   const standardMinimum = analytics.series.find((item) => item.standard_min !== null && item.standard_min !== undefined)?.standard_min;
   const standardMaximum = analytics.series.find((item) => item.standard_max !== null && item.standard_max !== undefined)?.standard_max;
   return (
-    <svg className="quality-spc-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${analytics.metric_name} SPC 控制图`}>
+    <svg className="quality-spc-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${analytics.metric_name} 质量趋势控制图`}>
       {[0, 0.25, 0.5, 0.75, 1].map((ratio) => { const value = maximum - ratio * (maximum - minimum); return <g key={ratio}><line className="spc-grid-line" x1={padding.left} x2={width - padding.right} y1={padding.top + ratio * plotHeight} y2={padding.top + ratio * plotHeight} /><text className="spc-axis-label" x={padding.left - 8} y={padding.top + ratio * plotHeight + 3} textAnchor="end">{value.toFixed(2)}</text></g>; })}
       {referenceLines.map(([label, value, kind]) => value === null || value === undefined ? null : <g key={label}><line className={`spc-reference spc-${kind}`} x1={padding.left} x2={width - padding.right} y1={y(value)} y2={y(value)} /><text className={`spc-reference-label spc-${kind}`} x={width - padding.right} y={y(value) - 4} textAnchor="end">{label} {value.toFixed(2)}</text></g>)}
       {[["USL", standardMaximum], ["LSL", standardMinimum]].map(([label, value]) => typeof value !== "number" ? null : <g key={label}><line className="spc-reference spc-standard" x1={padding.left} x2={width - padding.right} y1={y(value)} y2={y(value)} /><text className="spc-reference-label spc-standard" x={padding.left + 4} y={y(value) - 4}>{label} {value.toFixed(2)}</text></g>)}

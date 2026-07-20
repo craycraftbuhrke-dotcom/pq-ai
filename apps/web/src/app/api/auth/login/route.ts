@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { sessionCookieName } from "@/lib/auth-data";
+import { isUpstreamTimeout, sessionCookieName, upstreamRequestSignal } from "@/lib/auth-data";
+import { parseBoundedJson } from "@/lib/bounded-request-body";
 
 type LoginPayload = {
   username?: string;
@@ -20,8 +21,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "后端 API 地址未配置" }, { status: 503 });
   }
 
-  const payload = (await request.json().catch(() => ({}))) as LoginPayload;
   try {
+    const payload = await parseBoundedJson<LoginPayload>(request, 16 * 1024);
     const response = await fetch(`${apiUrl}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -30,26 +31,46 @@ export async function POST(request: Request) {
         password: payload.password ?? "",
       }),
       cache: "no-store",
+      signal: upstreamRequestSignal(request),
     });
     const result = (await response.json().catch(() => ({}))) as LoginResult;
-    if (!response.ok || !result.access_token || !result.expires_at) {
+    if (!response.ok) {
       return NextResponse.json(
         { error: result.detail ?? "用户名或密码错误" },
-        { status: response.status || 401 },
+        { status: response.status },
       );
+    }
+    const expiresAt = typeof result.expires_at === "string" ? new Date(result.expires_at) : null;
+    if (
+      typeof result.access_token !== "string" ||
+      !result.access_token ||
+      !expiresAt ||
+      Number.isNaN(expiresAt.getTime()) ||
+      expiresAt.getTime() <= Date.now()
+    ) {
+      return NextResponse.json({ error: "认证服务返回无效响应" }, { status: 502 });
     }
 
     const nextResponse = NextResponse.json({ actor: result.actor, expires_at: result.expires_at });
-    const expires = new Date(result.expires_at);
     nextResponse.cookies.set(sessionCookieName, result.access_token, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
-      expires,
+      expires: expiresAt,
     });
     return nextResponse;
-  } catch {
-    return NextResponse.json({ error: "无法连接认证服务" }, { status: 502 });
+  } catch (error) {
+    const clientStatus = (error as { status?: number }).status;
+    if (typeof clientStatus === "number" && clientStatus >= 400 && clientStatus < 500) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "登录请求无效" },
+        { status: clientStatus },
+      );
+    }
+    return NextResponse.json(
+      { error: isUpstreamTimeout(error) ? "认证服务响应超时" : "无法连接认证服务" },
+      { status: isUpstreamTimeout(error) ? 504 : 502 },
+    );
   }
 }

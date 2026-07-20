@@ -1,12 +1,13 @@
 "use client";
 
-import { LogOut, Menu, ShieldCheck, X } from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { navigationIcons } from "@/components/icons";
 import { ContextSelector } from "@/components/context-selector";
+import { SystemStatus } from "@/components/system-status";
 import { useAuth } from "@/lib/auth-context";
 import { primaryRoleLabel } from "@/lib/display-labels";
 import { navSections, type NavItem } from "@/lib/ui-data";
@@ -40,12 +41,14 @@ export function AppShell({ children }: AppShellProps) {
   }, [actor.roles, isAdmin, pathname]);
 
   const isAuthPage = pathname === "/login" || pathname === "/register";
-  const todayLabel = new Date().toLocaleDateString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    weekday: "short",
-  });
+  async function handleLogout() {
+    try {
+      await logout();
+      window.location.replace("/login");
+    } catch {
+      // AuthProvider 保留当前身份并记录错误，避免失败时伪装成已退出。
+    }
+  }
 
   if (isAuthPage) {
     return (
@@ -93,25 +96,9 @@ export function AppShell({ children }: AppShellProps) {
                 </Link>
               );
             })}
-            {actor.isAuthenticated && isAdmin ? (
-              <Link
-                className={`nav-item nav-item-flat ${pathname === "/security-admin" ? "nav-item-active" : ""}`}
-                href="/security-admin"
-                onClick={() => setMobileOpen(false)}
-              >
-                <ShieldCheck aria-hidden="true" />
-                <span>用户与角色</span>
-              </Link>
-            ) : null}
           </nav>
           <div className="sidebar-foot">
-            <div className="system-state">
-              <span className="live-dot" />
-              <div>
-                <strong>系统可用</strong>
-                <span>请以页面内实时数据为准</span>
-              </div>
-            </div>
+            <SystemStatus />
             {actor.isAuthenticated ? (
               <div className="identity">
                 <Link href="/profile" className="avatar-link">
@@ -124,7 +111,7 @@ export function AppShell({ children }: AppShellProps) {
                 <button
                   className="icon-button"
                   aria-label="退出登录"
-                  onClick={() => void logout()}
+                  onClick={() => void handleLogout()}
                   title="退出登录"
                 >
                   <LogOut />
@@ -152,10 +139,7 @@ export function AppShell({ children }: AppShellProps) {
             >
               <Menu />
             </button>
-            <div className="topbar-context">
-              <span>今天</span>
-              <strong>{todayLabel}</strong>
-            </div>
+            <strong className="mobile-only">当前作业范围</strong>
           </header>
           <ContextSelector />
           <main>{children}</main>

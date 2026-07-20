@@ -18,7 +18,6 @@ import {
 } from "react";
 
 import { BodyMapModelEditor } from "@/components/body-map-model-editor";
-import { ModalShell } from "@/components/modal-shell";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type Resource = { id: string; code: string; name: string };
@@ -272,7 +271,6 @@ function Scene3DInner({
             key={point.measurement_point_id}
             position={[point.pos_x!, point.pos_y!, point.pos_z!]}
             color={pointColor(point, overlayMode)}
-            label={point.code}
             selected={selectedPointId === point.measurement_point_id}
             onClick={() => onPointClick(point.measurement_point_id)}
           />
@@ -296,7 +294,6 @@ function ModelMesh({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const THREE = await import("three");
       const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
       const loader = new GLTFLoader();
       loader.load(
@@ -365,13 +362,11 @@ function PlaceholderBody({
 function PointMarker({
   position,
   color,
-  label,
   selected,
   onClick,
 }: {
   position: [number, number, number];
   color: string;
-  label: string;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -498,15 +493,21 @@ export function BodyPointMap3D() {
   );
 
   useEffect(() => {
-    void loadRefs().catch((err) => setError(err instanceof Error ? err.message : "加载主数据失败"));
+    const timer = window.setTimeout(() => {
+      void loadRefs().catch((err) => setError(err instanceof Error ? err.message : "加载主数据失败"));
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadRefs]);
 
   useEffect(() => {
-    if (modelId) setVehicleModelId(modelId);
+    if (!modelId) return;
+    const timer = window.setTimeout(() => setVehicleModelId(modelId), 0);
+    return () => window.clearTimeout(timer);
   }, [modelId]);
 
   useEffect(() => {
-    void loadScene();
+    const timer = window.setTimeout(() => void loadScene(), 0);
+    return () => window.clearTimeout(timer);
   }, [loadScene]);
 
   useEffect(() => {
@@ -516,11 +517,14 @@ export function BodyPointMap3D() {
   }, [message]);
 
   useEffect(() => {
-    setGroupId("");
-    setRunId("");
-    setSelectedPointId("");
-    setDetail(null);
-    setPendingPick(null);
+    const timer = window.setTimeout(() => {
+      setGroupId("");
+      setRunId("");
+      setSelectedPointId("");
+      setDetail(null);
+      setPendingPick(null);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [vehicleModelId]);
 
   async function handleSurfacePick(pos: [number, number, number], normal: [number, number, number] | null) {

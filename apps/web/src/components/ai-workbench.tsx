@@ -4,6 +4,7 @@ import {
   Activity,
   BrainCircuit,
   Check,
+  FileSpreadsheet,
   FlaskConical,
   LoaderCircle,
   Play,
@@ -91,15 +92,32 @@ type DatasetSnapshot = {
 type DatasetMember = {
   id: string;
   dataset_snapshot_id: string;
-  point_feature_snapshot_id: string;
-  production_run_id: string;
-  measurement_point_id: string;
-  target_measurement_id: string;
+  source_type: "PRODUCTION" | "MANUAL_UPLOAD";
+  source_ref: string;
+  point_feature_snapshot_id?: string | null;
+  manual_sample_id?: string | null;
+  production_run_id?: string | null;
+  measurement_point_id?: string | null;
+  target_measurement_id?: string | null;
   group_value: string;
   split: string;
   target_value: number;
   feature_values: Record<string, number>;
   occurred_at: string;
+};
+type TrainingUpload = {
+  id: string;
+  upload_no: string;
+  name: string;
+  target_metric: string;
+  feature_set_version: string;
+  file_name: string;
+  status: string;
+  sample_count: number;
+  feature_names: string[];
+  validation_report: { passed: boolean; group_count: number; feature_count: number };
+  uploaded_by: string;
+  uploaded_at: string;
 };
 type AcceptanceDecision = {
   id: string;
@@ -495,23 +513,37 @@ export function AiWorkbench({
 } = {}) {
   const { actor } = useAuth();
   const actorName = actor.isAuthenticated ? actor.displayName : "";
-  const canManageModels =
+  const hasModelRole =
     actor.roles.includes("DATA_SCIENTIST") ||
     actor.roles.includes("ADMIN") ||
     actor.permissions.includes("*") ||
     actor.roles.includes("SYSTEM");
+  const canPrepareModels = hasModelRole || actor.permissions.includes("ai.train");
+  const canGovernModels = hasModelRole || actor.permissions.includes("ai.approve");
+  const canCompareModels = canPrepareModels || canGovernModels;
+  const canUseTab = (candidate: Tab) =>
+    candidate === "models"
+      ? canPrepareModels
+      : candidate === "governance"
+        ? canGovernModels
+        : candidate === "comparison"
+          ? canCompareModels
+          : true;
+  const permittedAllowedTabs = allowedTabs?.filter(canUseTab);
+  const canOpenRequestedTabs = (!lockedTab || canUseTab(lockedTab)) && (!allowedTabs || Boolean(permittedAllowedTabs?.length));
   const showChrome = mode === "full";
-  const [tab, setTab] = useState<Tab>(lockedTab ?? allowedTabs?.[0] ?? "predictions");
+  const [tab, setTab] = useState<Tab>(lockedTab ?? permittedAllowedTabs?.[0] ?? "predictions");
   const [showAdvancedTraining, setShowAdvancedTraining] = useState(false);
   const activeTab = lockedTab
     ? lockedTab
-    : allowedTabs
-      ? (allowedTabs.includes(tab) ? tab : allowedTabs[0])
-      : !canManageModels && (tab === "models" || tab === "governance" || tab === "comparison")
+    : permittedAllowedTabs
+      ? (permittedAllowedTabs.includes(tab) ? tab : permittedAllowedTabs[0])
+      : !canUseTab(tab)
         ? "predictions"
         : tab;
   const [models, setModels] = useState<ModelVersion[]>([]);
   const [datasets, setDatasets] = useState<DatasetSnapshot[]>([]);
+  const [trainingUploads, setTrainingUploads] = useState<TrainingUpload[]>([]);
   const [acceptanceDecisions, setAcceptanceDecisions] = useState<AcceptanceDecision[]>([]);
   const [acceptancePolicies, setAcceptancePolicies] = useState<AcceptancePolicy[]>([]);
   const [applicabilityScopes, setApplicabilityScopes] = useState<ApplicabilityScope[]>([]);
@@ -533,6 +565,13 @@ export function AiWorkbench({
   const [selectedDatasetId, setSelectedDatasetId] = useState("");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState("");
   const [selectedBuildMeasurementId, setSelectedBuildMeasurementId] = useState("");
+  const [trainingTargetMetric, setTrainingTargetMetric] = useState("");
+  const [useProductionTraining, setUseProductionTraining] = useState(true);
+  const [useAllProductionTraining, setUseAllProductionTraining] = useState(true);
+  const [useManualTraining, setUseManualTraining] = useState(false);
+  const [selectedProductionSnapshotIds, setSelectedProductionSnapshotIds] = useState<string[]>([]);
+  const [selectedManualUploadIds, setSelectedManualUploadIds] = useState<string[]>([]);
+  const [manualUploadName, setManualUploadName] = useState("");
   const [selectedPredictionId, setSelectedPredictionId] = useState("");
   const [selectedRecommendationId, setSelectedRecommendationId] = useState("");
   const [query, setQuery] = useState("");
@@ -555,10 +594,11 @@ export function AiWorkbench({
     setLoading(true);
     setError("");
     try {
-      const [nextModels, nextDatasets, nextAcceptanceDecisions, nextAcceptancePolicies, nextApplicabilityScopes, nextOodPolicies, nextValidationFolds, nextModelArtifacts, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextControlledTrials, nextRollbacks, nextMeasurements, nextMetrics] =
+      const [nextModels, nextDatasets, nextTrainingUploads, nextAcceptanceDecisions, nextAcceptancePolicies, nextApplicabilityScopes, nextOodPolicies, nextValidationFolds, nextModelArtifacts, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextControlledTrials, nextRollbacks, nextMeasurements, nextMetrics] =
         await Promise.all([
           request<ModelVersion[]>("/api/ai/models"),
           request<DatasetSnapshot[]>("/api/ai/models/datasets"),
+          request<TrainingUpload[]>("/api/ai/models/training-wide/uploads"),
           request<AcceptanceDecision[]>("/api/ai/models/acceptance-decisions"),
           request<AcceptancePolicy[]>("/api/ai/models/acceptance-policies"),
           request<ApplicabilityScope[]>("/api/ai/models/applicability-scopes"),
@@ -576,6 +616,7 @@ export function AiWorkbench({
         ]);
       setModels(nextModels);
       setDatasets(nextDatasets);
+      setTrainingUploads(nextTrainingUploads);
       setAcceptanceDecisions(nextAcceptanceDecisions);
       setAcceptancePolicies(nextAcceptancePolicies);
       setApplicabilityScopes(nextApplicabilityScopes);
@@ -598,10 +639,11 @@ export function AiWorkbench({
           ? current
           : nextMeasurements[0]?.id || "",
       );
+      setTrainingTargetMetric((current) => current || nextMetrics.find((item) => item.is_primary)?.code || nextMetrics[0]?.code || "");
       setSelectedPredictionId((current) => current || nextPredictions[0]?.id || "");
       setSelectedRecommendationId((current) => current || nextRecommendations[0]?.id || "");
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "AI 工作台加载失败");
+      setError(loadError instanceof Error ? loadError.message : "智能分析页面加载失败");
     } finally {
       setLoading(false);
     }
@@ -687,6 +729,13 @@ export function AiWorkbench({
   const selectedBuildMeasurement =
     featureBuildMeasurements.find((item) => item.id === selectedBuildMeasurementId) ??
     featureBuildMeasurements[0];
+  const selectedTargetDefinition = metrics.find((item) => item.code === trainingTargetMetric);
+  const eligibleProductionSnapshots = snapshots.filter(
+    (snapshot) => !selectedTargetDefinition || snapshot.target_family === selectedTargetDefinition.quality_type,
+  );
+  const eligibleManualUploads = trainingUploads.filter(
+    (upload) => upload.target_metric === trainingTargetMetric && upload.status === "VALIDATED",
+  );
   const selectedDatasetMembers = datasetMembers.filter(
     (member) => member.dataset_snapshot_id === selectedDatasetId,
   );
@@ -873,6 +922,18 @@ export function AiWorkbench({
   async function buildDataset(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    if (!useProductionTraining && !useManualTraining) {
+      setError("请至少选择一种训练数据来源");
+      return;
+    }
+    if (useProductionTraining && !useAllProductionTraining && !selectedProductionSnapshotIds.length) {
+      setError("请选择至少一条生产训练样本，或改为使用全部生产样本");
+      return;
+    }
+    if (useManualTraining && !selectedManualUploadIds.length) {
+      setError("请选择至少一个人工训练数据文件");
+      return;
+    }
     setSubmitting("dataset");
     try {
       const dataset = await request<DatasetSnapshot>("/api/ai/models/datasets", {
@@ -881,15 +942,87 @@ export function AiWorkbench({
         body: JSON.stringify({
           dataset_code: String(data.get("dataset_code")),
           version: String(data.get("version")),
-          target_metric: String(data.get("target_metric")),
+          target_metric: trainingTargetMetric,
           feature_set_version: String(data.get("feature_set_version")),
           holdout_ratio: Number(data.get("holdout_ratio")),
           min_train_groups: Number(data.get("min_train_groups")),
           min_validation_groups: Number(data.get("min_validation_groups")),
+          include_all_production: useProductionTraining && useAllProductionTraining,
+          production_snapshot_ids:
+            useProductionTraining && !useAllProductionTraining ? selectedProductionSnapshotIds : [],
+          manual_upload_ids: useManualTraining ? selectedManualUploadIds : [],
         }),
       });
       setSelectedDatasetId(dataset.id);
       showSuccess("训练集已生成，并完成数据交叉检查");
+      await reload();
+    } catch (operationError) {
+      showError(operationError);
+    } finally {
+      setSubmitting("");
+    }
+  }
+
+  function toggleSelected(
+    value: string,
+    selected: string[],
+    setSelected: (values: string[]) => void,
+  ) {
+    setSelected(
+      selected.includes(value)
+        ? selected.filter((item) => item !== value)
+        : [...selected, value],
+    );
+  }
+
+  function downloadTrainingTemplate(format: "xlsx" | "csv" = "xlsx") {
+    if (!trainingTargetMetric) {
+      setError("请先选择要预测的质量指标");
+      return;
+    }
+    const query = new URLSearchParams({
+      target_metric: trainingTargetMetric,
+      file_format: format,
+    });
+    window.location.href = `/api/ai/models/training-wide/template?${query}`;
+  }
+
+  async function uploadTrainingWide(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const file = data.get("training_file");
+    if (!(file instanceof File) || !file.size) {
+      setError("请选择已填写的 Excel 或 CSV 训练宽表");
+      return;
+    }
+    if (!manualUploadName.trim()) {
+      setError("请填写这批人工训练数据的名称");
+      return;
+    }
+    const baseQuery = new URLSearchParams({
+      target_metric: trainingTargetMetric,
+      feature_set_version: featureSetVersions[0] ?? DEFAULT_FEATURE_SET_VERSION,
+      filename: file.name,
+    });
+    setSubmitting("training-upload");
+    try {
+      await request<{ passed: boolean }>(`/api/ai/models/training-wide/validate?${baseQuery}`, {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      baseQuery.set("upload_name", manualUploadName.trim());
+      const uploaded = await request<TrainingUpload>(`/api/ai/models/training-wide/import?${baseQuery}`, {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      setUseManualTraining(true);
+      setSelectedManualUploadIds((current) => [...new Set([...current, uploaded.id])]);
+      setManualUploadName("");
+      form.reset();
+      showSuccess(`人工训练数据已通过校验并导入：${uploaded.sample_count} 条样本`);
       await reload();
     } catch (operationError) {
       showError(operationError);
@@ -1268,8 +1401,20 @@ export function AiWorkbench({
       <div className="page-stack">
         <WorkspaceEmptyState
           icon={ShieldCheck}
-          title="请先登录后进入 AI 闭环工作台"
+          title="请先登录后进入智能分析页面"
           description="模型治理、预测诊断、推荐审批与复测闭环都属于高风险业务能力，需要登录后再继续。"
+        />
+      </div>
+    );
+  }
+
+  if (!canOpenRequestedTabs) {
+    return (
+      <div className="page-stack">
+        <WorkspaceEmptyState
+          icon={ShieldCheck}
+          title="当前账号没有这项模型权限"
+          description="准备训练数据需要模型训练权限，模型验收需要独立审批权限。请由系统管理员按岗位职责授权。"
         />
       </div>
     );
@@ -1308,19 +1453,14 @@ export function AiWorkbench({
         <div className="master-tabs">
           {(
             (
-              canManageModels
-                ? ([
+              ([
                     ["predictions", "预测与诊断"],
                     ["recommendations", "推荐与试验"],
-                    ["models", "准备训练数据"],
-                    ["governance", "模型验收"],
-                    ["comparison", "模型对比"],
+                    ...(canPrepareModels ? [["models", "准备训练数据"]] : []),
+                    ...(canGovernModels ? [["governance", "模型验收"]] : []),
+                    ...(canCompareModels ? [["comparison", "模型对比"]] : []),
                   ] as [Tab, string][])
-                : ([
-                    ["predictions", "预测与诊断"],
-                    ["recommendations", "推荐与试验"],
-                  ] as [Tab, string][])
-            ).filter(([key]) => !allowedTabs || allowedTabs.includes(key))
+            ).filter(([key]) => !permittedAllowedTabs || permittedAllowedTabs.includes(key))
           ).map(([key, label]) => (
             <button key={key} className={activeTab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
           ))}
@@ -1332,7 +1472,7 @@ export function AiWorkbench({
         </div>
         )}
 
-        {activeTab === "models" && canManageModels ? (
+        {activeTab === "models" && canPrepareModels ? (
           <div className="ai-split">
             <div className="ai-control-panel ai-governed-training">
               <form onSubmit={buildPointFeatureSnapshot}>
@@ -1358,12 +1498,85 @@ export function AiWorkbench({
                   <button className="button button-secondary" disabled={!selectedBuildMeasurement || submitting === "feature-snapshot"}>{submitting === "feature-snapshot" ? <LoaderCircle className="spin" /> : <Activity />} 生成训练样本</button>
                 </div>
               </form>
+              <form onSubmit={uploadTrainingWide} className="ai-training-source">
+                <div className="program-subheading"><div><span className="eyebrow">第 2 步</span><h3>选择训练数据来源</h3></div><FileSpreadsheet /></div>
+                <div className="ai-form-stack">
+                  <label className="form-field">
+                    <span>要预测的质量指标</span>
+                    <select
+                      value={trainingTargetMetric}
+                      onChange={(event) => {
+                        setTrainingTargetMetric(event.target.value);
+                        setSelectedProductionSnapshotIds([]);
+                        setSelectedManualUploadIds([]);
+                      }}
+                      required
+                    >
+                      {metrics.filter((item) => item.is_primary).map((item) => <option key={`${item.quality_type}-${item.code}`} value={item.code}>{item.name}</option>)}
+                    </select>
+                  </label>
+                  <div className="ai-source-choice-grid">
+                    <label className={`ai-source-choice ${useProductionTraining ? "selected" : ""}`}>
+                      <input type="checkbox" checked={useProductionTraining} onChange={(event) => setUseProductionTraining(event.target.checked)} />
+                      <span><strong>生产记录</strong><small>使用系统已汇总的真实生产与质量数据</small></span>
+                    </label>
+                    <label className={`ai-source-choice ${useManualTraining ? "selected" : ""}`}>
+                      <input type="checkbox" checked={useManualTraining} onChange={(event) => setUseManualTraining(event.target.checked)} />
+                      <span><strong>人工训练数据</strong><small>使用您单独整理并上传的训练宽表</small></span>
+                    </label>
+                  </div>
+                  <p className="ai-hint">两种来源同等参与训练，不设优先级；可以任选一种，也可以一起使用。</p>
+
+                  {useProductionTraining ? (
+                    <details className="ai-advanced-details">
+                      <summary>选择生产样本（当前可用 {eligibleProductionSnapshots.length} 条）</summary>
+                      <label className="checkbox-field"><input type="checkbox" checked={useAllProductionTraining} onChange={(event) => setUseAllProductionTraining(event.target.checked)} />使用当前指标下全部可用生产样本</label>
+                      {!useAllProductionTraining ? (
+                        <div className="ai-source-list">
+                          {eligibleProductionSnapshots.map((snapshot) => (
+                            <label className="checkbox-field" key={snapshot.id}>
+                              <input type="checkbox" checked={selectedProductionSnapshotIds.includes(snapshot.id)} onChange={() => toggleSelected(snapshot.id, selectedProductionSnapshotIds, setSelectedProductionSnapshotIds)} />
+                              {snapshot.production_run_no} · {snapshot.measurement_point_name} · {snapshot.vehicle_model_name}/{snapshot.color_name}
+                            </label>
+                          ))}
+                          {!eligibleProductionSnapshots.length ? <small>暂无可用生产样本，请先完成第 1 步。</small> : null}
+                        </div>
+                      ) : null}
+                    </details>
+                  ) : null}
+
+                  {useManualTraining ? (
+                    <div className="ai-manual-upload-box">
+                      <div className="program-subheading"><div><strong>上传人工训练宽表</strong><small>先下载中文模板，填写后系统会先校验再入库</small></div></div>
+                      <div className="ai-two-fields">
+                        <button type="button" className="button button-secondary" onClick={() => downloadTrainingTemplate("xlsx")}><FileSpreadsheet /> 下载 Excel 模板</button>
+                        <button type="button" className="button button-secondary" onClick={() => downloadTrainingTemplate("csv")}><FileSpreadsheet /> 下载 CSV 模板</button>
+                      </div>
+                      <label className="form-field"><span>这批数据的名称</span><input value={manualUploadName} onChange={(event) => setManualUploadName(event.target.value)} placeholder="例如：车顶橘皮优化试验记录" /></label>
+                      <label className="form-field"><span>选择已填写的文件</span><input name="training_file" type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" /></label>
+                      <button className="button button-secondary" disabled={submitting === "training-upload"}>{submitting === "training-upload" ? <LoaderCircle className="spin" /> : <FileSpreadsheet />} 校验并导入</button>
+                      <details className="ai-advanced-details">
+                        <summary>选择已导入的数据文件（当前可用 {eligibleManualUploads.length} 个）</summary>
+                        <div className="ai-source-list">
+                          {eligibleManualUploads.map((upload) => (
+                            <label className="checkbox-field" key={upload.id}>
+                              <input type="checkbox" checked={selectedManualUploadIds.includes(upload.id)} onChange={() => toggleSelected(upload.id, selectedManualUploadIds, setSelectedManualUploadIds)} />
+                              {upload.name} · {upload.sample_count} 条样本 · {upload.validation_report.group_count} 个独立分组
+                            </label>
+                          ))}
+                          {!eligibleManualUploads.length ? <small>尚未导入该指标的人工训练数据。</small> : null}
+                        </div>
+                      </details>
+                    </div>
+                  ) : null}
+                </div>
+              </form>
               <form onSubmit={buildDataset}>
-                <div className="program-subheading"><div><span className="eyebrow">第 2 步</span><h3>汇总历史样本并划分训练/验证</h3></div><ShieldCheck /></div>
+                <div className="program-subheading"><div><span className="eyebrow">第 3 步</span><h3>生成训练与验证数据</h3></div><ShieldCheck /></div>
                 <div className="ai-form-stack">
                   <label className="form-field"><span>数据集名称 <b>*</b></span><input name="dataset_code" required defaultValue={defaultDatasetCode} /></label>
                   <div className="ai-two-fields"><label className="form-field"><span>版本</span><input name="version" required defaultValue="1.0" /></label><label className="form-field"><span>留给验证的比例</span><input name="holdout_ratio" type="number" min="0.1" max="0.5" step="0.05" defaultValue="0.25" title="用最近一部分车身做验证，避免把同一台车既拿来训练又拿来考试" /></label></div>
-                  <label className="form-field"><span>要预测的质量指标</span><select name="target_metric" required>{metrics.filter((item) => item.is_primary).map((item) => <option key={`${item.quality_type}-${item.code}`} value={item.code}>{item.name}</option>)}</select></label>
+                  <div className="ai-context-box"><span>预测指标</span><strong>{selectedTargetDefinition?.name ?? "—"}</strong><span>生产样本</span><strong>{useProductionTraining ? (useAllProductionTraining ? `全部 ${eligibleProductionSnapshots.length} 条` : `已选 ${selectedProductionSnapshotIds.length} 条`) : "不使用"}</strong><span>人工数据</span><strong>{useManualTraining ? `已选 ${selectedManualUploadIds.length} 个文件` : "不使用"}</strong></div>
                   <input type="hidden" name="feature_set_version" value={featureSetVersions[0] ?? DEFAULT_FEATURE_SET_VERSION} />
                   <details className="ai-advanced-details">
                     <summary>高级选项（一般不用改）</summary>
@@ -1373,7 +1586,7 @@ export function AiWorkbench({
                 </div>
               </form>
               <form onSubmit={trainModel}>
-                <div className="program-subheading"><div><span className="eyebrow">第 3 步</span><h3>训练模型</h3></div><FlaskConical /></div>
+                <div className="program-subheading"><div><span className="eyebrow">第 4 步</span><h3>训练模型</h3></div><FlaskConical /></div>
                 <div className="ai-form-stack">
                   <label className="form-field"><span>选择训练集</span><select name="dataset_snapshot_id" required value={selectedDatasetId} onChange={(event) => setSelectedDatasetId(event.target.value)}>{datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.dataset_code}:{dataset.version} · 训练{dataset.train_group_count}/验证{dataset.validation_group_count} 组</option>)}</select></label>
                   <input type="hidden" name="target_metric" value={selectedDataset?.target_metric ?? ""} />
@@ -1410,7 +1623,7 @@ export function AiWorkbench({
                     <div className="production-actual-row compact-head"><span>分组</span><span>切分</span><span>目标值</span><span>特征数</span><span>时间</span></div>
                     {selectedDatasetMembers.slice(0, 6).map((member) => (
                       <div className="production-actual-row" key={member.id}>
-                        <span><strong>{member.group_value}</strong><small>{member.measurement_point_id.slice(0, 8)} · {member.production_run_id.slice(0, 8)}</small></span>
+                        <span><strong>{member.group_value}</strong><small>{member.source_type === "PRODUCTION" ? `生产记录 · ${member.measurement_point_id?.slice(0, 8) ?? "—"}` : "人工训练宽表"}</small></span>
                         <span>{member.split}</span>
                         <span>{formatNumber(member.target_value)}</span>
                         <span>{Object.keys(member.feature_values ?? {}).length}</span>
@@ -1439,7 +1652,7 @@ export function AiWorkbench({
           </div>
         ) : null}
 
-        {activeTab === "governance" && canManageModels ? (
+        {activeTab === "governance" && canGovernModels ? (
           <div className="ai-split">
             <div className="ai-control-panel">
               <div className="program-subheading"><div><span className="eyebrow">模型状态</span><h3>版本状态治理</h3></div><ShieldCheck /></div>
@@ -1642,7 +1855,7 @@ export function AiWorkbench({
             </div>
           </div>
         ) : null}
-        {activeTab === "comparison" && canManageModels ? (
+        {activeTab === "comparison" && canCompareModels ? (
           <div className="model-comparison">
             <div className="program-subheading">
               <div><span className="eyebrow">模型对比</span><h3>模型版本对比</h3></div>

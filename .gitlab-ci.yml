@@ -1,9 +1,9 @@
 stages:
   - scan
   - build
+  - deploy
 
 variables:
-  PROJECT_GIT_REPOSITORY: "git@git.n.xiaomi.com:adili/pq-ai.git"
   NODE_IMAGE: "node:22-alpine"
   PYTHON_IMAGE: "python:3.11-slim"
   GIT_STRATEGY: clone
@@ -11,11 +11,13 @@ variables:
   SECRET_DETECTION_ENABLED: "true"
   DOCKER_DRIVER: overlay2
   DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_BUILDKIT: "1"
   DOCKER_IMAGE_TAG: "${CI_COMMIT_SHORT_SHA}"
   FRONTEND_IMAGE: "${CI_REGISTRY_IMAGE}/frontend:${DOCKER_IMAGE_TAG}"
   BACKEND_IMAGE: "${CI_REGISTRY_IMAGE}/backend:${DOCKER_IMAGE_TAG}"
   FRONTEND_LATEST_IMAGE: "${CI_REGISTRY_IMAGE}/frontend:latest"
   BACKEND_LATEST_IMAGE: "${CI_REGISTRY_IMAGE}/backend:latest"
+  KUBECTL_IMAGE: "alpine/k8s:1.31.6"
 
 include:
   - template: Security/SAST.gitlab-ci.yml
@@ -31,7 +33,7 @@ frontend:scan:
   stage: scan
   image: ${NODE_IMAGE}
   script:
-    - echo "Scanning frontend from ${PROJECT_GIT_REPOSITORY}"
+    - echo "Scanning frontend project ${CI_PROJECT_PATH}"
     - npm ci
     - npm run lint:web
 
@@ -43,7 +45,7 @@ backend:scan:
     - python -m pip install --upgrade pip
     - pip install -e ".[dev]"
   script:
-    - echo "Scanning backend from ${PROJECT_GIT_REPOSITORY}"
+    - echo "Scanning backend project ${CI_PROJECT_PATH}"
     - python -m compileall app tests
     - PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest
 
@@ -60,10 +62,11 @@ frontend:image:
     - test -n "${CI_REGISTRY_PASSWORD}"
     - test -n "${NODE_IMAGE}"
     - test -n "${NEXT_PUBLIC_API_URL}"
+    - test "${NEXT_PUBLIC_AUTH_ENABLED}" = "true"
     - echo "${CI_REGISTRY_PASSWORD}" | docker login -u "${CI_REGISTRY_USER}" --password-stdin "${CI_REGISTRY}"
   script:
-    - echo "Building frontend image from ${PROJECT_GIT_REPOSITORY} with dockerfile.frontend"
-    - docker build --pull --build-arg NODE_IMAGE="${NODE_IMAGE}" --build-arg NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL}" --build-arg NEXT_PUBLIC_AUTH_ENABLED="${NEXT_PUBLIC_AUTH_ENABLED:-false}" -f dockerfile.frontend -t "${FRONTEND_IMAGE}" -t "${FRONTEND_LATEST_IMAGE}" .
+    - echo "Building frontend image for ${CI_PROJECT_PATH} with dockerfile.frontend"
+    - docker build --pull --build-arg NODE_IMAGE="${NODE_IMAGE}" --build-arg NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL}" --build-arg NEXT_PUBLIC_AUTH_ENABLED="${NEXT_PUBLIC_AUTH_ENABLED}" -f dockerfile.frontend -t "${FRONTEND_IMAGE}" -t "${FRONTEND_LATEST_IMAGE}" .
     - docker push "${FRONTEND_IMAGE}"
     - docker push "${FRONTEND_LATEST_IMAGE}"
 
@@ -81,7 +84,49 @@ backend:image:
     - test -n "${PYTHON_IMAGE}"
     - echo "${CI_REGISTRY_PASSWORD}" | docker login -u "${CI_REGISTRY_USER}" --password-stdin "${CI_REGISTRY}"
   script:
-    - echo "Building backend image from ${PROJECT_GIT_REPOSITORY} with dockerfile.backend"
-    - docker build --pull --build-arg PYTHON_IMAGE="${PYTHON_IMAGE}" -f dockerfile.backend -t "${BACKEND_IMAGE}" -t "${BACKEND_LATEST_IMAGE}" .
+    - echo "Building backend image for ${CI_PROJECT_PATH} with dockerfile.backend"
+    - |
+      if [ -n "${PIP_CONFIG_SECRET_FILE:-}" ]; then
+        docker build --pull --build-arg PYTHON_IMAGE="${PYTHON_IMAGE}" --secret "id=pip_config,src=${PIP_CONFIG_SECRET_FILE}" -f dockerfile.backend -t "${BACKEND_IMAGE}" -t "${BACKEND_LATEST_IMAGE}" .
+      else
+        docker build --pull --build-arg PYTHON_IMAGE="${PYTHON_IMAGE}" -f dockerfile.backend -t "${BACKEND_IMAGE}" -t "${BACKEND_LATEST_IMAGE}" .
+      fi
     - docker push "${BACKEND_IMAGE}"
     - docker push "${BACKEND_LATEST_IMAGE}"
+
+.k8s-deploy:
+  stage: deploy
+  image:
+    name: ${KUBECTL_IMAGE}
+    entrypoint: [""]
+  before_script:
+    - test -n "${KUBE_CONTEXT}"
+    - test -n "${K8S_NAMESPACE}"
+    - kubectl config use-context "${KUBE_CONTEXT}"
+    - kubectl auth can-i patch deployments.apps -n "${K8S_NAMESPACE}"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+    - when: never
+
+backend:deploy:
+  extends: .k8s-deploy
+  needs:
+    - backend:image
+  script:
+    - sed "s|pq-ai-backend:replace-by-ci|${BACKEND_IMAGE}|g" deploy/k8s/backend.yaml > /tmp/pq-ai-backend.yaml
+    - kubectl -n "${K8S_NAMESPACE}" apply -f /tmp/pq-ai-backend.yaml
+    - kubectl -n "${K8S_NAMESPACE}" rollout status deployment/pq-ai-backend --timeout=10m
+  environment:
+    name: production/backend
+
+frontend:deploy:
+  extends: .k8s-deploy
+  needs:
+    - frontend:image
+  script:
+    - sed "s|pq-ai-frontend:replace-by-ci|${FRONTEND_IMAGE}|g" deploy/k8s/frontend.yaml > /tmp/pq-ai-frontend.yaml
+    - kubectl -n "${K8S_NAMESPACE}" apply -f /tmp/pq-ai-frontend.yaml
+    - kubectl -n "${K8S_NAMESPACE}" rollout status deployment/pq-ai-frontend --timeout=10m
+  environment:
+    name: production/frontend

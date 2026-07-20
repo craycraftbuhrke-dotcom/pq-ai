@@ -43,15 +43,9 @@ type DiffRow = {
   change_percent?: number;
 };
 
-function getApiKey(): string {
-  const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
-
 async function apiRequest<T>(path: string): Promise<T> {
   const resp = await fetch(path, {
     cache: "no-store",
-    headers: { "x-api-key": getApiKey() },
   });
   if (!resp.ok) throw new Error(`请求失败 (${resp.status})`);
   return resp.json() as Promise<T>;

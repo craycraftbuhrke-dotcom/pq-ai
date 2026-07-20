@@ -23,6 +23,7 @@ from app.models.domain import (
     Permission,
     Role,
     RolePermission,
+    UserSession,
     UserRole,
 )
 from app.schemas.security import (
@@ -71,16 +72,6 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     if not result:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     actor, access_token, expires_at = result
-    raw_key = f"pq_{token_urlsafe(32)}"
-    api_key = ApiKey(
-        user_id=actor.user_id,
-        name=f"浏览器登录 {payload.username}",
-        key_prefix=raw_key[:12],
-        key_hash=hash_api_key(raw_key),
-    )
-    db.add(api_key)
-    db.commit()
-    db.refresh(api_key)
     actor_payload = {
         "user_id": actor.user_id,
         "username": actor.username,
@@ -91,8 +82,6 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     }
     return {
         **actor_payload,
-        "api_key": raw_key,
-        "api_key_name": api_key.name,
         "access_token": access_token,
         "token_type": "bearer",
         "expires_at": expires_at,
@@ -102,6 +91,8 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
 
 @router.post("/auth/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> dict:
+    if not settings.allow_self_registration:
+        raise HTTPException(status_code=403, detail="系统未开放自助注册，请联系管理员创建账号")
     if db.scalar(select(AppUser).where(AppUser.username == payload.username)):
         raise HTTPException(status_code=409, detail="用户名已存在")
     if payload.email and db.scalar(select(AppUser).where(AppUser.email == payload.email)):
@@ -115,14 +106,6 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> dict:
     )
     db.add(user)
     db.flush()
-    raw_key = f"pq_{token_urlsafe(32)}"
-    api_key = ApiKey(
-        user_id=user.id,
-        name=f"注册自动签发 {payload.username}",
-        key_prefix=raw_key[:12],
-        key_hash=hash_api_key(raw_key),
-    )
-    db.add(api_key)
     db.commit()
     db.refresh(user)
     result = login_with_password(
@@ -143,8 +126,6 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> dict:
     }
     return {
         **actor_payload,
-        "api_key": raw_key,
-        "api_key_name": api_key.name,
         "access_token": access_token,
         "token_type": "bearer",
         "expires_at": expires_at,
@@ -165,6 +146,19 @@ def change_password(
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=400, detail="当前密码不正确")
     user.password_hash = hash_password(payload.new_password)
+    user.password_changed_at = datetime.now(UTC)
+    now = datetime.now(UTC)
+    for session in db.scalars(
+        select(UserSession).where(
+            UserSession.user_id == user.id,
+            UserSession.revoked_at.is_(None),
+        )
+    ):
+        session.revoked_at = now
+    for api_key in db.scalars(
+        select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.is_active.is_(True))
+    ):
+        api_key.is_active = False
     db.commit()
     return {"message": "密码已更新"}
 

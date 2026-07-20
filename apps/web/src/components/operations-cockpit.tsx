@@ -35,13 +35,13 @@ function ExceptionTriage({ d }: { d: DashboardOverview }) {
   const hasRisk = d.riskPoints.length > 0;
 
   return (
-    <section className={`cockpit-panel cockpit-triage${hasRisk ? " is-alert" : ""}`} aria-label="质量异常">
+    <section className={`cockpit-panel cockpit-triage${hasRisk ? " is-alert" : ""}`} aria-label="待办事项">
       <header className="cockpit-panel-head">
         <div>
-          <span className="cockpit-panel-kicker">质量异常</span>
+          <span className="cockpit-panel-kicker">待办事项</span>
           <div className="cockpit-triage-count">
             <strong className="mono">{d.riskPoints.length}</strong>
-            <span>个高风险点位</span>
+            <span>项需要处理</span>
           </div>
         </div>
         <Link className="cockpit-panel-link" href="/quality?tab=measurements&filter=fail">
@@ -62,8 +62,11 @@ function ExceptionTriage({ d }: { d: DashboardOverview }) {
               </div>
               <div className="cockpit-exception-meta">
                 <span className="cockpit-exception-metric">{p.metric}</span>
-                <span className="cockpit-exception-risk mono">{p.risk.toFixed(1)}</span>
+                <span className="cockpit-exception-risk">风险 {p.risk.toFixed(1)}</span>
               </div>
+              <Link className="cockpit-exception-action" href="/quality?tab=measurements&filter=fail">
+                开始排查
+              </Link>
             </li>
           ))}
         </ul>
@@ -99,28 +102,28 @@ function StageHealthPanel({ p }: { p: ProcessOverview }) {
       ? p.stages
       : [
           { code: "MIDCOAT_EXT", name: "中涂外喷", healthy: false, runCount: 0 },
-          { code: "BASECOAT_1", name: "色漆一道", healthy: false, runCount: 0 },
-          { code: "BASECOAT_2", name: "色漆二道", healthy: false, runCount: 0 },
-          { code: "CLEARCOAT_1", name: "清漆一道", healthy: false, runCount: 0 },
-          { code: "CLEARCOAT_2", name: "清漆二道", healthy: false, runCount: 0 },
+          { code: "BASECOAT_1", name: "色漆一站", healthy: false, runCount: 0 },
+          { code: "BASECOAT_2", name: "色漆二站", healthy: false, runCount: 0 },
+          { code: "CLEARCOAT_1", name: "清漆一站", healthy: false, runCount: 0 },
+          { code: "CLEARCOAT_2", name: "清漆二站", healthy: false, runCount: 0 },
         ];
   const healthyCount = stages.filter((s) => s.healthy).length;
   const recent = p.recentRuns.slice(0, 3);
 
   return (
-    <section className="cockpit-panel cockpit-stages" aria-label="工艺五段健康">
+    <section className="cockpit-panel cockpit-stages" aria-label="五道喷涂工序">
       <header className="cockpit-panel-head">
         <div>
-          <span className="cockpit-panel-kicker">工艺执行</span>
+          <span className="cockpit-panel-kicker">五道喷涂工序</span>
           <div className="cockpit-stages-summary">
             <strong className="mono">
               {healthyCount}/{stages.length}
             </strong>
-            <span>段健康 · 在制 {p.activeRuns} 台</span>
+            <span>道正常 · 在制 {p.activeRuns} 台</span>
           </div>
         </div>
         <Link className="cockpit-panel-link" href="/process?tab=simulation">
-          虚拟产线
+          查看工序详情
           <ArrowRight aria-hidden="true" />
         </Link>
       </header>
@@ -283,6 +286,12 @@ export function OperationsCockpit() {
 
   return (
     <div className="page-stack cockpit-page">
+      <header className="cockpit-heading">
+        <div>
+          <h1>今日工作</h1>
+          <p>先处理异常，再确认数据，最后推进试验闭环。</p>
+        </div>
+      </header>
       <div className="cockpit-toolbar">
         <div className="cockpit-freshness">
           <span className="live-dot" />

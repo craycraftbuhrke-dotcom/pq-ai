@@ -104,7 +104,7 @@ export function AiOverviewPanel() {
   return (
     <div className="domain-overview">
       <div className="domain-overview-intro">
-        <strong>AI 闭环总览</strong>
+        <strong>智能分析与试验闭环</strong>
         <span>模型验收、预测诊断、推荐试验与工艺变更的关键指标；点击卡片进入对应工作台。</span>
       </div>
       <div className="ovp-card-grid">

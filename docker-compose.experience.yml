@@ -9,8 +9,7 @@ services:
       API_PREFIX: ${API_PREFIX:?API_PREFIX is required}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       API_CORS_ORIGINS: ${API_CORS_ORIGINS:?API_CORS_ORIGINS is required}
-      # 认证总开关：默认 false（测试期直接放行）；正式投用改为 true
-      API_AUTH_ENABLED: ${API_AUTH_ENABLED:-false}
+      API_AUTH_ENABLED: "true"
       API_HOST: ${API_HOST:?API_HOST is required}
       API_PORT: ${API_PORT:?API_PORT is required}
     ports:
@@ -29,9 +28,9 @@ services:
       PORT: ${FRONTEND_PORT:?FRONTEND_PORT is required}
       API_URL: ${API_URL:?API_URL is required}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
-      NEXT_PUBLIC_AUTH_ENABLED: ${NEXT_PUBLIC_AUTH_ENABLED:-false}
-      API_AUTH_ENABLED: ${API_AUTH_ENABLED:-false}
-      API_KEY: ${API_KEY:?API_KEY is required}
+      AUTH_ENABLED: "true"
+      NEXT_PUBLIC_AUTH_ENABLED: "true"
+      API_AUTH_ENABLED: "true"
     ports:
       - "${FRONTEND_PUBLISH_PORT:?FRONTEND_PUBLISH_PORT is required}:${FRONTEND_PORT:?FRONTEND_PORT is required}"
     depends_on:

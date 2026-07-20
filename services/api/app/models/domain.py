@@ -1311,22 +1311,69 @@ class DatasetSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class TrainingDataUpload(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "training_data_upload"
+    __table_args__ = (
+        UniqueConstraint("upload_no", name="uk_training_data_upload_no"),
+        Index("idx_training_upload_target", "target_metric", "row_status", "uploaded_at"),
+    )
+
+    upload_no: Mapped[str] = mapped_column(String(80), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    target_metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    feature_set_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_type: Mapped[str] = mapped_column(
+        String(24), default="MANUAL_UPLOAD", nullable=False
+    )
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        "row_status", String(24), default="VALIDATED", nullable=False
+    )
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    feature_names: Mapped[list] = mapped_column(JSON, nullable=False)
+    validation_report: Mapped[dict] = mapped_column(JSON, nullable=False)
+    uploaded_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class TrainingWideSample(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "training_wide_sample"
+    __table_args__ = (
+        UniqueConstraint("upload_id", "sample_no", name="uk_training_upload_sample"),
+        Index("idx_training_sample_group", "upload_id", "group_value", "occurred_at"),
+    )
+
+    upload_id: Mapped[str] = logical_fk("training_data_upload.id", nullable=False)
+    sample_no: Mapped[str] = mapped_column(String(100), nullable=False)
+    group_value: Mapped[str] = mapped_column(String(100), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    target_value: Mapped[float] = mapped_column(Float, nullable=False)
+    feature_values: Mapped[dict] = mapped_column(JSON, nullable=False)
+    lineage: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    is_valid: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
 class DatasetSplitMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "dataset_split_member"
     __table_args__ = (
         UniqueConstraint(
             "dataset_snapshot_id",
-            "point_feature_snapshot_id",
-            name="uk_dataset_feature_snapshot",
+            "source_type",
+            "source_ref",
+            name="uk_dataset_source_member",
         ),
         Index("idx_dataset_split_group", "dataset_snapshot_id", "split", "group_value"),
     )
 
     dataset_snapshot_id: Mapped[str] = logical_fk("dataset_snapshot.id", nullable=False)
-    point_feature_snapshot_id: Mapped[str] = logical_fk("point_feature_snapshot.id", nullable=False)
-    production_run_id: Mapped[str] = logical_fk("production_run.id", nullable=False)
-    measurement_point_id: Mapped[str] = logical_fk("measurement_point.id", nullable=False)
-    target_measurement_id: Mapped[str] = logical_fk("quality_measurement.id", nullable=False)
+    source_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(100), nullable=False)
+    point_feature_snapshot_id: Mapped[str | None] = logical_fk("point_feature_snapshot.id")
+    manual_sample_id: Mapped[str | None] = logical_fk("training_wide_sample.id")
+    production_run_id: Mapped[str | None] = logical_fk("production_run.id")
+    measurement_point_id: Mapped[str | None] = logical_fk("measurement_point.id")
+    target_measurement_id: Mapped[str | None] = logical_fk("quality_measurement.id")
     group_value: Mapped[str] = mapped_column(String(100), nullable=False)
     split: Mapped[str] = mapped_column(String(24), nullable=False)
     target_value: Mapped[float] = mapped_column(Float, nullable=False)
@@ -1904,3 +1951,134 @@ class IntegrationEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RemoteStationConnection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "remote_station_connection"
+    __table_args__ = (
+        UniqueConstraint("connection_code", name="uk_remote_station_connection"),
+        Index("idx_remote_station_factory", "factory_id", "process_stage", "row_status"),
+    )
+
+    connection_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    factory_id: Mapped[str] = logical_fk("factory.id", nullable=False)
+    station_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    station_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    process_stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    port: Mapped[int] = mapped_column(Integer, nullable=False)
+    transport: Mapped[str] = mapped_column(String(24), default="TLS_TCP", nullable=False)
+    adapter_mode: Mapped[str] = mapped_column(
+        String(32), default="SIMULATOR", nullable=False
+    )
+    agent_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    server_name: Mapped[str | None] = mapped_column(String(255))
+    client_certificate_ref: Mapped[str | None] = mapped_column(String(160))
+    client_private_key_ref: Mapped[str | None] = mapped_column(String(160))
+    trusted_ca_ref: Mapped[str | None] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(
+        "row_status", String(24), default="DRAFT", nullable=False
+    )
+    operating_mode: Mapped[str] = mapped_column(
+        String(24), default="READ_ONLY", nullable=False
+    )
+    local_confirmation_required: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    connect_timeout_seconds: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    max_package_bytes: Mapped[int] = mapped_column(
+        Integer, default=5242880, nullable=False
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_inventory_hash: Mapped[str | None] = mapped_column(String(64))
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class RemoteParameterSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "remote_parameter_snapshot"
+    __table_args__ = (
+        Index("idx_remote_snapshot_source", "connection_id", "source_type", "collected_at"),
+    )
+
+    connection_id: Mapped[str] = logical_fk("remote_station_connection.id", nullable=False)
+    source_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    program_version_id: Mapped[str | None] = logical_fk("spray_program_version.id")
+    version_label: Mapped[str] = mapped_column(String(80), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    parameter_payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    collection_ref: Mapped[str | None] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(
+        "row_status", String(24), default="VERIFIED", nullable=False
+    )
+    collected_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RemoteProgramRelease(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "remote_program_release"
+    __table_args__ = (
+        UniqueConstraint("release_no", name="uk_remote_program_release"),
+        Index("idx_remote_release_status", "connection_id", "row_status", "requested_at"),
+    )
+
+    release_no: Mapped[str] = mapped_column(String(80), nullable=False)
+    connection_id: Mapped[str] = logical_fk("remote_station_connection.id", nullable=False)
+    base_program_version_id: Mapped[str] = logical_fk(
+        "spray_program_version.id", nullable=False
+    )
+    candidate_program_version_id: Mapped[str] = logical_fk(
+        "spray_program_version.id", nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        "row_status", String(32), default="DRAFT", nullable=False
+    )
+    package_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    package_payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    risk_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String(80))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    staged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    local_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    readback_hash: Mapped[str | None] = mapped_column(String(64))
+    rollback_program_version_id: Mapped[str | None] = logical_fk("spray_program_version.id")
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class RemoteReleaseEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "remote_release_event"
+    __table_args__ = (
+        Index("idx_remote_release_event", "release_id", "occurred_at"),
+    )
+
+    release_id: Mapped[str] = logical_fk("remote_program_release.id", nullable=False)
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    event_payload: Mapped[dict | None] = mapped_column(JSON)
+    actor: Mapped[str] = mapped_column(String(80), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RemoteStationReconciliation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "remote_station_reconciliation"
+    __table_args__ = (
+        Index("idx_remote_reconcile_time", "connection_id", "generated_at"),
+    )
+
+    connection_id: Mapped[str] = logical_fk("remote_station_connection.id", nullable=False)
+    cloud_snapshot_id: Mapped[str | None] = logical_fk("remote_parameter_snapshot.id")
+    virtual_snapshot_id: Mapped[str | None] = logical_fk("remote_parameter_snapshot.id")
+    upper_snapshot_id: Mapped[str | None] = logical_fk("remote_parameter_snapshot.id")
+    status: Mapped[str] = mapped_column(
+        "row_status", String(24), default="GENERATED", nullable=False
+    )
+    diff_payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    generated_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

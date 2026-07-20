@@ -21,6 +21,7 @@ type BulkDataActionsProps = {
   onImported?: () => void | Promise<void>;
   importQuery?: Record<string, string | undefined>;
   downloadQuery?: Record<string, string | undefined>;
+  defaultValues?: Record<string, string | number | boolean | undefined>;
   className?: string;
 };
 
@@ -51,18 +52,24 @@ export function BulkDataActions({
   onResult,
   importQuery,
   downloadQuery,
+  defaultValues,
   className,
 }: BulkDataActionsProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [format, setFormat] = useState<"xlsx" | "csv">("xlsx");
   const [uploading, setUploading] = useState(false);
+  const defaultQuery = defaultValues && Object.values(defaultValues).some((value) => value !== undefined)
+    ? { default_values: JSON.stringify(defaultValues) }
+    : undefined;
+  const effectiveImportQuery = { ...defaultQuery, ...importQuery };
+  const effectiveDownloadQuery = { ...defaultQuery, ...downloadQuery };
 
   function notify(message: string, type: "success" | "error" = "success") {
     onResult?.(message, type);
   }
 
   function download(action: "template" | "export") {
-    window.location.href = withQuery(downloadUrl(resourceKey, action, format), downloadQuery);
+    window.location.href = withQuery(downloadUrl(resourceKey, action, format), effectiveDownloadQuery);
     notify(`${resourceLabel}${action === "template" ? "模板" : "数据"}下载已开始`);
   }
 
@@ -72,7 +79,7 @@ export function BulkDataActions({
       const response = await fetch(
         withQuery(
           `/api/bulk/${encodeURIComponent(resourceKey)}/import?mode=upsert&filename=${encodeURIComponent(file.name)}`,
-          importQuery,
+          effectiveImportQuery,
         ),
         {
           method: "POST",
@@ -85,7 +92,7 @@ export function BulkDataActions({
       const firstError = result.errors?.[0];
       const summary = `已处理 ${result.total_rows ?? 0} 行，新增 ${result.created ?? 0}，更新 ${result.updated ?? 0}，跳过 ${result.skipped ?? 0}，失败 ${result.failed ?? 0}`;
       if ((result.total_rows ?? 0) === 0) {
-        notify("导入文件没有可处理的数据行，请先在模板的 data 页或 CSV 数据区填写记录后再导入", "error");
+        notify("导入文件没有可处理的数据行，请先在模板的「数据」页填写记录后再导入", "error");
         return;
       }
       notify(firstError ? `${summary}；首个错误：第 ${firstError.row} 行 ${firstError.message}` : summary, firstError ? "error" : "success");
@@ -105,16 +112,16 @@ export function BulkDataActions({
         onChange={(event) => setFormat(event.target.value as "xlsx" | "csv")}
         disabled={disabled || uploading}
       >
-        <option value="xlsx">Excel</option>
-        <option value="csv">CSV</option>
+        <option value="xlsx">Excel 表格</option>
+        <option value="csv">CSV 文件</option>
       </select>
       <button className="button button-secondary" onClick={() => download("template")} disabled={disabled || uploading}>
         <FileSpreadsheet />
-        模板
+        下载中文模板
       </button>
       <button className="button button-secondary" onClick={() => download("export")} disabled={disabled || uploading}>
         <Download />
-        导出
+        导出当前数据
       </button>
       <input
         ref={inputRef}
@@ -133,7 +140,7 @@ export function BulkDataActions({
         disabled={disabled || uploading}
       >
         {uploading ? <LoaderCircle className="spin" /> : <Upload />}
-        导入
+        导入表格
       </button>
     </div>
   );

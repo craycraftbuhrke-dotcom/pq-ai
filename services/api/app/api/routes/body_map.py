@@ -402,6 +402,10 @@ def _parameter_cards(
                 configured_value=conf.configured_value if conf else None,
                 actual_value=actual_by_code.get(code),
                 unit=conf.unit if conf else "",
+                soft_min=conf.soft_min if conf else None,
+                soft_max=conf.soft_max if conf else None,
+                hard_min=conf.hard_min if conf else None,
+                hard_max=conf.hard_max if conf else None,
             )
         )
     return cards
@@ -508,6 +512,10 @@ def _brush_contributions_for_point(
                             brush_id=brush.id,
                             brush_no=brush.brush_no,
                             brush_table_no=brush.brush_table_no,
+                            program_version_id=version.id if version else None,
+                            program_version=version.version if version else None,
+                            program_code=program.program_code if program else None,
+                            program_name=program.name if program else None,
                             process_stage=process_stage,
                             coating_system=_coating_system(process_stage),
                             overlap_ratio=entry.overlap_ratio,
@@ -590,6 +598,10 @@ def _brush_contributions_for_point(
                 brush_id=brush.id,
                 brush_no=brush.brush_no,
                 brush_table_no=brush.brush_table_no,
+                program_version_id=version.id if version else None,
+                program_version=version.version if version else None,
+                program_code=program.program_code if program else None,
+                program_name=program.name if program else None,
                 process_stage=process_stage,
                 coating_system=_coating_system(process_stage)
                 if process_stage != "UNKNOWN"
@@ -1302,7 +1314,6 @@ def _upsert_3d_layout(
     layout = db.scalar(
         select(MeasurementPoint3DLayout).where(
             MeasurementPoint3DLayout.measurement_point_id == measurement_point_id,
-            MeasurementPoint3DLayout.status == "ACTIVE",
         )
     )
     if layout:
@@ -1315,16 +1326,6 @@ def _upsert_3d_layout(
         layout.model_asset_key = model_asset_key
         layout.status = "ACTIVE"
     else:
-        # Soft-retire any stale ACTIVE rows (unique constraint guard).
-        stale = list(
-            db.scalars(
-                select(MeasurementPoint3DLayout).where(
-                    MeasurementPoint3DLayout.measurement_point_id == measurement_point_id,
-                )
-            )
-        )
-        for item in stale:
-            item.status = "INACTIVE"
         layout = MeasurementPoint3DLayout(
             measurement_point_id=measurement_point_id,
             pos_x=pos_x,

@@ -70,12 +70,6 @@ const TREND_ICONS: Record<string, ReactNode> = {
   insufficient_data: <BarChart3 className="trend-icon" />,
 };
 
-function getApiKeyFromCookie(): string {
-  if (typeof document === "undefined") return "";
-  const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
-
 function formatDate(raw: string): string {
   try {
     return new Date(raw).toLocaleString("zh-CN", {
@@ -304,15 +298,12 @@ export function MaterialTrendsPanel({ embedded = false }: { embedded?: boolean }
     setLoading(true);
     setError("");
     try {
-      const apiKey = getApiKeyFromCookie();
       const [resResp, sumResp] = await Promise.all([
         fetch("/api/process/material-governance/results?limit=500", {
           cache: "no-store",
-          headers: { "x-api-key": apiKey },
         }),
         fetch("/api/process/material-governance/summary", {
           cache: "no-store",
-          headers: { "x-api-key": apiKey },
         }),
       ]);
 
@@ -490,7 +481,7 @@ export function MaterialTrendsPanel({ embedded = false }: { embedded?: boolean }
           <section className="panel material-ai-readiness">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">AI 闭环</span>
+                <span className="eyebrow">智能分析</span>
                 <h2>材料特性 → AI 推荐</h2>
               </div>
               <Link className="button button-secondary" href="/ai?tab=recommendations">

@@ -19,7 +19,16 @@ from app.db.session import SessionLocal
 from app.models.domain import AuditLog
 
 
-EXEMPT_PATHS = {"/", "/docs", "/openapi.json", "/api/v1/health", "/api/v1/auth/login", "/api/v1/auth/register"}
+EXEMPT_PATHS = {
+    "/",
+    "/docs",
+    "/openapi.json",
+    f"{settings.api_prefix}/health",
+    f"{settings.api_prefix}/health/live",
+    f"{settings.api_prefix}/health/ready",
+    f"{settings.api_prefix}/auth/login",
+    f"{settings.api_prefix}/auth/register",
+}
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -27,10 +36,10 @@ async def security_and_audit_middleware(request: Request, call_next) -> Response
     request_id = request.headers.get("x-request-id", str(uuid4()))
     request.state.request_id = request_id
     path = request.url.path
-    # 认证关闭时（settings.api_auth_enabled=False）：跳过 Bearer/x-api-key 校验，
-    # 所有请求以 SYSTEM_ACTOR（拥有 * 权限）身份放行。审计日志仍会写入 actor_username="system"。
-    # 未来测试通过后，将环境变量 API_AUTH_ENABLED=true 即可恢复完整登录 + RBAC + 审计流程。
-    actor = SYSTEM_ACTOR
+    # 公开端点也必须按匿名身份审计；只有显式关闭认证的隔离测试使用系统身份。
+    actor = ANONYMOUS_ACTOR
+    if not settings.api_auth_enabled:
+        actor = SYSTEM_ACTOR
 
     if settings.api_auth_enabled and path not in EXEMPT_PATHS and request.method != "OPTIONS":
         bearer_token = _bearer_token(request.headers.get("authorization", ""))
@@ -49,7 +58,7 @@ async def security_and_audit_middleware(request: Request, call_next) -> Response
                 _write_audit(request, ANONYMOUS_ACTOR, request_id, 401, 0)
             return JSONResponse(
                 status_code=401,
-                content={"detail": "无效或已过期的 API Key", "request_id": request_id},
+                content={"detail": "登录会话或系统接口密钥无效或已过期", "request_id": request_id},
                 headers={"x-request-id": request_id},
             )
         permission = required_permission(request.method, path)
@@ -107,10 +116,7 @@ def _write_audit(request: Request, actor, request_id: str, status_code: int, dur
                     resource_id=resource_id,
                     status_code=status_code,
                     client_ip=request.client.host if request.client else None,
-                    detail={
-                        "query": str(request.url.query) or None,
-                        "duration_ms": round(duration * 1000, 2),
-                    },
+                    detail={"duration_ms": round(duration * 1000, 2)},
                 )
             )
             db.commit()

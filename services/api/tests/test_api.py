@@ -1,14 +1,37 @@
 from fastapi import HTTPException
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.api.routes.ai import diagnose, predict
 from app.api.routes.dashboard import get_dashboard
-from app.api.routes.health import health
+from app.api.routes.health import liveness, readiness
 from app.schemas.common import DiagnosisRequest, PredictionRequest
 
 
 def test_health_endpoint() -> None:
-    assert health()["status"] == "ok"
+    assert liveness() == {
+        "status": "ok",
+        "service": "pq-ai-api",
+        "check": "liveness",
+    }
+
+
+def test_readiness_checks_database() -> None:
+    class ReadySession:
+        def execute(self, statement):
+            assert str(statement) == "SELECT 1"
+
+    assert readiness(ReadySession())["check"] == "readiness"
+
+
+def test_readiness_returns_503_when_database_is_unavailable() -> None:
+    class UnavailableSession:
+        def execute(self, statement):
+            raise OperationalError("SELECT 1", {}, RuntimeError("offline"))
+
+    with pytest.raises(HTTPException) as error:
+        readiness(UnavailableSession())
+    assert error.value.status_code == 503
 
 
 def test_dashboard_contract() -> None:

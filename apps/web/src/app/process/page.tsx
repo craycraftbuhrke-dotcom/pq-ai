@@ -79,7 +79,7 @@ function ProcessOverviewPanel({ data }: { data: ProcessOverviewData }) {
           kpiUnit="项"
           accent={data.openIssueTasks > 0 ? "warning" : "positive"}
           viewAllHref="/ai?tab=changes"
-          viewAllLabel="去 AI 闭环"
+          viewAllLabel="去智能分析"
         >
           <OvpCardList items={[{ label: "待处理问题", value: String(data.openIssueTasks) }]} />
         </OvpCard>

@@ -9,14 +9,16 @@ class Settings(BaseSettings):
     database_url: str
     # 默认允许 nginx 惯例端口（80）与常见备用端口（8080），部署时通过 API_CORS_ORIGINS 覆盖
     api_cors_origins: str = "http://localhost,http://localhost:80,http://localhost:8080"
-    # 认证总开关：默认关闭，测试期直接放行所有请求；正式投用时通过环境变量 API_AUTH_ENABLED=true 开启。
-    api_auth_enabled: bool = False
+    # 默认失败关闭；只有隔离测试可显式设为 false。
+    api_auth_enabled: bool = True
+    allow_self_registration: bool = False
     session_ttl_minutes: int = 12 * 60
     login_lockout_threshold: int = 5
     login_lockout_minutes: int = 15
-    # 启动时自动预置固定字典（质量指标定义 + 工艺参数定义）。默认开启；
-    # 若某次部署想跳过（例如 DB 只读、只做灰度），可通过环境变量 SEED_ON_STARTUP=false 关闭。
-    seed_on_startup: bool = True
+    bulk_import_max_bytes: int = 50 * 1024 * 1024
+    file_import_max_bytes: int = 50 * 1024 * 1024
+    # 生产启动不得隐式写库。仅在受控初始化任务中显式开启目录预置。
+    seed_on_startup: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 

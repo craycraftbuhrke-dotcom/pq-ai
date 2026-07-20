@@ -14,7 +14,7 @@ export const QUALITY_HUB_TABS: Array<{ key: QualityHubTab; label: string }> = [
   { key: "body-map", label: "车身点位图" },
   { key: "3d-view", label: "3D 车身" },
   { key: "standards", label: "质量标准" },
-  { key: "analytics", label: "SPC 与趋势" },
+  { key: "analytics", label: "质量趋势" },
 ];
 
 export type QualityShortcut = { tab: QualityHubTab; label: string };

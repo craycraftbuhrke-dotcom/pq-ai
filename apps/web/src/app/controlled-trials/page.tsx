@@ -84,17 +84,11 @@ const EVIDENCE_LABELS: Record<string, string> = {
   CONTROLLED_CHANGE: "受控变更证据",
 };
 
-function getApiKeyFromCookie(): string {
-  if (typeof document === "undefined") return "";
-  const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
-
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     cache: "no-store",
-    headers: { ...init?.headers, "x-api-key": getApiKeyFromCookie() },
     ...init,
+    headers: init?.headers,
   });
   if (response.status === 204) return undefined as T;
   const payload = (await response.json().catch(() => ({}))) as T & { detail?: string };

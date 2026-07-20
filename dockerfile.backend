@@ -1,20 +1,23 @@
-FROM python:3.11-slim
+# syntax=docker/dockerfile:1.7
+ARG PYTHON_IMAGE=python:3.11-slim
+FROM ${PYTHON_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_INDEX_URL=https://artifactory.d.xiaomi.net/artifactory/api/pypi/pypi-virtual/simple \
-    PIP_EXTRA_INDEX_URL=https://pypi.org/simple \
-    PIP_TRUSTED_HOST=artifactory.d.xiaomi.net
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
 COPY services/api/pyproject.toml ./
 COPY services/api/app ./app
-RUN python -m pip install --no-cache-dir --prefer-binary --default-timeout=300 --retries=10 .
+RUN --mount=type=secret,id=pip_config,target=/etc/pip.conf,required=false \
+    python -m pip install --no-cache-dir --prefer-binary --default-timeout=300 --retries=10 .
 # Optional CAD stack for STEP→GLB upload; keep image buildable if wheel is unavailable.
-RUN python -m pip install --no-cache-dir --prefer-binary --default-timeout=300 --retries=10 "cascadio==0.0.17" \
+RUN --mount=type=secret,id=pip_config,target=/etc/pip.conf,required=false \
+    python -m pip install --no-cache-dir --prefer-binary --default-timeout=300 --retries=10 "cascadio==0.0.17" \
  || echo "WARN: cascadio install failed; STEP upload convert will return 503"
+RUN addgroup --system pqai && adduser --system --ingroup pqai pqai
+USER pqai
 
 EXPOSE 8000
 
-CMD : "${APP_NAME:?APP_NAME is required}"; : "${API_PREFIX:?API_PREFIX is required}"; : "${DATABASE_URL:?DATABASE_URL is required}"; : "${API_CORS_ORIGINS:?API_CORS_ORIGINS is required}"; : "${API_AUTH_ENABLED:=false}"; : "${SEED_ON_STARTUP:=true}"; : "${API_HOST:?API_HOST is required}"; : "${API_PORT:?API_PORT is required}"; export API_AUTH_ENABLED SEED_ON_STARTUP; uvicorn app.main:app --host "$API_HOST" --port "$API_PORT"
+CMD : "${APP_NAME:?APP_NAME is required}"; : "${API_PREFIX:?API_PREFIX is required}"; : "${DATABASE_URL:?DATABASE_URL is required}"; : "${API_CORS_ORIGINS:?API_CORS_ORIGINS is required}"; : "${API_AUTH_ENABLED:?API_AUTH_ENABLED must be true}"; [ "$API_AUTH_ENABLED" = "true" ] || { echo "API_AUTH_ENABLED must be true" >&2; exit 1; }; SEED_ON_STARTUP="${SEED_ON_STARTUP:-false}"; : "${API_HOST:?API_HOST is required}"; : "${API_PORT:?API_PORT is required}"; export API_AUTH_ENABLED SEED_ON_STARTUP; uvicorn app.main:app --host "$API_HOST" --port "$API_PORT"

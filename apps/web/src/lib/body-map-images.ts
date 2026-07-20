@@ -1,5 +1,7 @@
 /** Built-in body-map backgrounds under apps/web/public, plus override manifest helpers. */
 
+import { legacyModelKey, normalizeModelKey, ownModelEntry } from "@/lib/body-map-models";
+
 export type BodyMapView = "RIGHT" | "LEFT" | "TOP" | "REAR";
 
 export const BODY_MAP_VIEWS: BodyMapView[] = ["RIGHT", "LEFT", "TOP", "REAR"];
@@ -51,7 +53,7 @@ export const EMPTY_BODY_MAP_IMAGE_MANIFEST: BodyMapImageManifest = {
 };
 
 export function normalizeModelImageKey(code: string): string {
-  return code.trim().toLowerCase();
+  return normalizeModelKey(code);
 }
 
 export function builtinBodyMapImage(modelCode: string, view: BodyMapView): string {
@@ -71,7 +73,12 @@ export function resolveBodyMapImage(
   manifest: BodyMapImageManifest | null | undefined,
 ): string {
   const lowered = normalizeModelImageKey(modelCode);
+  const legacy = legacyModelKey(modelCode);
   const models = manifest?.models ?? {};
+  const direct =
+    ownModelEntry(models, lowered) ??
+    (legacy !== lowered ? ownModelEntry(models, legacy) : undefined);
+  if (direct?.[view]) return direct[view]!;
   for (const [key, images] of Object.entries(models)) {
     if (lowered === key || (key && lowered.includes(key))) {
       const override = images?.[view];

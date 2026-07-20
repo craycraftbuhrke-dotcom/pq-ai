@@ -83,8 +83,10 @@ def _csv_bytes(columns: list[str], rows: list[dict]) -> bytes:
 
 def _run_import(db, program_id, version_id, content):
     class _Req:
-        async def body(self) -> bytes:
-            return content
+        headers = {"content-length": str(len(content))}
+
+        async def stream(self):
+            yield content
 
     return asyncio.run(recipe_wide_import(
         _Req(),

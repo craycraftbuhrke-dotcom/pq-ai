@@ -37,6 +37,17 @@ Explicitly excluded: pretreatment, e-coat, sealing, booth temperature/humidity, 
 19. Human users authenticate with personal username/password sessions stored as HttpOnly cookies; external systems use API Keys. Never expose session tokens or API Keys to browser JavaScript.
 20. Every domain CRUD surface must support governed Excel/CSV template download, bulk export, and bulk import where the underlying resource is editable. Templates are the contract for field names, data types, required fields, and business keys.
 21. Bulk import must call existing application services/routes, enforce the same logical reference checks as manual CRUD, and use create/upsert semantics only. Import files must never trigger schema creation, schema migration, unsafe SQL, or physical deletion.
+22. Frontend information architecture is organized around user tasks and decisions, not database tables. Each page must state its purpose, primary action, required prerequisites, result, and next step in plain business language.
+23. Complexity belongs in governed backend services. The frontend may guide and progressively disclose details, but must not weaken domain validation, approval, lineage, reliability, or safety constraints to make a workflow appear simpler.
+24. User-visible labels must use workshop language understood by process engineers, quality engineers, suppliers, and new operators. Internal IDs, JSON, hashes, enum codes, and database field names belong in traceability details, not primary forms.
+25. Empty, loading, blocked, error, and success states are part of the business workflow. Every state must explain what happened, what is affected, and what the user should do next.
+26. Production point-feature snapshots and separately uploaded training-wide samples are equal model-training sources. Neither source receives hidden priority or weighting; both must pass the same feature-scope, grouped temporal split, leakage, validation, lineage, and acceptance rules.
+27. Human training uploads must use Chinese-column Excel/CSV templates. Users provide sample number, independent group, occurrence time, target value, and governed feature values; internal feature keys and JSON conversion remain backend responsibilities.
+28. Every robot-parameter edit creates a new complete draft program version, even when only one brush parameter changes. The service must copy every brush, parameter, applicability relation, and point contribution before applying edits; it must never mutate the approved/current version in place.
+29. Remote upper-computer operation is deny-by-default and isolated. A cloud draft, submitted request, or approved request alone must never change the remote station. Remote application requires approved connection, separate release approval, successful staging, local upper-computer confirmation, explicit commit, and readback verification.
+30. Remote parameter transport must use mutual TLS over TCP/IP, bounded length-prefixed messages, target-agent identity, replay protection, full-package hashes, immutable release events, and runtime-injected certificate/private-key locations. Plain TCP and database-stored secrets are forbidden.
+31. The cloud, virtual line, and upper computer are independent versioned sources. Reconciliation is read-only; resolving a difference must create/capture an approved version or follow the remote-release workflow, never directly overwrite a source from the comparison table.
+32. Direct undocumented robot writes are forbidden. Production adapters must be approved by the factory and Dürr/upper-computer owner and pass FAT/SAT. Simulator and file-drop modes may support development and governed handoff but must not claim that a robot changed without matching readback.
 
 ## Development Gate
 
@@ -54,6 +65,7 @@ Every new feature must pass:
 - MySQL standards check: no physical foreign keys, no runtime physical deletes, no unsupported data types, compliant table/field/index naming, and DBA-reviewed DDL only.
 - Authentication check: user sessions, API Keys, RBAC permission checks, and write-operation audit evidence are present for protected workflows.
 - Bulk data check: editable domain resources provide templates, export, import validation, row-level errors, idempotent upsert behavior, and post-import UI refresh.
+- Remote execution check: complete-version derivation, connection approval, segregation of duties, staging isolation, local confirmation, mutual TLS, bounded protocol, readback hash, failure evidence, and rollback version are present.
 
 ## Execution Discipline
 
@@ -65,3 +77,4 @@ Every new feature must pass:
 6. A step is not considered complete until implementation, review, testing, verification evidence, and plan status update are all finished.
 7. Any new page, form, import flow, or CRUD surface must be checked for dead controls, misleading placeholders, layout overlap, overflow, stacking conflicts, and missing empty/error/success states as part of the same step, not as a later cleanup.
 8. All changes must continue to respect project database rules: no automatic MySQL DDL, no physical foreign keys, no runtime physical deletes, no unsafe SQL, and no schema mutation outside approved manual SQL workflow.
+9. Code review candidates are tracked in `docs/coderabbit-remediation-plan.md`. A candidate may be fixed, invalidated, deduplicated, or accepted with documented risk, but must never disappear without a recorded disposition.

@@ -1,15 +1,15 @@
 import type { NextConfig } from "next";
 
-/** Intranet CAD uploads (STP/GLB) can be multi‑GB; do not keep the default ~10MB proxy buffer. */
-const LARGE_UPLOAD_BODY = "4gb";
+/** Bulk files are capped at 50 MiB; 3D models use 512 KiB chunk requests. */
+const PROXY_BODY_LIMIT = "64mb";
 
 const nextConfig: NextConfig = {
   output: "standalone",
   reactStrictMode: true,
   experimental: {
-    proxyClientMaxBodySize: LARGE_UPLOAD_BODY,
+    proxyClientMaxBodySize: PROXY_BODY_LIMIT,
     serverActions: {
-      bodySizeLimit: LARGE_UPLOAD_BODY,
+      bodySizeLimit: "8mb",
     },
   },
 };

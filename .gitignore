@@ -40,3 +40,10 @@ apps/web/public/body-models/custom/*
 *.bak
 *.bak2
 *.bak3
+
+# Upper-computer agent runtime files and secrets
+tools/pq-upper-agent/agent-config.ini
+tools/pq-upper-agent/*.pem
+tools/pq-upper-agent/*.key
+tools/pq-upper-agent/data/
+tools/pq-upper-agent/dist/

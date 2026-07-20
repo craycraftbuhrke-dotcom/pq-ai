@@ -7,14 +7,9 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { roleLabel } from "@/lib/display-labels";
 
-function getApiKey(): string {
-  const match = document.cookie.match(/(?:^|;\s*)pq_api_key=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
-
 export default function ProfilePage() {
   const router = useRouter();
-  const { actor, setApiKey } = useAuth();
+  const { actor, logout, refreshActor } = useAuth();
   const [displayName, setDisplayName] = useState(actor.displayName);
   const [email, setEmail] = useState("");
   const [department, setDepartment] = useState("");
@@ -34,22 +29,16 @@ export default function ProfilePage() {
     }
   }, [actor.isAuthenticated, router]);
 
-  useEffect(() => {
-    setDisplayName(actor.displayName);
-  }, [actor.displayName]);
-
   async function updateProfile(event: FormEvent) {
     event.preventDefault();
     setError("");
     setNotice("");
     setLoading(true);
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
     try {
-      const response = await fetch(`${apiUrl}/auth/me`, {
+      const response = await fetch("/api/auth/me", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": getApiKey(),
         },
         body: JSON.stringify({
           display_name: displayName,
@@ -58,12 +47,15 @@ export default function ProfilePage() {
         }),
       });
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { detail?: string };
-        throw new Error(body.detail ?? "更新失败");
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "更新失败");
       }
-      const data = (await response.json()) as { display_name: string };
       setNotice("个人信息已更新");
-      if (data.display_name) setApiKey(getApiKey());
+      try {
+        await refreshActor();
+      } catch {
+        setError("个人信息已保存，但页面信息刷新失败，请重新加载页面");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "更新失败");
     } finally {
@@ -79,18 +71,16 @@ export default function ProfilePage() {
       setError("两次输入的新密码不一致");
       return;
     }
-    if (newPassword.length < 6) {
-      setError("新密码至少 6 位");
+    if (newPassword.length < 12) {
+      setError("新密码至少 12 位");
       return;
     }
     setLoading(true);
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
     try {
-      const response = await fetch(`${apiUrl}/auth/me/password`, {
+      const response = await fetch("/api/auth/me/password", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": getApiKey(),
         },
         body: JSON.stringify({
           current_password: currentPassword,
@@ -98,13 +88,15 @@ export default function ProfilePage() {
         }),
       });
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { detail?: string };
-        throw new Error(body.detail ?? "修改失败");
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "修改失败");
       }
       setNotice("密码已更新，请使用新密码重新登录");
       setCurrentPassword("");
       setNewPassword("");
       setNewPasswordConfirm("");
+      await logout();
+      router.push("/login");
     } catch (err) {
       setError(err instanceof Error ? err.message : "密码修改失败");
     } finally {
@@ -223,10 +215,10 @@ export default function ProfilePage() {
                   required
                   type="password"
                   autoComplete="new-password"
+                  minLength={12}
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
-                  placeholder="至少 6 位"
-                  minLength={6}
+                  placeholder="至少 12 位"
                 />
               </label>
               <label className="form-field">
@@ -237,10 +229,10 @@ export default function ProfilePage() {
                   required
                   type="password"
                   autoComplete="new-password"
+                  minLength={12}
                   value={newPasswordConfirm}
                   onChange={(event) => setNewPasswordConfirm(event.target.value)}
                   placeholder="再次输入"
-                  minLength={6}
                 />
               </label>
             </div>

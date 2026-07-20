@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 
 /**
  * Shared modal dismiss + initial-focus behavior.
@@ -24,14 +24,13 @@ export function useModalDismiss(options: {
   focusSelector?: string;
 }) {
   const { open, onClose, busy = false, focusSelector } = options;
-  const onCloseRef = useRef(onClose);
-  const busyRef = useRef(busy);
-  const focusSelectorRef = useRef(focusSelector);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
-
-  onCloseRef.current = onClose;
-  busyRef.current = busy;
-  focusSelectorRef.current = focusSelector;
+  const closeIfAvailable = useEffectEvent(() => {
+    if (!busy) onClose();
+  });
+  const currentFocusSelector = useEffectEvent(
+    () => focusSelector ?? DEFAULT_FOCUS_SELECTOR,
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -39,9 +38,8 @@ export function useModalDismiss(options: {
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
-      if (busyRef.current) return;
       event.stopPropagation();
-      onCloseRef.current();
+      closeIfAvailable();
     }
 
     document.addEventListener("keydown", handleKeyDown);
@@ -58,7 +56,7 @@ export function useModalDismiss(options: {
       const container = document.querySelector(".modal-card");
       if (!container) return;
 
-      const selector = focusSelectorRef.current ?? DEFAULT_FOCUS_SELECTOR;
+      const selector = currentFocusSelector();
       let target = container.querySelector<HTMLElement>(selector);
 
       if (!target) {
