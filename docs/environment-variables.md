@@ -28,7 +28,7 @@
 | `API_URL` | 是 | 否 | 前端服务端访问 FastAPI 的内网地址，例如容器网络内的 API 地址。 |
 | `NEXT_PUBLIC_API_URL` | 是 | 否 | 浏览器可见的 API 地址；也会作为前端构建参数注入。不得包含密钥。 |
 | `AUTH_ENABLED` | 是 | 否 | Next.js 服务端代理认证开关；部署必须为 `true`，只有 `NODE_ENV=test` 的隔离测试可关闭。 |
-| `NEXT_PUBLIC_AUTH_ENABLED` | 是 | 否 | 构建时嵌入浏览器包的认证开关；生产构建必须为 `true`，仅修改 Pod 运行时变量无效。 |
+| `NEXT_PUBLIC_AUTH_ENABLED` | 是 | 否 | 构建时嵌入浏览器包的认证开关；生产构建必须为 `true`，仅修改 Pod 运行时变量无效。`dockerfile.frontend` 默认 `true`，小米 Kaniko 未传 build-arg 时也会按启用认证构建。 |
 | `NEXT_PUBLIC_ALLOW_SELF_REGISTRATION` | 否 | 否 | 构建时嵌入的自助注册入口开关；必须与后端开关一致，生产默认 `false`。 |
 | `WEB_PUBLIC_DIR` | 否 | 否 | 前端服务端底图/数模运行时目录；容器镜像已设置为应用 `public` 目录。 |
 | `WEB_RUNTIME_ASSET_DIR` | 否 | 否 | 用户上传模型、底图、覆盖清单和上传会话目录；K8s 挂载 RWX PVC，本地默认与 `WEB_PUBLIC_DIR` 共用。 |
@@ -45,7 +45,7 @@
 | `PYTHON_IMAGE` | 否 | 否 | GitLab 后端扫描/构建 Job 使用的 Python 执行镜像，默认 `python:3.11-slim`；根目录 `dockerfile.backend` 已固定基础镜像，避免平台未传 build-arg 时失败。 |
 | `PIP_CONFIG_SECRET_FILE` | 否 | 是 | GitLab File 类型、masked/protected 变量，内容为企业 `pip.conf`；仅通过 BuildKit secret 挂载到构建步骤，不进入 build-arg、镜像层或历史。未配置时使用 pip 默认公开索引。 |
 | `NEXT_PUBLIC_API_URL` | 是 | 否 | 前端构建时注入的浏览器可见 API 地址。 |
-| `NEXT_PUBLIC_AUTH_ENABLED` | 是 | 否 | 前端构建时认证开关，生产镜像必须为 `true`；不能依赖 K8s 运行时覆盖。 |
+| `NEXT_PUBLIC_AUTH_ENABLED` | 是 | 否 | 前端构建时认证开关，生产镜像必须为 `true`；CI/Kaniko 建议显式传入，未传时 Dockerfile 默认 `true`。不能依赖 K8s 运行时覆盖。 |
 | `NEXT_PUBLIC_ALLOW_SELF_REGISTRATION` | 否 | 否 | 前端构建时注册入口开关，默认 `false`。 |
 
 ## 4. MySQL / Compose 本地变量

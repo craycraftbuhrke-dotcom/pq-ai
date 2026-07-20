@@ -62,6 +62,8 @@ frontend:image:
     - test -n "${CI_REGISTRY_PASSWORD}"
     - test -n "${NODE_IMAGE}"
     - test -n "${NEXT_PUBLIC_API_URL}"
+    # 方案1：生产前端镜像固定启用认证；CI 未配置时默认 true（与 dockerfile.frontend ARG 一致）
+    - export NEXT_PUBLIC_AUTH_ENABLED="${NEXT_PUBLIC_AUTH_ENABLED:-true}"
     - test "${NEXT_PUBLIC_AUTH_ENABLED}" = "true"
     - echo "${CI_REGISTRY_PASSWORD}" | docker login -u "${CI_REGISTRY_USER}" --password-stdin "${CI_REGISTRY}"
   script:

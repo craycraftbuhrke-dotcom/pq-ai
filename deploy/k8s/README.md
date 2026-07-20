@@ -20,7 +20,9 @@ Database schema changes still use `docs/sql/pq_ai_mysql_schema.sql` through the
 manual DBA approval process.
 
 `NEXT_PUBLIC_AUTH_ENABLED` and other `NEXT_PUBLIC_*` values are compiled into the
-frontend image. Set them in the image build job; changing a Deployment environment
+frontend image. Prefer passing `--build-arg NEXT_PUBLIC_AUTH_ENABLED=true` in the
+image build job (Xiaomi Kaniko / GitLab). The root `dockerfile.frontend` defaults
+the ARG to `true` when the platform omits it. Changing a Deployment environment
 variable alone does not change browser-side behavior.
 The server-only `AUTH_ENABLED` guard is injected at frontend runtime and must remain
 `true` in every deployed environment.
