@@ -2,15 +2,21 @@
 
 import { Eye, EyeOff, LoaderCircle, LogIn } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 import { useAuth } from "@/lib/auth-context";
 
 const allowSelfRegistration = process.env.NEXT_PUBLIC_ALLOW_SELF_REGISTRATION === "true";
 
+function safeNextPath(raw: string | null): string {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
+  return raw;
+}
+
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { login, loading } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -22,7 +28,7 @@ export default function LoginPage() {
     setError("");
     try {
       await login(username, password);
-      router.push("/");
+      router.replace(safeNextPath(searchParams.get("next")));
     } catch (err) {
       setError(err instanceof Error ? err.message : "登录失败，请重试");
     }

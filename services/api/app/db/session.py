@@ -6,17 +6,18 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 
-# MySQL 上给一个短的连接超时（3s），避免启动阶段 (lifespan/startup_seed) 因 MySQL
-# 尚未就绪而挂住 K8s startupProbe 的 failureThreshold 触发 CrashLoop。SQLite
-# 不支持该参数，因此按 URL scheme 条件添加。
+# MySQL 连接超时：过短会导致鉴权中间件偶发 503，前端误踢登录。
+# 启动探针仍依赖 /health/live（不查库），不必为启动把超时压到 3s。
 _connect_args: dict = {}
 if settings.database_url.startswith(("mysql", "mariadb")):
-    _connect_args["connect_timeout"] = 3
+    _connect_args["connect_timeout"] = 8
 
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,
     pool_recycle=1800,
+    pool_size=5,
+    max_overflow=10,
     connect_args=_connect_args,
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)

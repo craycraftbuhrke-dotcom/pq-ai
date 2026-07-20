@@ -217,8 +217,11 @@ def authenticate_session_token(db: Session, raw_token: str) -> Actor | None:
     user = db.get(AppUser, session.user_id)
     if not user or not user.is_active:
         return None
-    session.last_seen_at = now
-    db.commit()
+    # 节流 last_seen 写入，避免每次页面导航都 commit 加重 MySQL 压力
+    last_seen = _as_utc(session.last_seen_at)
+    if last_seen is None or (now - last_seen) >= timedelta(minutes=5):
+        session.last_seen_at = now
+        db.commit()
     return _actor_for_user(db, user)
 
 
