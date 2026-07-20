@@ -3,7 +3,7 @@
 import { Eye, EyeOff, LoaderCircle, LogIn } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { Suspense, useState, type FormEvent } from "react";
 
 import { useAuth } from "@/lib/auth-context";
 
@@ -14,7 +14,7 @@ function safeNextPath(raw: string | null): string {
   return raw;
 }
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { login, loading } = useAuth();
@@ -98,5 +98,27 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="auth-page">
+          <div className="auth-card">
+            <div className="auth-header">
+              <div className="brand-mark" aria-hidden="true">
+                PQ
+              </div>
+              <h1>登录 PQ-AI</h1>
+              <p>正在加载…</p>
+            </div>
+          </div>
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }
