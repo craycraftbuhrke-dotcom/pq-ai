@@ -16,6 +16,7 @@ from app.api.routes.modeling import (
     check_model_governance,
     get_model_drift,
     list_applicability_scopes,
+    list_available_models,
     list_feature_snapshots,
     list_model_artifacts,
     list_ood_policies,
@@ -54,6 +55,7 @@ from app.models.domain import (
     ProductionRun,
     QualityMeasurement,
     QualityMetricValue,
+    QualityStandard,
     Recommendation,
     RecommendationAction,
     VehicleModel,
@@ -231,11 +233,15 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             ),
             db,
         )
-        assert trained.model_type == "RIDGE_REGRESSION_BASELINE"
+        assert trained.model_type in {"RIDGE_REGRESSION", "ELASTIC_NET_REGRESSION"}
         assert trained.status == "DRAFT"
         assert trained.training_sample_count == 6
         assert trained.evaluation_metrics["training_r2"] > 0.99
         assert "validation_rmse" in trained.evaluation_metrics
+        model_selection = trained.evaluation_metrics["model_selection"]
+        assert model_selection["strategy"] == "AUTO_TEMPORAL_INNER_VALIDATION"
+        assert model_selection["primary_holdout_used_for_selection"] is False
+        assert model_selection["candidate_count"] > 1
         multi_axis = trained.evaluation_metrics["multi_axis_validation"]
         assert multi_axis["strategy"] == "TEMPORAL_HOLDOUT_PLUS_LEAVE_AXIS_OUT"
         assert multi_axis["axes"]["TIME_HOLDOUT"]["status"] == "EVALUATED"
@@ -340,6 +346,8 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         )
         assert prediction["predicted_value"] == pytest.approx(runs[-1][1], abs=0.2)
         assert prediction["prediction_result_id"]
+        assert prediction["model_type"] == trained.model_type
+        assert prediction["uncertainty_source"] == "TEMPORAL_VALIDATION_RMSE"
         assert prediction["applicability_status"] == "IN_SCOPE"
         assert prediction["ood_status"] == "IN_DISTRIBUTION"
         assert prediction["governance_evidence"]["scope_id"] == scopes[0]["id"]
@@ -352,6 +360,10 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             db,
         )
         assert governance["allowed"] is True
+        available_models = list_available_models(runs[-1][0].id, point.id, None, db)
+        assert len(available_models) == 1
+        assert available_models[0]["id"] == trained.id
+        assert available_models[0]["allowed"] is True
 
         out_of_scope_factory = Factory(code="F2", name="范围外工厂")
         db.add(out_of_scope_factory)
@@ -489,12 +501,27 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert list_predictions(db)[0]["model_name"] == "DOI-BASELINE:1.0"
         assert list_diagnoses(db)[0]["id"] == diagnosis["diagnosis_result_id"]
 
+        db.add(
+            QualityStandard(
+                standard_no="F1-DOI-P1",
+                version="1.0",
+                standard_type="PRODUCTION",
+                quality_type="ORANGE_PEEL",
+                metric_code="doi",
+                vehicle_model_id=model.id,
+                color_id=color.id,
+                part_id=part.id,
+                measurement_point_id=point.id,
+                min_value=prediction["predicted_value"] + 1.0,
+                is_active=True,
+            )
+        )
+        db.commit()
         recommendation = recommend_from_snapshot(
             trained.id,
             ModelRecommendationRequest(
                 production_run_id=runs[-1][0].id,
                 measurement_point_id=point.id,
-                target_min=prediction["predicted_value"] + 1.0,
                 max_actions=2,
             ),
             db,
@@ -502,6 +529,10 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert recommendation["status"] == "PENDING"
         assert recommendation["constraints_checked"] is True
         assert recommendation["predicted_improvement"] > 0
+        assert recommendation["target_source"] == "QUALITY_STANDARD:F1-DOI-P1:1.0"
+        assert recommendation["target_min"] == pytest.approx(
+            prediction["predicted_value"] + 1.0
+        )
         assert recommendation["actions"]
         assert all(
             action["hard_min"] <= action["recommended_value"] <= action["hard_max"]

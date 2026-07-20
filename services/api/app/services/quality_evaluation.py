@@ -10,6 +10,53 @@ from app.models.domain import (
 )
 
 
+def resolve_quality_standard(
+    db: Session,
+    quality_type: str,
+    metric_code: str,
+    production_run: ProductionRun,
+    point: MeasurementPoint,
+) -> QualityStandard | None:
+    standards = list(
+        db.scalars(
+            select(QualityStandard)
+            .where(
+                QualityStandard.is_active.is_(True),
+                QualityStandard.quality_type == quality_type,
+                QualityStandard.metric_code == metric_code,
+            )
+            .order_by(QualityStandard.updated_at.desc())
+        )
+    )
+    candidates = [
+        standard
+        for standard in standards
+        if (
+            standard.vehicle_model_id is None
+            or standard.vehicle_model_id == production_run.vehicle_model_id
+        )
+        and (standard.color_id is None or standard.color_id == production_run.color_id)
+        and (standard.part_id is None or standard.part_id == point.part_id)
+        and (
+            standard.measurement_point_id is None
+            or standard.measurement_point_id == point.id
+        )
+    ]
+    candidates.sort(
+        key=lambda standard: sum(
+            value is not None
+            for value in (
+                standard.vehicle_model_id,
+                standard.color_id,
+                standard.part_id,
+                standard.measurement_point_id,
+            )
+        ),
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
 def evaluate_quality_measurement(
     db: Session,
     measurement: QualityMeasurement,
@@ -34,45 +81,13 @@ def evaluate_quality_measurement(
             "metric_results": [],
         }
 
-    metric_codes = [metric.metric_code for metric in metrics]
-    standards = list(
-        db.scalars(
-            select(QualityStandard).where(
-                QualityStandard.is_active.is_(True),
-                QualityStandard.quality_type == measurement.quality_type,
-                QualityStandard.metric_code.in_(metric_codes),
-            )
-        )
-    )
     violations: list[str] = []
     metric_results: list[dict] = []
     matched_count = 0
     for metric in metrics:
-        candidates = [
-            standard
-            for standard in standards
-            if standard.metric_code == metric.metric_code
-            and (standard.vehicle_model_id is None or standard.vehicle_model_id == production_run.vehicle_model_id)
-            and (standard.color_id is None or standard.color_id == production_run.color_id)
-            and (standard.part_id is None or standard.part_id == point.part_id)
-            and (
-                standard.measurement_point_id is None
-                or standard.measurement_point_id == measurement.measurement_point_id
-            )
-        ]
-        candidates.sort(
-            key=lambda standard: sum(
-                value is not None
-                for value in (
-                    standard.vehicle_model_id,
-                    standard.color_id,
-                    standard.part_id,
-                    standard.measurement_point_id,
-                )
-            ),
-            reverse=True,
+        standard = resolve_quality_standard(
+            db, measurement.quality_type, metric.metric_code, production_run, point
         )
-        standard = candidates[0] if candidates else None
         value = metric.corrected_value if metric.corrected_value is not None else metric.raw_value
         if not standard:
             metric_results.append(

@@ -32,6 +32,7 @@ from app.schemas.modeling import (
     TrainingDataUploadRead,
     TrainingWideSampleRead,
     ModelAcceptanceDecisionRead,
+    AvailableModelRead,
     ModelAcceptanceRequest,
     ModelArtifactRead,
     ModelAcceptancePolicyCreate,
@@ -64,6 +65,7 @@ from app.services.training_wide import (
     validate_training_file,
 )
 from app.services.modeling import (
+    available_models_for_point,
     build_dataset_snapshot,
     create_model_acceptance_policy,
     create_model_applicability_scope,
@@ -86,6 +88,23 @@ router = APIRouter(prefix="/ai/models", tags=["ai-modeling"])
 @router.get("", response_model=list[ModelVersionRead])
 def list_models(db: Session = Depends(get_db)) -> list[ModelVersion]:
     return list(db.scalars(select(ModelVersion).order_by(ModelVersion.created_at.desc())))
+
+
+@router.get("/available", response_model=list[AvailableModelRead])
+def list_available_models(
+    production_run_id: str,
+    measurement_point_id: str,
+    target_metric: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    check_fk(db, ProductionRun, production_run_id, label="生产事件")
+    check_fk(db, MeasurementPoint, measurement_point_id, label="测量点")
+    return available_models_for_point(
+        db,
+        production_run_id,
+        measurement_point_id,
+        target_metric,
+    )
 
 
 @router.get("/validation-folds", response_model=list[ModelValidationFoldRead])

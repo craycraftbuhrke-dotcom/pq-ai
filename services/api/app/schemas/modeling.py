@@ -107,7 +107,9 @@ class ModelTrainingRequest(BaseModel):
     feature_set_version: str = Field(default=CURRENT_FEATURE_SET_VERSION, max_length=64)
     dataset_snapshot_id: str
     min_samples: int = Field(default=5, ge=3)
+    model_family: Literal["AUTO", "RIDGE", "ELASTIC_NET"] = "AUTO"
     ridge_lambda: float = Field(default=0.1, ge=0)
+    elastic_net_l1_ratio: float = Field(default=0.5, ge=0.05, le=0.95)
     max_abs_standardized_shift: float = Field(default=4.0, gt=0)
     max_outlier_feature_ratio: float = Field(default=0.2, ge=0, le=1)
     min_feature_completeness: float = Field(default=1.0, gt=0, le=1)
@@ -130,6 +132,19 @@ class ModelVersionRead(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AvailableModelRead(BaseModel):
+    id: str
+    model_code: str
+    version: str
+    model_type: str
+    target_metric: str
+    target_name: str
+    allowed: bool
+    applicability_status: str
+    ood_status: str
+    reason: str | None = None
 
 
 class ModelValidationFoldRead(BaseModel):
@@ -344,10 +359,12 @@ class ModelPredictionResponse(BaseModel):
     production_run_id: str
     measurement_point_id: str
     metric_code: str
+    model_type: str
     predicted_value: float
     lower_bound: float
     upper_bound: float
     confidence: float
+    uncertainty_source: str
     feature_completeness: float
     applicability_status: str
     ood_status: str
@@ -378,6 +395,9 @@ class ModelRecommendationResponse(BaseModel):
     recommendation_no: str
     status: str
     metric_code: str
+    target_min: float | None
+    target_max: float | None
+    target_source: str
     current_prediction: float
     expected_prediction: float
     predicted_improvement: float

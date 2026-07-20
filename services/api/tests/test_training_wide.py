@@ -23,8 +23,8 @@ from app.models.domain import (
     TrainingWideSample,
     VehicleModel,
 )
-from app.schemas.modeling import DatasetBuildRequest
-from app.services.modeling import build_dataset_snapshot
+from app.schemas.modeling import DatasetBuildRequest, ModelTrainingRequest
+from app.services.modeling import build_dataset_snapshot, train_model
 from app.services.training_wide import (
     import_training_file,
     training_template_response,
@@ -158,6 +158,23 @@ def test_manual_training_wide_can_build_dataset_without_production_rows() -> Non
         assert all(member.source_type == "MANUAL_UPLOAD" for member in members)
         assert all(member.production_run_id is None for member in members)
         assert all(member.manual_sample_id for member in members)
+
+        trained = train_model(
+            db,
+            ModelTrainingRequest(
+                model_code="MANUAL-DOI",
+                version="1.0",
+                target_metric="doi",
+                dataset_snapshot_id=dataset.id,
+                min_samples=3,
+            ),
+        )
+        validation = trained.evaluation_metrics["multi_axis_validation"]["axes"]
+        assert validation["TIME_HOLDOUT"]["validation_sample_count"] == 2
+        assert validation["PRODUCTION_GROUP_LOO"]["status"] == "EVALUATED"
+        assert validation["PRODUCTION_GROUP_LOO"]["validation_sample_count"] == 6
+        assert validation["FACTORY"]["excluded_sample_count"] == 6
+        assert trained.model_payload["uncertainty_source"] == "TEMPORAL_VALIDATION_RMSE"
 
 
 def test_production_and_manual_rows_enter_same_matrix_without_source_priority() -> None:

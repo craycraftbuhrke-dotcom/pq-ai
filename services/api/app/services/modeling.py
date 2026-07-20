@@ -20,6 +20,7 @@ from app.models.domain import (
     Color,
     Factory,
     FactoryVehicleModel,
+    MeasurementPoint,
     ModelArtifact,
     ModelAcceptancePolicy,
     ModelApplicabilityScope,
@@ -42,6 +43,7 @@ from app.models.domain import (
     VehicleModel,
     VehicleModelColor,
 )
+from app.services.quality_evaluation import resolve_quality_standard
 
 
 def _time_key(value: datetime) -> float:
@@ -193,14 +195,15 @@ def _register_model_artifact(db: Session, model: ModelVersion) -> ModelArtifact:
     payload_hash = _model_payload_hash(model)
     artifact = ModelArtifact(
         model_version_id=model.id,
-        artifact_type="RIDGE_MODEL_PAYLOAD",
-        artifact_uri=f"mysql://model-artifact/{model.id}/ridge-payload.json",
+        artifact_type="LINEAR_MODEL_PAYLOAD",
+        artifact_uri=f"mysql://model-artifact/{model.id}/linear-model-payload.json",
         storage_backend="MYSQL",
         payload_hash=payload_hash,
         metadata_payload={
             "hash_algorithm": "SHA256",
             "model_code": model.model_code,
             "version": model.version,
+            "model_type": model.model_type,
             "dataset_snapshot_id": model.dataset_snapshot_id,
             "feature_count": len(model.model_payload.get("feature_names", [])),
             "evidence_included": [
@@ -226,7 +229,6 @@ def _model_artifact_evidence(db: Session, model: ModelVersion) -> dict:
         select(ModelArtifact)
         .where(
             ModelArtifact.model_version_id == model.id,
-            ModelArtifact.artifact_type == "RIDGE_MODEL_PAYLOAD",
             ModelArtifact.status == "REGISTERED",
         )
         .order_by(ModelArtifact.registered_at.desc())
@@ -281,25 +283,39 @@ def _create_validation_folds(
     model: ModelVersion,
     dataset: DatasetSnapshot,
     *,
-    ridge_lambda: float,
+    model_config: dict,
     min_train_samples: int,
     time_holdout_metrics: dict,
 ) -> dict:
-    rows = list(
-        db.execute(
-            select(DatasetSplitMember, ProductionRun)
-            .join(ProductionRun, ProductionRun.id == DatasetSplitMember.production_run_id)
-            .where(DatasetSplitMember.dataset_snapshot_id == dataset.id)
+    members = list(
+        db.scalars(
+            select(DatasetSplitMember).where(
+                DatasetSplitMember.dataset_snapshot_id == dataset.id
+            )
         )
     )
+    production_run_ids = {
+        member.production_run_id for member in members if member.production_run_id
+    }
+    runs_by_id = (
+        {
+            run.id: run
+            for run in db.scalars(
+                select(ProductionRun).where(ProductionRun.id.in_(production_run_ids))
+            )
+        }
+        if production_run_ids
+        else {}
+    )
+    rows = [(member, runs_by_id.get(member.production_run_id)) for member in members]
     now = datetime.now(UTC)
     summaries: dict[str, dict] = {}
 
     def add_fold(
         axis: str,
         fold_key: str,
-        train_items: list[tuple[DatasetSplitMember, ProductionRun]],
-        validation_items: list[tuple[DatasetSplitMember, ProductionRun]],
+        train_items: list[tuple[DatasetSplitMember, ProductionRun | None]],
+        validation_items: list[tuple[DatasetSplitMember, ProductionRun | None]],
         status: str,
         metrics: dict,
     ) -> None:
@@ -322,7 +338,7 @@ def _create_validation_folds(
         )
 
     def samples(
-        items: list[tuple[DatasetSplitMember, ProductionRun]]
+        items: list[tuple[DatasetSplitMember, ProductionRun | None]]
     ) -> list[tuple[dict[str, float], float]]:
         return [(member.feature_values, member.target_value) for member, _run in items]
 
@@ -355,13 +371,15 @@ def _create_validation_folds(
     }
 
     axis_definitions = {
-        "FACTORY": lambda member, run: run.factory_id,
-        "VEHICLE_MODEL": lambda member, run: run.vehicle_model_id,
-        "COLOR": lambda member, run: run.color_id,
+        "FACTORY": lambda member, run: run.factory_id if run else None,
+        "VEHICLE_MODEL": lambda member, run: run.vehicle_model_id if run else None,
+        "COLOR": lambda member, run: run.color_id if run else None,
         "PRODUCTION_GROUP_LOO": lambda member, run: member.group_value,
     }
     for axis, key_getter in axis_definitions.items():
-        keyed_rows = [(key_getter(member, run), member, run) for member, run in rows]
+        all_keyed_rows = [(key_getter(member, run), member, run) for member, run in rows]
+        keyed_rows = [item for item in all_keyed_rows if item[0] is not None]
+        excluded_sample_count = len(all_keyed_rows) - len(keyed_rows)
         distinct_keys = sorted({key for key, _member, _run in keyed_rows})
         if len(distinct_keys) < 2:
             add_fold(
@@ -372,6 +390,7 @@ def _create_validation_folds(
                 "INSUFFICIENT_AXIS_DIVERSITY",
                 {
                     "distinct_key_count": len(distinct_keys),
+                    "excluded_sample_count": excluded_sample_count,
                     "reason": "该验证轴只有一个取值，不能估计跨域泛化能力。",
                 },
             )
@@ -380,6 +399,7 @@ def _create_validation_folds(
                 "fold_count": 1,
                 "evaluated_fold_count": 0,
                 "distinct_key_count": len(distinct_keys),
+                "excluded_sample_count": excluded_sample_count,
                 "validation_sample_count": 0,
                 "rmse": None,
                 "mae": None,
@@ -413,7 +433,7 @@ def _create_validation_folds(
                 )
                 continue
             try:
-                fold_model = _fit_ridge(samples(fold_train_items), ridge_lambda)
+                fold_model = _fit_selected_linear(samples(fold_train_items), model_config)
                 predictions = _predict_samples(fold_model, samples(fold_validation_items))
             except HTTPException as exc:
                 skipped_fold_count += 1
@@ -450,6 +470,7 @@ def _create_validation_folds(
                 "evaluated_fold_count": evaluated_fold_count,
                 "skipped_fold_count": skipped_fold_count,
                 "distinct_key_count": len(distinct_keys),
+                "excluded_sample_count": excluded_sample_count,
                 "validation_sample_count": len(aggregate_targets),
                 **aggregate_metrics,
             }
@@ -460,6 +481,7 @@ def _create_validation_folds(
                 "evaluated_fold_count": 0,
                 "skipped_fold_count": skipped_fold_count,
                 "distinct_key_count": len(distinct_keys),
+                "excluded_sample_count": excluded_sample_count,
                 "validation_sample_count": 0,
                 "rmse": None,
                 "mae": None,
@@ -514,7 +536,20 @@ def _predict_samples(model_payload: dict, samples: list[tuple[dict[str, float], 
     return predictions
 
 
-def _fit_ridge(samples: list[tuple[dict[str, float], float]], ridge_lambda: float) -> dict:
+def _soft_threshold(value: float, threshold: float) -> float:
+    if value > threshold:
+        return value - threshold
+    if value < -threshold:
+        return value + threshold
+    return 0.0
+
+
+def _fit_regularized_linear(
+    samples: list[tuple[dict[str, float], float]],
+    regularization_strength: float,
+    l1_ratio: float,
+    model_family: str,
+) -> dict:
     common_features = set(samples[0][0])
     for feature_values, _target in samples[1:]:
         common_features &= set(feature_values)
@@ -540,22 +575,36 @@ def _fit_ridge(samples: list[tuple[dict[str, float], float]], ridge_lambda: floa
     centered_targets = [target - intercept for target in targets]
     coefficients = [0.0] * len(feature_names)
 
-    # Coordinate descent is stable for small, correlated industrial tabular datasets.
-    for _iteration in range(200):
+    l1_penalty = regularization_strength * l1_ratio
+    l2_penalty = regularization_strength * (1 - l1_ratio)
+    residuals = centered_targets.copy()
+    # Residual-updating coordinate descent keeps small industrial wide tables fast
+    # while avoiding a heavy numerical runtime dependency in the API image.
+    for _iteration in range(500):
+        max_change = 0.0
         for feature_index in range(len(feature_names)):
-            numerator = 0.0
-            denominator = ridge_lambda
-            for row, target in zip(x_rows, centered_targets, strict=True):
-                residual_without_feature = target - sum(
-                    coefficient * value
-                    for index, (coefficient, value) in enumerate(
-                        zip(coefficients, row, strict=True)
-                    )
-                    if index != feature_index
-                )
-                numerator += row[feature_index] * residual_without_feature
-                denominator += row[feature_index] ** 2
-            coefficients[feature_index] = numerator / denominator if denominator else 0.0
+            previous = coefficients[feature_index]
+            if previous:
+                for row_index, row in enumerate(x_rows):
+                    residuals[row_index] += previous * row[feature_index]
+            numerator = sum(
+                row[feature_index] * residual
+                for row, residual in zip(x_rows, residuals, strict=True)
+            )
+            denominator = (
+                sum(row[feature_index] ** 2 for row in x_rows) + l2_penalty
+            )
+            current = (
+                _soft_threshold(numerator, l1_penalty) / denominator
+                if denominator
+                else 0.0
+            )
+            coefficients[feature_index] = current
+            for row_index, row in enumerate(x_rows):
+                residuals[row_index] -= current * row[feature_index]
+            max_change = max(max_change, abs(current - previous))
+        if max_change < 1e-9:
+            break
 
     fitted = {
         "feature_names": feature_names,
@@ -565,12 +614,140 @@ def _fit_ridge(samples: list[tuple[dict[str, float], float]], ridge_lambda: floa
         "maximums": [max(column) for column in columns],
         "coefficients": coefficients,
         "intercept": intercept,
+        "model_family": model_family,
+        "regularization_strength": regularization_strength,
+        "l1_ratio": l1_ratio,
     }
     predictions = _predict_samples(fitted, samples)
     metrics = _regression_metrics(predictions, targets, "training")
     fitted["residual_std"] = metrics["training_rmse"]
     fitted["evaluation_metrics"] = metrics
     return fitted
+
+
+def _fit_ridge(samples: list[tuple[dict[str, float], float]], ridge_lambda: float) -> dict:
+    return _fit_regularized_linear(samples, ridge_lambda, 0.0, "RIDGE")
+
+
+def _fit_selected_linear(
+    samples: list[tuple[dict[str, float], float]], config: dict
+) -> dict:
+    return _fit_regularized_linear(
+        samples,
+        float(config["regularization_strength"]),
+        float(config["l1_ratio"]),
+        str(config["model_family"]),
+    )
+
+
+def _temporal_tuning_folds(
+    members: list[DatasetSplitMember],
+) -> list[tuple[list[DatasetSplitMember], list[DatasetSplitMember]]]:
+    grouped: dict[str, list[DatasetSplitMember]] = {}
+    for member in members:
+        grouped.setdefault(member.group_value, []).append(member)
+    ordered_groups = sorted(
+        grouped,
+        key=lambda key: min(_time_key(item.occurred_at) for item in grouped[key]),
+    )
+    folds = []
+    for validation_index in range(max(2, len(ordered_groups) - 3), len(ordered_groups)):
+        train_groups = set(ordered_groups[:validation_index])
+        validation_group = ordered_groups[validation_index]
+        train_members = [item for item in members if item.group_value in train_groups]
+        validation_members = grouped[validation_group]
+        if len(train_members) >= 3 and validation_members:
+            folds.append((train_members, validation_members))
+    return folds
+
+
+def _select_training_model(
+    train_members: list[DatasetSplitMember],
+    requested_family: str,
+    regularization_strength: float,
+    elastic_net_l1_ratio: float,
+) -> tuple[dict, dict]:
+    base_strength = max(float(regularization_strength), 0.0)
+    if requested_family == "AUTO":
+        strengths = (
+            [0.0, 0.1, 1.0]
+            if base_strength == 0
+            else sorted({base_strength / 10, base_strength, base_strength * 10})
+        )
+        candidates = [
+            {"model_family": "RIDGE", "regularization_strength": value, "l1_ratio": 0.0}
+            for value in strengths
+        ]
+        candidates.extend(
+            {
+                "model_family": "ELASTIC_NET",
+                "regularization_strength": value,
+                "l1_ratio": ratio,
+            }
+            for value in strengths
+            for ratio in (0.25, elastic_net_l1_ratio, 0.75)
+        )
+    else:
+        candidates = [
+            {
+                "model_family": requested_family,
+                "regularization_strength": base_strength,
+                "l1_ratio": elastic_net_l1_ratio if requested_family == "ELASTIC_NET" else 0.0,
+            }
+        ]
+
+    folds = _temporal_tuning_folds(train_members)
+    candidate_reports = []
+    for candidate in candidates:
+        predictions: list[float] = []
+        targets: list[float] = []
+        for fold_train, fold_validation in folds:
+            fitted = _fit_selected_linear(
+                [(item.feature_values, item.target_value) for item in fold_train],
+                candidate,
+            )
+            fold_samples = [
+                (item.feature_values, item.target_value) for item in fold_validation
+            ]
+            predictions.extend(_predict_samples(fitted, fold_samples))
+            targets.extend(item.target_value for item in fold_validation)
+        metrics = (
+            _regression_metric_values(predictions, targets)
+            if predictions
+            else {"mae": None, "rmse": None, "r2": None}
+        )
+        candidate_reports.append({**candidate, **metrics})
+
+    selected = min(
+        candidate_reports,
+        key=lambda item: (
+            item["rmse"] is None,
+            item["rmse"] if item["rmse"] is not None else float("inf"),
+            item["model_family"] != "RIDGE",
+            item["regularization_strength"],
+        ),
+    )
+    selected_config = {
+        key: selected[key]
+        for key in ("model_family", "regularization_strength", "l1_ratio")
+    }
+    fitted = _fit_selected_linear(
+        [(item.feature_values, item.target_value) for item in train_members],
+        selected_config,
+    )
+    return fitted, {
+        "strategy": (
+            "AUTO_TEMPORAL_INNER_VALIDATION"
+            if requested_family == "AUTO"
+            else "USER_SELECTED_FAMILY"
+        ),
+        "primary_holdout_used_for_selection": False,
+        "inner_fold_count": len(folds),
+        "inner_validation_sample_count": sum(len(validation) for _train, validation in folds),
+        "candidate_count": len(candidate_reports),
+        "selected": selected_config,
+        "candidates": candidate_reports,
+    }
 
 
 def ensure_model_governance(
@@ -1183,15 +1360,13 @@ def train_model(db: Session, payload) -> ModelVersion:
             )
         )
     )
+    train_members = [member for member in members if member.split == "TRAIN"]
+    validation_members = [member for member in members if member.split == "VALIDATION"]
     train_samples = [
-        (member.feature_values, member.target_value)
-        for member in members
-        if member.split == "TRAIN"
+        (member.feature_values, member.target_value) for member in train_members
     ]
     validation_samples = [
-        (member.feature_values, member.target_value)
-        for member in members
-        if member.split == "VALIDATION"
+        (member.feature_values, member.target_value) for member in validation_members
     ]
     if len(train_samples) < payload.min_samples:
         raise HTTPException(
@@ -1201,7 +1376,12 @@ def train_model(db: Session, payload) -> ModelVersion:
     if not validation_samples:
         raise HTTPException(status_code=422, detail="数据集没有独立验证样本")
 
-    fitted = _fit_ridge(train_samples, payload.ridge_lambda)
+    fitted, model_selection = _select_training_model(
+        train_members,
+        payload.model_family,
+        payload.ridge_lambda,
+        payload.elastic_net_l1_ratio,
+    )
     try:
         require_scope_safe_model(
             payload.target_metric,
@@ -1216,18 +1396,25 @@ def train_model(db: Session, payload) -> ModelVersion:
         [target for _features, target in validation_samples],
         "validation",
     )
+    fitted["residual_std"] = validation_metrics["validation_rmse"]
+    fitted["uncertainty_source"] = "TEMPORAL_VALIDATION_RMSE"
     evaluation_metrics = {
         **fitted["evaluation_metrics"],
         **validation_metrics,
         "train_group_count": dataset.train_group_count,
         "validation_group_count": dataset.validation_group_count,
         "leakage_check_passed": dataset.leakage_check.get("passed", False),
+        "model_selection": model_selection,
     }
     now = datetime.now(UTC)
     model = ModelVersion(
         model_code=payload.model_code,
         version=payload.version,
-        model_type="RIDGE_REGRESSION_BASELINE",
+        model_type=(
+            "ELASTIC_NET_REGRESSION"
+            if fitted["model_family"] == "ELASTIC_NET"
+            else "RIDGE_REGRESSION"
+        ),
         target_metric=payload.target_metric,
         feature_set_version=payload.feature_set_version,
         artifact_uri=f"mysql://model-version/{payload.model_code}/{payload.version}",
@@ -1246,7 +1433,7 @@ def train_model(db: Session, payload) -> ModelVersion:
         db,
         model,
         dataset,
-        ridge_lambda=payload.ridge_lambda,
+        model_config=model_selection["selected"],
         min_train_samples=payload.min_samples,
         time_holdout_metrics=validation_metrics,
     )
@@ -1564,15 +1751,39 @@ def update_model_status(db: Session, model: ModelVersion, next_status: str) -> M
             raise HTTPException(status_code=409, detail="模型全部适用工厂必须配置生效验收策略")
         if not factory_acceptance["thresholds_passed"]:
             raise HTTPException(status_code=409, detail="模型未满足当前生效的工厂验收阈值")
+        new_contexts = set(
+            db.execute(
+                select(
+                    ModelApplicabilityScope.factory_id,
+                    ModelApplicabilityScope.vehicle_model_id,
+                    ModelApplicabilityScope.color_id,
+                ).where(
+                    ModelApplicabilityScope.model_version_id == model.id,
+                    ModelApplicabilityScope.status == "ACTIVE",
+                )
+            ).all()
+        )
         for active_model in db.scalars(
             select(ModelVersion).where(
-                ModelVersion.model_code == model.model_code,
                 ModelVersion.target_metric == model.target_metric,
                 ModelVersion.status == "ACTIVE",
                 ModelVersion.id != model.id,
             )
         ):
-            active_model.status = "RETIRED"
+            active_contexts = set(
+                db.execute(
+                    select(
+                        ModelApplicabilityScope.factory_id,
+                        ModelApplicabilityScope.vehicle_model_id,
+                        ModelApplicabilityScope.color_id,
+                    ).where(
+                        ModelApplicabilityScope.model_version_id == active_model.id,
+                        ModelApplicabilityScope.status == "ACTIVE",
+                    )
+                ).all()
+            )
+            if new_contexts & active_contexts:
+                active_model.status = "RETIRED"
     model.status = next_status
     db.commit()
     db.refresh(model)
@@ -1703,6 +1914,80 @@ def model_governance_check(
     }
 
 
+def available_models_for_point(
+    db: Session,
+    production_run_id: str,
+    measurement_point_id: str,
+    target_metric: str | None = None,
+) -> list[dict]:
+    run = db.get(ProductionRun, production_run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="生产事件不存在")
+    models = list(
+        db.scalars(
+            select(ModelVersion)
+            .join(
+                ModelApplicabilityScope,
+                ModelApplicabilityScope.model_version_id == ModelVersion.id,
+            )
+            .where(
+                ModelVersion.status == "ACTIVE",
+                ModelApplicabilityScope.factory_id == run.factory_id,
+                ModelApplicabilityScope.vehicle_model_id == run.vehicle_model_id,
+                ModelApplicabilityScope.color_id == run.color_id,
+                ModelApplicabilityScope.status == "ACTIVE",
+            )
+            .order_by(ModelVersion.target_metric, ModelVersion.trained_at.desc())
+        )
+    )
+    if target_metric:
+        models = [model for model in models if model.target_metric == target_metric]
+    metric_names = {
+        definition.code: definition.name
+        for definition in db.scalars(
+            select(QualityMetricDefinition).where(
+                QualityMetricDefinition.code.in_({model.target_metric for model in models})
+            )
+        )
+    } if models else {}
+    available = []
+    for model in models:
+        try:
+            check = model_governance_check(
+                db, model, production_run_id, measurement_point_id
+            )
+            available.append(
+                {
+                    "id": model.id,
+                    "model_code": model.model_code,
+                    "version": model.version,
+                    "model_type": model.model_type,
+                    "target_metric": model.target_metric,
+                    "target_name": metric_names.get(model.target_metric, model.target_metric),
+                    "allowed": check["allowed"],
+                    "applicability_status": check["applicability_status"],
+                    "ood_status": check["ood_status"],
+                    "reason": None if check["allowed"] else "当前点位参数未通过模型使用检查",
+                }
+            )
+        except HTTPException as exc:
+            available.append(
+                {
+                    "id": model.id,
+                    "model_code": model.model_code,
+                    "version": model.version,
+                    "model_type": model.model_type,
+                    "target_metric": model.target_metric,
+                    "target_name": metric_names.get(model.target_metric, model.target_metric),
+                    "allowed": False,
+                    "applicability_status": "IN_SCOPE",
+                    "ood_status": "FEATURES_NOT_READY",
+                    "reason": str(exc.detail),
+                }
+            )
+    return sorted(available, key=lambda item: (not item["allowed"], item["target_metric"]))
+
+
 def _require_governed_inference(check: dict) -> None:
     if check["allowed"]:
         return
@@ -1750,7 +2035,18 @@ def predict_with_model(
     )
     residual_std = float(payload.get("residual_std", 0.0))
     feature_completeness = present_count / len(feature_names)
-    confidence = round(min(0.99, 0.5 + 0.49 * feature_completeness), 4)
+    max_shift = governance["evidence"].get("max_abs_standardized_shift") or 0.0
+    policy = governance["evidence"].get("policy") or {}
+    shift_limit = float(policy.get("max_abs_standardized_shift") or 4.0)
+    distribution_support = max(0.2, 1 - min(1.0, float(max_shift) / shift_limit) * 0.5)
+    sample_support = min(1.0, model.training_sample_count / 30)
+    confidence = round(
+        min(0.99, feature_completeness * distribution_support * (0.6 + 0.4 * sample_support)),
+        4,
+    )
+    uncertainty_source = str(
+        payload.get("uncertainty_source", "TRAINING_RESIDUAL_RMSE_LEGACY")
+    )
     prediction = None
     if persist_result:
         prediction = PredictionResult(
@@ -1776,10 +2072,12 @@ def predict_with_model(
         "production_run_id": production_run_id,
         "measurement_point_id": measurement_point_id,
         "metric_code": model.target_metric,
+        "model_type": model.model_type,
         "predicted_value": predicted_value,
         "lower_bound": predicted_value - 1.96 * residual_std,
         "upper_bound": predicted_value + 1.96 * residual_std,
         "confidence": confidence,
+        "uncertainty_source": uncertainty_source,
         "feature_completeness": feature_completeness,
         "applicability_status": governance["applicability_status"],
         "ood_status": governance["ood_status"],
@@ -1867,11 +2165,32 @@ def recommend_with_model(
     max_step_ratio: float,
 ) -> dict:
     _ensure_model_scope(model)
-    if target_min is None and target_max is None:
-        raise HTTPException(status_code=422, detail="必须提供目标下限或目标上限")
     production_run = db.get(ProductionRun, production_run_id)
     if not production_run:
         raise HTTPException(status_code=404, detail="生产事件不存在")
+    point = db.get(MeasurementPoint, measurement_point_id)
+    if not point:
+        raise HTTPException(status_code=404, detail="测量点不存在")
+    target_source = "USER_INPUT"
+    target_standard = None
+    if target_min is None and target_max is None:
+        target_standard = resolve_quality_standard(
+            db,
+            _target_family(model.target_metric),
+            model.target_metric,
+            production_run,
+            point,
+        )
+        if not target_standard or (
+            target_standard.min_value is None and target_standard.max_value is None
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="当前车型、颜色和点位没有可用的生效质量标准，请先维护标准或填写期望范围",
+            )
+        target_min = target_standard.min_value
+        target_max = target_standard.max_value
+        target_source = f"QUALITY_STANDARD:{target_standard.standard_no}:{target_standard.version}"
     prediction = predict_with_model(
         db,
         model,
@@ -1992,7 +2311,10 @@ def recommend_with_model(
         measurement_point_id=measurement_point_id,
         target_quality_type=metric_definition.quality_type if metric_definition else "UNKNOWN",
         target_metric=model.target_metric,
-        diagnosis_summary="基于线性基础模型贡献度和已配置硬边界生成受约束参数建议。",
+        diagnosis_summary=(
+            "基于已验收模型的参数贡献度、已批准硬边界及"
+            f"目标来源 {target_source} 生成受约束参数建议。"
+        ),
         predicted_improvement=accumulated_impact,
         confidence=prediction["confidence"],
         status="PENDING",
@@ -2028,6 +2350,9 @@ def recommend_with_model(
         "recommendation_no": recommendation.recommendation_no,
         "status": recommendation.status,
         "metric_code": model.target_metric,
+        "target_min": target_min,
+        "target_max": target_max,
+        "target_source": target_source,
         "current_prediction": current_prediction,
         "expected_prediction": current_prediction + accumulated_impact,
         "predicted_improvement": accumulated_impact,
