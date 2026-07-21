@@ -43,12 +43,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "注册服务返回无效响应" }, { status: 502 });
     }
     const nextResponse = NextResponse.json({ actor: result.actor, expires_at: result.expires_at });
+    const maxAge = Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
     nextResponse.cookies.set(sessionCookieName, result.access_token, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
       expires: expiresAt,
+      maxAge,
     });
     return nextResponse;
   } catch (error) {

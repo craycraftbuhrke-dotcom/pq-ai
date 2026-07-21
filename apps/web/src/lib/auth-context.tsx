@@ -153,6 +153,10 @@ export function AuthProvider({
       setActor(ANON_ACTOR);
       return;
     }
+    if (!response.ok) {
+      // 后端暂不可用：保留当前登录态，避免刷新/轮询把用户踢掉
+      return;
+    }
     setActor(await readAuthResponse(response, "无法刷新账号信息"));
   }, []);
 

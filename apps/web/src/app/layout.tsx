@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { AppShell } from "@/components/app-shell";
+import { AuthSessionGuard } from "@/components/auth-session-guard";
 import { AuthProvider, type AuthActor } from "@/lib/auth-context";
 import { getCurrentActor } from "@/lib/auth-data";
 
@@ -23,14 +24,20 @@ export default async function RootLayout({
     displayName: currentActor.displayName,
     roles: currentActor.roles,
     permissions: currentActor.permissions,
-    isAuthenticated: Boolean(currentActor.userId) || !currentActor.authEnabled,
+    // cookie 仍在但后端暂不可用时，按已登录处理，避免刷新被当成退出
+    isAuthenticated:
+      Boolean(currentActor.userId) ||
+      !currentActor.authEnabled ||
+      Boolean(currentActor.sessionPresent),
   };
 
   return (
     <html lang="zh-CN">
       <body>
         <AuthProvider initialActor={initialActor}>
-          <AppShell>{children}</AppShell>
+          <AuthSessionGuard>
+            <AppShell>{children}</AppShell>
+          </AuthSessionGuard>
         </AuthProvider>
       </body>
     </html>

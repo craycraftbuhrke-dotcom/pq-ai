@@ -11,6 +11,8 @@ export type CurrentActor = {
   roles: string[];
   permissions: string[];
   authEnabled: boolean;
+  /** Cookie 仍在，但后端暂时不可用——刷新时不应当成已退出 */
+  sessionPresent?: boolean;
   connectionError?: string;
 };
 
@@ -198,26 +200,51 @@ export async function getCurrentActor(): Promise<CurrentActor> {
     return authDisabledActor;
   }
   const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
+  const token = await sessionToken();
   if (!apiUrl) {
-    return withConnectionError("后端 API 地址未配置");
+    return token
+      ? {
+          ...fallbackActor,
+          sessionPresent: true,
+          displayName: "已登录（API 未配置）",
+          connectionError: "后端 API 地址未配置",
+        }
+      : withConnectionError("后端 API 地址未配置");
+  }
+  if (!token) {
+    return fallbackActor;
   }
   try {
     const response = await fetch(`${apiUrl}/auth/me`, {
       cache: "no-store",
-      headers: await apiRequestHeaders(),
-      signal: AbortSignal.timeout(2500),
+      headers: { Authorization: `Bearer ${token}` },
+      // 与登录态代理一致：给慢库留足时间，避免刷新时误判
+      signal: AbortSignal.timeout(5000),
     });
+    if (response.status === 401) {
+      // 会话明确失效；cookie 清理由 /api/auth/me 或登出接口负责
+      return fallbackActor;
+    }
     if (!response.ok) {
       const payload = (await response.json().catch(() => ({}))) as ApiErrorPayload;
-      return withConnectionError(
-        stringifyApiError(payload.detail) ??
+      return {
+        ...fallbackActor,
+        sessionPresent: true,
+        displayName: "已登录（服务恢复中）",
+        connectionError:
+          stringifyApiError(payload.detail) ??
           stringifyApiError(payload.error) ??
-          `后端认证接口返回错误（HTTP ${response.status}）`,
-      );
+          `后端认证接口暂时不可用（HTTP ${response.status}）`,
+      };
     }
     return mapActor(await parseApiActor(response));
   } catch (error) {
     const message = error instanceof Error ? error.message : "无法连接后端认证接口";
-    return withConnectionError(`无法连接后端认证接口：${message}`);
+    return {
+      ...fallbackActor,
+      sessionPresent: true,
+      displayName: "已登录（服务恢复中）",
+      connectionError: `无法连接后端认证接口：${message}`,
+    };
   }
 }
