@@ -719,10 +719,11 @@ def ai_overview_summary(db: Session = Depends(get_db)) -> AiOverviewSummary:
         )
         or 0
     )
+    # MySQL 不支持 NULLS LAST；用 IS NULL 排序保证非空 trained_at 优先
     latest_model = db.scalar(
         select(ModelVersion)
         .where(ModelVersion.status == VersionStatus.APPROVED)
-        .order_by(ModelVersion.trained_at.desc().nullslast())
+        .order_by(ModelVersion.trained_at.is_(None), ModelVersion.trained_at.desc())
     )
 
     now = datetime.now(UTC)

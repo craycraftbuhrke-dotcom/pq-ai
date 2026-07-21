@@ -16,6 +16,34 @@ const allowedRoots = new Set([
 
 type Context = { params: Promise<{ path: string[] }> };
 
+function formatUpstreamDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) {
+          return String((item as { msg: unknown }).msg);
+        }
+        return null;
+      })
+      .filter((item): item is string => Boolean(item));
+    if (parts.length) return parts.join("；");
+  }
+  if (detail && typeof detail === "object") {
+    const record = detail as Record<string, unknown>;
+    if (typeof record.message === "string") {
+      const errors = Array.isArray(record.errors)
+        ? record.errors.filter((item): item is string => typeof item === "string")
+        : [];
+      return errors.length
+        ? `${record.message}：${errors.slice(0, 20).join("；")}`
+        : record.message;
+    }
+  }
+  return fallback;
+}
+
 async function proxy(request: Request, context: Context) {
   const { path } = await context.params;
   if (!path.length || !allowedRoots.has(path[0])) {
@@ -43,7 +71,10 @@ async function proxy(request: Request, context: Context) {
       const result = contentType.includes("application/json")
         ? ((await response.json().catch(() => ({}))) as Record<string, unknown>)
         : {};
-      return NextResponse.json({ error: result.detail ?? "后端 AI 服务返回错误" }, { status: response.status });
+      return NextResponse.json(
+        { error: formatUpstreamDetail(result.detail, "后端 AI 服务返回错误") },
+        { status: response.status },
+      );
     }
     if (contentType.includes("application/json")) {
       return NextResponse.json(await response.json(), { status: response.status });

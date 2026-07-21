@@ -436,10 +436,26 @@ type GovernanceCheck = {
 };
 type Tab = "models" | "governance" | "predictions" | "recommendations" | "comparison";
 
+function formatRequestError(error: unknown, status: number): string {
+  if (typeof error === "string" && error.trim()) return error;
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    if (typeof record.message === "string") {
+      const errors = Array.isArray(record.errors)
+        ? record.errors.filter((item): item is string => typeof item === "string")
+        : [];
+      return errors.length
+        ? `${record.message}：${errors.slice(0, 20).join("；")}`
+        : record.message;
+    }
+  }
+  return `请求失败（${status}）`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { cache: "no-store", ...init });
-  const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error ?? `请求失败（${response.status}）`);
+  const payload = (await response.json().catch(() => ({}))) as T & { error?: unknown };
+  if (!response.ok) throw new Error(formatRequestError(payload.error, response.status));
   return payload;
 }
 

@@ -244,7 +244,7 @@ def dashboard_snapshot(db: Session | None = None) -> dict:
         latest_model = db.scalar(
             select(ModelVersion)
             .where(ModelVersion.status == VersionStatus.APPROVED)
-            .order_by(ModelVersion.trained_at.desc().nullslast())
+            .order_by(ModelVersion.trained_at.is_(None), ModelVersion.trained_at.desc())
         )
         snapshot["ai_models"] = {
             "approved": approved_models,

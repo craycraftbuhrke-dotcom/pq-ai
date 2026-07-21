@@ -358,9 +358,11 @@ def validate_training_file(
         except ValueError as exc:
             errors.append(str(exc))
     if errors:
+        preview = "；".join(errors[:10])
+        more = f"；另有 {len(errors) - 10} 条错误" if len(errors) > 10 else ""
         raise HTTPException(
             status_code=422,
-            detail={"message": "训练宽表校验未通过", "errors": errors[:100]},
+            detail=f"训练宽表校验未通过：{preview}{more}",
         )
     feature_names = sorted({key for sample in samples for key in sample["feature_values"]})
     try:
