@@ -65,6 +65,61 @@ export const CUSTOM_DIR = path.join(
 export const UPLOAD_ROOT = path.join(/*turbopackIgnore: true*/ CUSTOM_DIR, ".uploads");
 const PENDING_DIR = path.join(/*turbopackIgnore: true*/ CUSTOM_DIR, ".pending");
 
+export type RuntimeStorageStatus = {
+  runtime_dir: string;
+  public_dir: string;
+  using_shared_runtime_dir: boolean;
+  writable: boolean;
+  warning: string | null;
+};
+
+/**
+ * Probe writable runtime storage. Production multi-replica uploads require a
+ * shared WEB_RUNTIME_ASSET_DIR (PVC), not the image-local public/ directory.
+ */
+export async function getRuntimeStorageStatus(): Promise<RuntimeStorageStatus> {
+  const usingShared = Boolean(process.env.WEB_RUNTIME_ASSET_DIR?.trim());
+  let writable = false;
+  try {
+    await mkdir(UPLOAD_ROOT, { recursive: true });
+    const probe = path.join(/*turbopackIgnore: true*/ UPLOAD_ROOT, `.write-probe-${randomUUID()}`);
+    await writeFile(probe, "ok", "utf-8");
+    await rm(probe, { force: true });
+    writable = true;
+  } catch {
+    writable = false;
+  }
+
+  let warning: string | null = null;
+  if (!writable) {
+    warning =
+      "运行时资源目录不可写，无法上传三维数模。请挂载共享 PVC，并确认目录权限（通常 uid/gid 1000）。";
+  } else if (!usingShared && process.env.NODE_ENV === "production") {
+    warning =
+      "未配置 WEB_RUNTIME_ASSET_DIR：上传会话写在容器本地盘。多副本时分片会找不到 meta.json。请挂载 RWX PVC 并设置 WEB_RUNTIME_ASSET_DIR=/data/runtime-assets。";
+  }
+
+  return {
+    runtime_dir: RUNTIME_ASSET_DIR,
+    public_dir: PUBLIC_DIR,
+    using_shared_runtime_dir: usingShared,
+    writable,
+    warning,
+  };
+}
+
+/** Fail fast before creating an upload session that cannot survive across pods. */
+export async function assertRuntimeStorageReadyForUpload(): Promise<RuntimeStorageStatus> {
+  const status = await getRuntimeStorageStatus();
+  if (!status.writable) {
+    throw Object.assign(new Error(status.warning ?? "运行时资源目录不可写"), { status: 503 });
+  }
+  if (!status.using_shared_runtime_dir && process.env.NODE_ENV === "production") {
+    throw Object.assign(new Error(status.warning ?? "未配置共享运行时目录"), { status: 503 });
+  }
+  return status;
+}
+
 export function fileExtension(name: string): string {
   const idx = name.lastIndexOf(".");
   return idx >= 0 ? name.slice(idx).toLowerCase() : "";
@@ -556,7 +611,20 @@ export function uploadMetaPath(uploadId: string): string {
 }
 
 export async function readUploadMeta(uploadId: string): Promise<UploadSessionMeta> {
-  const raw = await readFile(uploadMetaPath(uploadId), "utf-8");
+  let raw: string;
+  try {
+    raw = await readFile(uploadMetaPath(uploadId), "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw Object.assign(
+        new Error(
+          "上传会话不存在或无法在当前实例读取。请确认所有前端 Pod 已挂载同一 RWX PVC，并设置 WEB_RUNTIME_ASSET_DIR；然后重新选择文件上传。",
+        ),
+        { status: 404 },
+      );
+    }
+    throw error;
+  }
   const meta = JSON.parse(raw) as UploadSessionMeta;
   const receivedIsValid =
     Array.isArray(meta.received) &&

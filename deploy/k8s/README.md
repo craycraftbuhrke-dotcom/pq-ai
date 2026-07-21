@@ -14,6 +14,23 @@ Platform prerequisites in the target namespace:
 4. An Ingress/Gateway maintained by the platform team. Route browser traffic to
    `pq-ai-frontend:80`; the frontend BFF accesses `pq-ai-backend:8000` internally.
 
+### 小米云 / 平台发布：三维数模上传必备配置
+
+分片上传会话写在 `WEB_RUNTIME_ASSET_DIR` 下。若只改环境变量、不挂共享盘，
+或多副本各自写本地盘，会出现 `meta.json` ENOENT、chunk 404。
+
+平台侧请同时完成（缺一不可）：
+
+1. 创建 **ReadWriteMany** PVC（示例名 `pq-ai-frontend-assets`）。
+2. 所有前端 Pod 挂载到同一路径，例如 `/data/runtime-assets`。
+3. 运行时环境变量：`WEB_RUNTIME_ASSET_DIR=/data/runtime-assets`。
+4. 目录对容器用户可写（清单默认 `runAsUser/fsGroup: 1000`）。
+5. 发布后在任意两个前端 Pod 验证：
+   - `ls -ld /data/runtime-assets` 存在且可写
+   - 在 Pod A `touch /data/runtime-assets/.pvc-check`，Pod B 能看到同一文件
+
+临时排障可把前端缩成 1 副本，但不能替代共享 PVC。
+
 The CI deploy jobs require protected variables `KUBE_CONTEXT` and `K8S_NAMESPACE`.
 The GitLab Kubernetes agent or injected kubeconfig supplies cluster credentials.
 Database schema changes still use `docs/sql/pq_ai_mysql_schema.sql` through the

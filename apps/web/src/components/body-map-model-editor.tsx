@@ -1,9 +1,9 @@
 "use client";
 
-import { Box, LoaderCircle, RefreshCw, Upload } from "lucide-react";
+import { FileBox, LoaderCircle, RefreshCw, RotateCcw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ModalShell } from "@/components/modal-shell";
+import { ModalBody, ModalNote, ModalShell } from "@/components/modal-shell";
 import type { BodyModelBounds, BodyModelEntry } from "@/lib/body-map-models";
 
 /** Keep each request under common Xiaomi/K8s Ingress body limits (often 1MB). */
@@ -16,6 +16,21 @@ const EMPTY_BOUNDS: BoundsForm = {
   max_y: "",
   min_z: "",
   max_z: "",
+};
+
+const BOUND_FIELDS: Array<[keyof BodyModelBounds, string]> = [
+  ["min_x", "左右最小"],
+  ["max_x", "左右最大"],
+  ["min_y", "高度最小"],
+  ["max_y", "高度最大"],
+  ["min_z", "前后最小"],
+  ["max_z", "前后最大"],
+];
+
+type StorageStatus = {
+  using_shared_runtime_dir?: boolean;
+  writable?: boolean;
+  warning?: string | null;
 };
 
 function boundsForm(bounds?: BodyModelBounds | null): BoundsForm {
@@ -38,6 +53,12 @@ function serializeBounds(form: BoundsForm): string {
   return JSON.stringify(values);
 }
 
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 type Props = {
   open: boolean;
   modelCode: string;
@@ -57,7 +78,7 @@ async function uploadFileChunked(options: {
   upAxis: string;
   unitScale: string;
   bounds: string;
-  onProgress: (label: string) => void;
+  onProgress: (label: string, percent: number) => void;
 }): Promise<{
   source_format?: string;
   convert_engine?: string | null;
@@ -65,7 +86,7 @@ async function uploadFileChunked(options: {
   const { modelCode, file, upAxis, unitScale, bounds, onProgress } = options;
   const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
 
-  onProgress("正在准备上传…");
+  onProgress("正在准备上传…", 0);
   const initResp = await fetch("/api/body-map-models/uploads", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -92,12 +113,12 @@ async function uploadFileChunked(options: {
     const start = index * CHUNK_SIZE;
     const end = Math.min(file.size, start + CHUNK_SIZE);
     const blob = file.slice(start, end);
-    onProgress(`正在上传 ${Math.round((end / file.size) * 100)}%…`);
+    const percent = Math.round((end / file.size) * 100);
+    onProgress(`正在上传 ${percent}%`, percent);
 
     let attempt = 0;
     while (true) {
       attempt += 1;
-      // Use POST — Xiaomi Ingress commonly returns 404 for PUT.
       const form = new FormData();
       form.set("chunk", blob, `chunk-${index}.part`);
       const chunkResp = await fetch(`/api/body-map-models/uploads/${uploadId}/chunks/${index}`, {
@@ -106,16 +127,13 @@ async function uploadFileChunked(options: {
       });
       if (chunkResp.ok) break;
       if (attempt >= 3) {
-        const detail = await readError(chunkResp);
-        throw new Error(
-          chunkResp.status === 404 ? "上传服务暂时不可用，请联系系统管理员检查部署版本" : detail,
-        );
+        throw new Error(await readError(chunkResp));
       }
-      onProgress(`上传中断，正在重试（${attempt}/3）…`);
+      onProgress(`上传中断，正在重试（${attempt}/3）…`, percent);
     }
   }
 
-  onProgress("文件上传完成，正在检查并转换，请稍候…");
+  onProgress("上传完成，正在校验与转换…", 100);
   const completeResp = await fetch(`/api/body-map-models/uploads/${uploadId}/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -134,15 +152,21 @@ async function uploadFileChunked(options: {
 
 export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChanged }: Props) {
   const [entry, setEntry] = useState<BodyModelEntry | null>(null);
+  const [storage, setStorage] = useState<StorageStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [progress, setProgress] = useState("");
+  const [progressPercent, setProgressPercent] = useState(0);
   const [bounds, setBounds] = useState<BoundsForm>({ ...EMPTY_BOUNDS });
   const [upAxis, setUpAxis] = useState("Y");
   const [unitScale, setUnitScale] = useState("1");
+  const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const fileName = entry?.url?.split("/").at(-1) ?? "";
+  const hasCustomModel = Boolean(entry?.url);
 
   const load = useCallback(async () => {
     if (!modelCode) return;
@@ -153,8 +177,12 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
         cache: "no-store",
       });
       if (!response.ok) throw new Error(await readError(response));
-      const payload = (await response.json()) as { entry: BodyModelEntry };
+      const payload = (await response.json()) as {
+        entry: BodyModelEntry;
+        storage?: StorageStatus;
+      };
       setEntry(payload.entry);
+      setStorage(payload.storage ?? null);
       setBounds(boundsForm(payload.entry.bounds));
       setUpAxis(payload.entry.up_axis ?? "Y");
       setUnitScale(String(payload.entry.unit_scale ?? "1"));
@@ -176,6 +204,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
     setError("");
     setMessage("");
     setProgress("");
+    setProgressPercent(0);
     try {
       const form = new FormData();
       form.set("modelCode", modelCode);
@@ -183,7 +212,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
       const response = await fetch("/api/body-map-models", { method: "POST", body: form });
       const payload = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? `请求失败（${response.status}）`);
-      setMessage("已恢复内置/无模型");
+      setMessage("已恢复内置模型配置");
       await load();
       onChanged();
     } catch (err) {
@@ -191,6 +220,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
     } finally {
       setBusy(false);
       setProgress("");
+      setProgressPercent(0);
     }
   }
 
@@ -199,6 +229,7 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
     setError("");
     setMessage("");
     setProgress("");
+    setProgressPercent(0);
     try {
       const payload = await uploadFileChunked({
         modelCode,
@@ -206,15 +237,18 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
         upAxis,
         unitScale,
         bounds: serializeBounds(bounds),
-        onProgress: setProgress,
+        onProgress: (label, percent) => {
+          setProgress(label);
+          setProgressPercent(percent);
+        },
       });
       if (payload.source_format === "stp") {
         setMessage(
-          `STEP 已转换并保存为 GLB${payload.convert_engine ? `（${payload.convert_engine}）` : ""}；默认单位缩放 0.001（毫米→米）`,
+          `STEP 已转换为 GLB${payload.convert_engine ? `（${payload.convert_engine}）` : ""}，建议尺寸换算使用 0.001（毫米→米）`,
         );
         if (unitScale === "1") setUnitScale("0.001");
       } else {
-        setMessage("数模已上传");
+        setMessage(`已保存 ${file.name}（${formatBytes(file.size)}）`);
       }
       await load();
       onChanged();
@@ -223,123 +257,201 @@ export function BodyMapModelEditor({ open, modelCode, modelName, onClose, onChan
     } finally {
       setBusy(false);
       setProgress("");
+      setProgressPercent(0);
     }
+  }
+
+  function acceptFile(file: File | undefined) {
+    if (!file || busy || !modelCode) return;
+    void uploadModel(file);
   }
 
   if (!open) return null;
 
   return (
     <ModalShell
-      eyebrow="数模管理"
-      title="3D 车身数模"
-      description={`${modelName || modelCode}：上传现有车身数模，系统会自动处理大文件和 STEP 转换。`}
+      eyebrow="质量管理 · 3D 车身"
+      title="车身数模"
+      description={`${modelName || modelCode} · 上传 GLB / STEP，大文件自动分片`}
       onClose={onClose}
+      busy={busy}
       className="body-map-model-editor-modal"
-    >
-      <div className="body-map-model-editor">
-        <div className="body-map-model-editor-toolbar">
-          <button type="button" className="button button-secondary" onClick={() => void load()} disabled={loading}>
-            {loading ? <LoaderCircle className="spin" /> : <RefreshCw />}
-            刷新
+      actions={
+        <>
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={busy || !hasCustomModel}
+            onClick={() => void resetModel()}
+          >
+            <RotateCcw />
+            恢复内置
           </button>
-          <small className="muted">
-            支持 GLB、GLTF、STP 和 STEP 文件；STEP 转换可能需要几分钟
-          </small>
-        </div>
-        {error ? <div className="form-error">{error}</div> : null}
-        {message ? <div className="form-success">{message}</div> : null}
-        {progress ? <div className="form-success">{progress}</div> : null}
-
-        <div className="body-map-model-info">
-          <div className="body-map-model-info-row">
-            <span>当前模型</span>
-            <strong>{entry?.url?.split("/").at(-1) ?? "未配置"}</strong>
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={busy || !modelCode || Boolean(storage?.warning)}
+            onClick={() => fileRef.current?.click()}
+          >
+            {busy ? <LoaderCircle className="spin" /> : <Upload />}
+            {busy ? "处理中…" : "选择文件上传"}
+          </button>
+        </>
+      }
+    >
+      <ModalBody className="body-map-model-editor">
+        <div className="bmm-status-card">
+          <div className="bmm-status-icon" aria-hidden="true">
+            <FileBox />
           </div>
-          <div className="body-map-model-info-row">
-            <span>来源</span>
-            <strong>{entry?.url ? "自定义" : "内置/无"}</strong>
+          <div className="bmm-status-copy">
+            <div className="bmm-status-label">当前数模</div>
+            <div className="bmm-status-title">{hasCustomModel ? fileName : "尚未配置自定义数模"}</div>
+            <div className="bmm-status-meta">
+              <span className={`bmm-chip ${hasCustomModel ? "bmm-chip-active" : ""}`}>
+                {hasCustomModel ? "自定义" : "内置 / 空"}
+              </span>
+              <span className="bmm-chip">{modelCode}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="button button-secondary bmm-refresh"
+            onClick={() => void load()}
+            disabled={loading || busy}
+            aria-label="刷新"
+          >
+            {loading ? <LoaderCircle className="spin" /> : <RefreshCw />}
+          </button>
+        </div>
+
+        {storage?.warning ? (
+          <ModalNote className="bmm-storage-warning">{storage.warning}</ModalNote>
+        ) : (
+          <ModalNote>
+            支持 <strong>GLB / GLTF / STP / STEP</strong>
+            。STEP 转换可能需要几分钟；毫米单位的 STEP 建议尺寸换算填 <strong>0.001</strong>。
+          </ModalNote>
+        )}
+
+        {error ? <div className="message-banner message-error bmm-banner">{error}</div> : null}
+        {message ? <div className="message-banner message-success bmm-banner">{message}</div> : null}
+
+        {busy && progress ? (
+          <div className="bmm-progress" role="status" aria-live="polite">
+            <div className="bmm-progress-head">
+              <span>{progress}</span>
+              <strong>{progressPercent}%</strong>
+            </div>
+            <div className="bmm-progress-track">
+              <div className="bmm-progress-fill" style={{ width: `${progressPercent}%` }} />
+            </div>
+          </div>
+        ) : null}
+
+        <div className="bmm-section">
+          <div className="bmm-section-title">
+            <h3>姿态与比例</h3>
+            <p>影响 3D 视图中车身朝向与尺寸</p>
+          </div>
+          <div className="bmm-form-grid">
+            <label className="form-field">
+              <span>向上方向</span>
+              <select value={upAxis} onChange={(e) => setUpAxis(e.target.value)} disabled={busy}>
+                <option value="Y">Y（默认）</option>
+                <option value="Z">Z</option>
+                <option value="X">X</option>
+              </select>
+            </label>
+            <label className="form-field">
+              <span>尺寸换算</span>
+              <input
+                type="number"
+                step="any"
+                value={unitScale}
+                disabled={busy}
+                onChange={(e) => setUnitScale(e.target.value)}
+              />
+            </label>
           </div>
         </div>
 
-        <div className="body-map-model-form">
-          <label className="form-field">
-            <span>模型向上方向</span>
-            <select value={upAxis} onChange={(e) => setUpAxis(e.target.value)}>
-              <option value="Y">Y（默认）</option>
-              <option value="Z">Z</option>
-              <option value="X">X</option>
-            </select>
-          </label>
-          <label className="form-field">
-            <span>模型尺寸换算</span>
-            <input
-              type="number"
-              step="any"
-              value={unitScale}
-              onChange={(e) => setUnitScale(e.target.value)}
-            />
-          </label>
-          <fieldset className="form-field form-field-wide body-model-bounds">
-            <legend>模型尺寸边界（可选，全部留空时自动识别）</legend>
-            {(
-              [
-                ["min_x", "左右最小值"],
-                ["max_x", "左右最大值"],
-                ["min_y", "高度最小值"],
-                ["max_y", "高度最大值"],
-                ["min_z", "前后最小值"],
-                ["max_z", "前后最大值"],
-              ] as Array<[keyof BodyModelBounds, string]>
-            ).map(([key, label]) => (
-              <label key={key}>
+        <div className="bmm-section">
+          <div className="bmm-section-title">
+            <h3>尺寸边界</h3>
+            <p>可选；六项全留空时由系统自动识别</p>
+          </div>
+          <div className="bmm-bounds-grid">
+            {BOUND_FIELDS.map(([key, label]) => (
+              <label key={key} className="form-field">
                 <span>{label}</span>
                 <input
                   type="number"
                   step="any"
                   value={bounds[key]}
+                  disabled={busy}
                   onChange={(event) =>
                     setBounds((current) => ({ ...current, [key]: event.target.value }))
                   }
                 />
               </label>
             ))}
-          </fieldset>
+          </div>
         </div>
 
-        <div className="body-map-model-actions">
-          <input
-            ref={(node) => {
-              fileRef.current = node;
-            }}
-            type="file"
-            accept=".glb,.gltf,.stp,.step,model/gltf-binary,model/gltf+json,application/step,model/step"
-            hidden
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (file) void uploadModel(file);
-            }}
-          />
-          <button
-            type="button"
-            className="button button-primary"
-            disabled={busy || !modelCode}
-            onClick={() => fileRef.current?.click()}
-          >
-            {busy ? <LoaderCircle className="spin" /> : <Upload />}
-            {busy ? "处理中…" : "上传 GLB / STP"}
-          </button>
-          <button
-            type="button"
-            className="button button-secondary"
-            disabled={busy || !entry?.url}
-            onClick={() => void resetModel()}
-          >
-            <Box />
-            恢复内置
-          </button>
+        <div
+          className={`bmm-dropzone${dragOver ? " is-dragover" : ""}${busy ? " is-busy" : ""}`}
+          onDragEnter={(event) => {
+            event.preventDefault();
+            if (!busy) setDragOver(true);
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            if (!busy) setDragOver(true);
+          }}
+          onDragLeave={(event) => {
+            event.preventDefault();
+            setDragOver(false);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragOver(false);
+            acceptFile(event.dataTransfer.files?.[0]);
+          }}
+          onClick={() => {
+            if (!busy && !storage?.warning) fileRef.current?.click();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              if (!busy && !storage?.warning) fileRef.current?.click();
+            }
+          }}
+          role="button"
+          tabIndex={busy || storage?.warning ? -1 : 0}
+          aria-disabled={busy || Boolean(storage?.warning)}
+        >
+          <Upload />
+          <div>
+            <strong>拖拽文件到此处，或点击选择</strong>
+            <p>GLB / GLTF / STP / STEP · 大文件自动分片上传</p>
+          </div>
         </div>
-      </div>
+
+        <input
+          ref={(node) => {
+            fileRef.current = node;
+          }}
+          type="file"
+          accept=".glb,.gltf,.stp,.step,model/gltf-binary,model/gltf+json,application/step,model/step"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            acceptFile(file);
+          }}
+        />
+      </ModalBody>
     </ModalShell>
   );
 }

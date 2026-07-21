@@ -31,7 +31,7 @@
 | `NEXT_PUBLIC_AUTH_ENABLED` | 是 | 否 | 构建时嵌入浏览器包的认证开关；生产构建必须为 `true`，仅修改 Pod 运行时变量无效。`dockerfile.frontend` 默认 `true`，小米 Kaniko 未传 build-arg 时也会按启用认证构建。 |
 | `NEXT_PUBLIC_ALLOW_SELF_REGISTRATION` | 否 | 否 | 构建时嵌入的自助注册入口开关；必须与后端开关一致，生产默认 `false`。 |
 | `WEB_PUBLIC_DIR` | 否 | 否 | 前端服务端底图/数模运行时目录；容器镜像已设置为应用 `public` 目录。 |
-| `WEB_RUNTIME_ASSET_DIR` | 否 | 否 | 用户上传模型、底图、覆盖清单和上传会话目录；K8s 挂载 RWX PVC，本地默认与 `WEB_PUBLIC_DIR` 共用。 |
+| `WEB_RUNTIME_ASSET_DIR` | 生产必填 | 否 | 用户上传模型、底图、覆盖清单和上传会话目录。生产多副本必须指向 RWX PVC 挂载点（如 `/data/runtime-assets`）；未配置时回退 `WEB_PUBLIC_DIR`，分片上传会跨 Pod 失败。 |
 | `BODY_MODEL_MAX_UPLOAD_BYTES` | 否 | 否 | 三维车身模型上传大小上限，默认 256 MiB；更大文件需接入对象存储和流式转换服务后另行放开。 |
 | `BODY_MODEL_UPLOAD_SESSION_TTL_MS` | 否 | 否 | 三维数模分片上传会话有效期，默认 24 小时、最小 60 秒；过期会话在访问时及后续上传任务中清理。 |
 | `BULK_IMPORT_MAX_BYTES` | 否 | 否 | 通用 Excel/CSV 批量导入大小上限，默认 50 MiB。 |

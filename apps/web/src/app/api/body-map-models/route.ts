@@ -8,6 +8,7 @@ import {
   MANIFEST_PATH,
   MODEL_3D_ASSETS,
   fileExtension,
+  getRuntimeStorageStatus,
   isGlbName,
   isStpName,
   normalizeModelKey,
@@ -57,12 +58,14 @@ export async function GET(request: Request) {
   const key = normalizeModelKey(modelCode);
   const customEntry = resolveCustomBodyModel(modelCode, manifest);
   const entry = customEntry ?? resolveBodyModel(modelCode, manifest);
+  const storage = await getRuntimeStorageStatus();
   return NextResponse.json({
     model_code: modelCode,
     model_key: key,
     entry,
     source: customEntry ? "custom" : entry.url ? "builtin" : "none",
     manifest_path: "/body-models/view-models.json",
+    storage,
   });
 }
 

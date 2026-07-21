@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import {
   BODY_MAP_CHUNK_SIZE,
   BODY_MODEL_MAX_UPLOAD_BYTES,
+  assertRuntimeStorageReadyForUpload,
   garbageCollectExpiredUploads,
   isGlbName,
   isStpName,
@@ -21,6 +22,7 @@ export const maxDuration = 600;
 export async function POST(request: Request) {
   try {
     await requireApiPermission(request, "quality.write");
+    await assertRuntimeStorageReadyForUpload();
     await garbageCollectExpiredUploads();
     const body = await parseBoundedJson<{
       modelCode?: string;

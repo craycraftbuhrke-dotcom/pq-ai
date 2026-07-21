@@ -33,10 +33,15 @@ async function receiveChunk(request: Request, context: Context) {
     let initialMeta;
     try {
       initialMeta = await readUploadMeta(uploadId);
-    } catch {
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      const message =
+        error instanceof Error
+          ? error.message
+          : "上传会话不存在或已过期，请重新选择文件上传";
       return NextResponse.json(
-        { error: "上传会话不存在或已过期，请重新选择文件上传" },
-        { status: 404 },
+        { error: message },
+        { status: typeof status === "number" ? status : 404 },
       );
     }
     if (index >= initialMeta.totalChunks) {
