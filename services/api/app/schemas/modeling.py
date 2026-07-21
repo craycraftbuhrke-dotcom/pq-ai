@@ -91,6 +91,9 @@ class TrainingWideSampleRead(BaseModel):
     upload_id: str
     sample_no: str
     group_value: str
+    factory_id: str | None = None
+    vehicle_model_id: str | None = None
+    color_id: str | None = None
     occurred_at: datetime
     target_value: float
     feature_values: dict

@@ -22,14 +22,29 @@ from app.domain.scope_policy import (
     target_family_for_metric,
 )
 from app.models.domain import (
+    Color,
+    Factory,
+    FactoryVehicleModel,
     MaterialCharacteristicDefinition,
     ParameterDefinition,
     PointFeatureSnapshot,
     TrainingDataUpload,
     TrainingWideSample,
+    VehicleModel,
+    VehicleModelColor,
 )
 
-IDENTITY_COLUMNS = ("样本编号", "独立分组", "样本时间", "目标值")
+# 与生产质量导入一致的中文身份列；工厂/车型/颜色代码语义对齐 ProductionRun
+IDENTITY_COLUMNS = (
+    "样本编号",
+    "独立分组",
+    "工厂代码",
+    "车型代码",
+    "颜色代码",
+    "样本时间",
+    "目标值",
+)
+CONTEXT_COLUMNS = ("工厂代码", "车型代码", "颜色代码")
 
 STAGES = (
     ("midcoat", "中涂外喷"),
@@ -173,9 +188,24 @@ def _xlsx_bytes(columns: list[str], rows: list[dict[str, Any]]) -> bytes:
     instructions.append(["项目", "说明"])
     instructions.append(["样本编号", "每行唯一，例如企业内部试验编号或车身编号"])
     instructions.append(["独立分组", "同一车身、批次或同一次试验必须填写相同分组，防止数据泄漏"])
+    instructions.append(
+        ["工厂代码", "必填，与主数据「工厂」编码一致，语义同生产事件 factory_code"]
+    )
+    instructions.append(
+        ["车型代码", "必填，与主数据「车型」编码一致，语义同生产事件 vehicle_model_code"]
+    )
+    instructions.append(
+        ["颜色代码", "必填，与主数据「颜色」编码一致，语义同生产事件 color_code"]
+    )
     instructions.append(["样本时间", "填写实际发生时间，系统按时间划分训练和验证数据"])
     instructions.append(["目标值", "填写本次训练要预测的质量指标实测值"])
     instructions.append(["工艺参数", "只填写真实记录值；空白表示该样本没有该项，不要填写猜测值"])
+    instructions.append(
+        [
+            "主数据关系",
+            "工厂-车型、车型-颜色必须在系统中已启用，规则与创建生产事件相同",
+        ]
+    )
     instructions.append(["数据范围", "仅支持中涂、色漆、清漆及膜厚、色差、橘皮相关数据"])
     instructions.column_dimensions["A"].width = 18
     instructions.column_dimensions["B"].width = 80
@@ -282,6 +312,66 @@ def _datetime(value: Any, row_number: int) -> datetime:
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
+def _lookup_maps(db: Session) -> tuple[dict[str, Factory], dict[str, VehicleModel], dict[str, Color]]:
+    factories = {item.code: item for item in db.scalars(select(Factory))}
+    vehicles = {item.code: item for item in db.scalars(select(VehicleModel))}
+    colors = {item.code: item for item in db.scalars(select(Color))}
+    return factories, vehicles, colors
+
+
+def _resolve_production_context(
+    db: Session,
+    row: dict[str, Any],
+    row_number: int,
+    factories_by_code: dict[str, Factory],
+    vehicles_by_code: dict[str, VehicleModel],
+    colors_by_code: dict[str, Color],
+) -> dict[str, Any]:
+    """Resolve 工厂/车型/颜色 codes with the same rules as ProductionRun creation."""
+    factory_code = _required_text(row, "工厂代码", row_number)
+    vehicle_code = _required_text(row, "车型代码", row_number)
+    color_code = _required_text(row, "颜色代码", row_number)
+    factory = factories_by_code.get(factory_code)
+    if not factory:
+        raise ValueError(f"第 {row_number} 行工厂代码 {factory_code} 不存在")
+    vehicle = vehicles_by_code.get(vehicle_code)
+    if not vehicle:
+        raise ValueError(f"第 {row_number} 行车型代码 {vehicle_code} 不存在")
+    color = colors_by_code.get(color_code)
+    if not color:
+        raise ValueError(f"第 {row_number} 行颜色代码 {color_code} 不存在")
+    if not db.scalar(
+        select(FactoryVehicleModel.id).where(
+            FactoryVehicleModel.factory_id == factory.id,
+            FactoryVehicleModel.vehicle_model_id == vehicle.id,
+            FactoryVehicleModel.is_active.is_(True),
+        )
+    ):
+        raise ValueError(
+            f"第 {row_number} 行工厂 {factory_code} 下未启用车型 {vehicle_code}，"
+            "规则与创建生产事件相同"
+        )
+    if not db.scalar(
+        select(VehicleModelColor.id).where(
+            VehicleModelColor.vehicle_model_id == vehicle.id,
+            VehicleModelColor.color_id == color.id,
+            VehicleModelColor.is_active.is_(True),
+        )
+    ):
+        raise ValueError(
+            f"第 {row_number} 行车型 {vehicle_code} 下未启用颜色 {color_code}，"
+            "规则与创建生产事件相同"
+        )
+    return {
+        "factory_id": factory.id,
+        "vehicle_model_id": vehicle.id,
+        "color_id": color.id,
+        "factory_code": factory_code,
+        "vehicle_model_code": vehicle_code,
+        "color_code": color_code,
+    }
+
+
 def validate_training_file(
     db: Session,
     content: bytes,
@@ -326,6 +416,7 @@ def validate_training_file(
     if not rows:
         raise HTTPException(status_code=422, detail="训练宽表没有数据行")
 
+    factories_by_code, vehicles_by_code, colors_by_code = _lookup_maps(db)
     samples: list[dict[str, Any]] = []
     errors: list[str] = []
     sample_numbers: set[str] = set()
@@ -336,6 +427,14 @@ def validate_training_file(
             if sample_no in sample_numbers:
                 raise ValueError(f"第 {row_number} 行样本编号 {sample_no} 重复")
             sample_numbers.add(sample_no)
+            context = _resolve_production_context(
+                db,
+                row,
+                row_number,
+                factories_by_code,
+                vehicles_by_code,
+                colors_by_code,
+            )
             feature_values: dict[str, float] = {}
             for header in feature_headers:
                 raw = row.get(header)
@@ -349,6 +448,12 @@ def validate_training_file(
                 {
                     "sample_no": sample_no,
                     "group_value": _required_text(row, "独立分组", row_number),
+                    "factory_id": context["factory_id"],
+                    "vehicle_model_id": context["vehicle_model_id"],
+                    "color_id": context["color_id"],
+                    "factory_code": context["factory_code"],
+                    "vehicle_model_code": context["vehicle_model_code"],
+                    "color_code": context["color_code"],
                     "occurred_at": _datetime(row.get("样本时间"), row_number),
                     "target_value": _number(row.get("目标值"), "目标值", row_number),
                     "feature_values": feature_values,
@@ -378,6 +483,11 @@ def validate_training_file(
             "group_count": len({sample["group_value"] for sample in samples}),
             "feature_count": len(feature_names),
             "blank_feature_cell_count": missing_value_count,
+            "context_counts": {
+                "factory": len({sample["factory_id"] for sample in samples}),
+                "vehicle_model": len({sample["vehicle_model_id"] for sample in samples}),
+                "color": len({sample["color_id"] for sample in samples}),
+            },
             "errors": [],
         },
     }
@@ -420,6 +530,9 @@ def import_training_file(
                 upload_id=upload.id,
                 sample_no=sample["sample_no"],
                 group_value=sample["group_value"],
+                factory_id=sample["factory_id"],
+                vehicle_model_id=sample["vehicle_model_id"],
+                color_id=sample["color_id"],
                 occurred_at=sample["occurred_at"],
                 target_value=sample["target_value"],
                 feature_values=sample["feature_values"],
@@ -428,6 +541,9 @@ def import_training_file(
                     "file_name": filename,
                     "file_hash": digest,
                     "row_number": sample["row_number"],
+                    "factory_code": sample["factory_code"],
+                    "vehicle_model_code": sample["vehicle_model_code"],
+                    "color_code": sample["color_code"],
                 },
                 is_valid=True,
             )
@@ -458,11 +574,51 @@ def training_upload_export_response(
             .order_by(TrainingWideSample.occurred_at, TrainingWideSample.sample_no)
         )
     )
+    factory_ids = {sample.factory_id for sample in samples if sample.factory_id}
+    vehicle_ids = {sample.vehicle_model_id for sample in samples if sample.vehicle_model_id}
+    color_ids = {sample.color_id for sample in samples if sample.color_id}
+    factories = (
+        {
+            item.id: item
+            for item in db.scalars(select(Factory).where(Factory.id.in_(factory_ids)))
+        }
+        if factory_ids
+        else {}
+    )
+    vehicles = (
+        {
+            item.id: item
+            for item in db.scalars(
+                select(VehicleModel).where(VehicleModel.id.in_(vehicle_ids))
+            )
+        }
+        if vehicle_ids
+        else {}
+    )
+    colors = (
+        {
+            item.id: item
+            for item in db.scalars(select(Color).where(Color.id.in_(color_ids)))
+        }
+        if color_ids
+        else {}
+    )
     rows = []
     for sample in samples:
+        lineage = sample.lineage or {}
         row: dict[str, Any] = {
             "样本编号": sample.sample_no,
             "独立分组": sample.group_value,
+            "工厂代码": lineage.get("factory_code")
+            or (factories[sample.factory_id].code if sample.factory_id in factories else ""),
+            "车型代码": lineage.get("vehicle_model_code")
+            or (
+                vehicles[sample.vehicle_model_id].code
+                if sample.vehicle_model_id in vehicles
+                else ""
+            ),
+            "颜色代码": lineage.get("color_code")
+            or (colors[sample.color_id].code if sample.color_id in colors else ""),
             "样本时间": sample.occurred_at.isoformat(),
             "目标值": sample.target_value,
         }

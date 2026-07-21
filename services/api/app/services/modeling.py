@@ -307,6 +307,32 @@ def _create_validation_folds(
         if production_run_ids
         else {}
     )
+    manual_sample_ids = {
+        member.manual_sample_id for member in members if member.manual_sample_id
+    }
+    samples_by_id = (
+        {
+            sample.id: sample
+            for sample in db.scalars(
+                select(TrainingWideSample).where(
+                    TrainingWideSample.id.in_(manual_sample_ids)
+                )
+            )
+        }
+        if manual_sample_ids
+        else {}
+    )
+
+    def context_ids(
+        member: DatasetSplitMember, run: ProductionRun | None
+    ) -> tuple[str | None, str | None, str | None]:
+        if run is not None:
+            return run.factory_id, run.vehicle_model_id, run.color_id
+        sample = samples_by_id.get(member.manual_sample_id) if member.manual_sample_id else None
+        if sample is None:
+            return None, None, None
+        return sample.factory_id, sample.vehicle_model_id, sample.color_id
+
     rows = [(member, runs_by_id.get(member.production_run_id)) for member in members]
     now = datetime.now(UTC)
     summaries: dict[str, dict] = {}
@@ -371,9 +397,9 @@ def _create_validation_folds(
     }
 
     axis_definitions = {
-        "FACTORY": lambda member, run: run.factory_id if run else None,
-        "VEHICLE_MODEL": lambda member, run: run.vehicle_model_id if run else None,
-        "COLOR": lambda member, run: run.color_id if run else None,
+        "FACTORY": lambda member, run: context_ids(member, run)[0],
+        "VEHICLE_MODEL": lambda member, run: context_ids(member, run)[1],
+        "COLOR": lambda member, run: context_ids(member, run)[2],
         "PRODUCTION_GROUP_LOO": lambda member, run: member.group_value,
     }
     for axis, key_getter in axis_definitions.items():
@@ -780,6 +806,26 @@ def ensure_model_governance(
             .where(DatasetSplitMember.dataset_snapshot_id == model.dataset_snapshot_id)
         ).all()
     )
+    contexts |= {
+        (factory_id, vehicle_model_id, color_id)
+        for factory_id, vehicle_model_id, color_id in db.execute(
+            select(
+                TrainingWideSample.factory_id,
+                TrainingWideSample.vehicle_model_id,
+                TrainingWideSample.color_id,
+            )
+            .join(
+                DatasetSplitMember,
+                DatasetSplitMember.manual_sample_id == TrainingWideSample.id,
+            )
+            .where(
+                DatasetSplitMember.dataset_snapshot_id == model.dataset_snapshot_id,
+                TrainingWideSample.factory_id.is_not(None),
+                TrainingWideSample.vehicle_model_id.is_not(None),
+                TrainingWideSample.color_id.is_not(None),
+            )
+        ).all()
+    }
     for factory_id, vehicle_model_id, color_id in contexts - existing_contexts:
         db.add(
             ModelApplicabilityScope(
@@ -789,7 +835,7 @@ def ensure_model_governance(
                 color_id=color_id,
                 status="PENDING",
                 source="DATASET_DERIVED",
-                remark="由受治理训练数据集中的生产上下文自动派生，需随模型人工验收。",
+                remark="由受治理训练数据集中的生产或人工样本上下文自动派生，需随模型人工验收。",
             )
         )
     if not db.scalar(select(ModelOodPolicy).where(ModelOodPolicy.model_version_id == model.id)):

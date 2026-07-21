@@ -1617,7 +1617,7 @@ export function AiWorkbench({
 
                   {useManualTraining ? (
                     <div className="ai-manual-upload-box">
-                      <div className="program-subheading"><div><strong>上传人工训练宽表</strong><small>先下载中文模板，填写后系统会先校验再入库</small></div></div>
+                      <div className="program-subheading"><div><strong>上传人工训练宽表</strong><small>先下载中文模板；必须填写与生产记录相同的工厂代码、车型代码、颜色代码，校验通过后入库</small></div></div>
                       <div className="ai-two-fields">
                         <button type="button" className="button button-secondary" onClick={() => downloadTrainingTemplate("xlsx")}><FileSpreadsheet /> 下载 Excel 模板</button>
                         <button type="button" className="button button-secondary" onClick={() => downloadTrainingTemplate("csv")}><FileSpreadsheet /> 下载 CSV 模板</button>

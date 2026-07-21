@@ -14,6 +14,7 @@ from app.models.domain import (
     Color,
     DatasetSplitMember,
     Factory,
+    FactoryVehicleModel,
     MeasurementPoint,
     Part,
     PointFeatureSnapshot,
@@ -22,6 +23,7 @@ from app.models.domain import (
     QualityMetricValue,
     TrainingWideSample,
     VehicleModel,
+    VehicleModelColor,
 )
 from app.schemas.modeling import DatasetBuildRequest, ModelTrainingRequest
 from app.services.modeling import build_dataset_snapshot, train_model
@@ -42,11 +44,48 @@ def _engine():
     return engine
 
 
-def _manual_csv(now: datetime) -> bytes:
-    rows = ["样本编号,独立分组,样本时间,目标值,清漆二站-喷涂流量,清漆二站-外成型空气流量"]
-    for index in range(6):
+def _seed_context(
+    db: Session,
+    *,
+    factory_code: str = "F1",
+    vehicle_code: str = "V1",
+    color_code: str = "C1",
+) -> tuple[Factory, VehicleModel, Color]:
+    factory = Factory(code=factory_code, name=f"工厂{factory_code}")
+    vehicle = VehicleModel(code=vehicle_code, name=f"车型{vehicle_code}")
+    color = Color(code=color_code, name=f"颜色{color_code}", color_type="BASECOAT")
+    db.add_all([factory, vehicle, color])
+    db.flush()
+    db.add_all(
+        [
+            FactoryVehicleModel(
+                factory_id=factory.id, vehicle_model_id=vehicle.id, is_active=True
+            ),
+            VehicleModelColor(
+                vehicle_model_id=vehicle.id, color_id=color.id, is_active=True
+            ),
+        ]
+    )
+    db.flush()
+    return factory, vehicle, color
+
+
+def _manual_csv(
+    now: datetime,
+    *,
+    factory_code: str = "F1",
+    vehicle_code: str = "V1",
+    color_code: str = "C1",
+    row_count: int = 6,
+) -> bytes:
+    rows = [
+        "样本编号,独立分组,工厂代码,车型代码,颜色代码,样本时间,目标值,"
+        "清漆二站-喷涂流量,清漆二站-外成型空气流量"
+    ]
+    for index in range(row_count):
         rows.append(
-            f"S-{index},G-{index},{(now + timedelta(hours=index)).isoformat()},"
+            f"S-{index},G-{index},{factory_code},{vehicle_code},{color_code},"
+            f"{(now + timedelta(hours=index)).isoformat()},"
             f"{10 + index},{100 + index},{200 + index}"
         )
     return ("\ufeff" + "\n".join(rows)).encode("utf-8")
@@ -66,8 +105,8 @@ def test_training_wide_rejects_broken_excel_and_duplicate_columns() -> None:
         assert "无法解析" in str(broken.value.detail)
 
         duplicate_csv = (
-            "样本编号,样本编号,独立分组,样本时间,目标值,清漆二站-喷涂流量\n"
-            "S-1,S-2,G-1,2026-07-19 08:00:00,10,100\n"
+            "样本编号,样本编号,独立分组,工厂代码,车型代码,颜色代码,样本时间,目标值,清漆二站-喷涂流量\n"
+            "S-1,S-2,G-1,F1,V1,C1,2026-07-19 08:00:00,10,100\n"
         ).encode("utf-8")
         with pytest.raises(HTTPException) as duplicate:
             validate_training_file(
@@ -85,12 +124,26 @@ def test_training_wide_normalizes_numeric_sample_number_and_escapes_exports() ->
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "训练数据"
-    sheet.append(["样本编号", "独立分组", "样本时间", "目标值", "清漆二站-喷涂流量"])
-    sheet.append([100.0, "+UNSAFE-GROUP", datetime(2026, 7, 19, 8, 0), 10, 100])
+    sheet.append(
+        [
+            "样本编号",
+            "独立分组",
+            "工厂代码",
+            "车型代码",
+            "颜色代码",
+            "样本时间",
+            "目标值",
+            "清漆二站-喷涂流量",
+        ]
+    )
+    sheet.append(
+        [100.0, "+UNSAFE-GROUP", "F1", "V1", "C1", datetime(2026, 7, 19, 8, 0), 10, 100]
+    )
     source = BytesIO()
     workbook.save(source)
 
     with Session(_engine(), expire_on_commit=False) as db:
+        _seed_context(db)
         upload = import_training_file(
             db,
             source.getvalue(),
@@ -104,9 +157,13 @@ def test_training_wide_normalizes_numeric_sample_number_and_escapes_exports() ->
             select(TrainingWideSample).where(TrainingWideSample.upload_id == upload.id)
         )
         assert sample.sample_no == "100"
+        assert sample.factory_id is not None
+        assert sample.vehicle_model_id is not None
+        assert sample.color_id is not None
 
         csv_response = training_upload_export_response(db, upload, "csv")
         assert "'+UNSAFE-GROUP" in csv_response.body.decode("utf-8-sig")
+        assert "F1" in csv_response.body.decode("utf-8-sig")
 
         xlsx_response = training_upload_export_response(db, upload, "xlsx")
         exported = load_workbook(BytesIO(xlsx_response.body), read_only=True, data_only=False)
@@ -116,6 +173,7 @@ def test_training_wide_normalizes_numeric_sample_number_and_escapes_exports() ->
 def test_manual_training_wide_can_build_dataset_without_production_rows() -> None:
     now = datetime.now(UTC) - timedelta(days=1)
     with Session(_engine(), expire_on_commit=False) as db:
+        factory, vehicle, color = _seed_context(db)
         template = training_template_response(db, "doi", "xlsx")
         assert "spreadsheetml" in template.media_type
         assert len(template.body) > 1000
@@ -130,6 +188,21 @@ def test_manual_training_wide_can_build_dataset_without_production_rows() -> Non
         )
         assert upload.sample_count == 6
         assert upload.validation_report["passed"] is True
+        assert upload.validation_report["context_counts"] == {
+            "factory": 1,
+            "vehicle_model": 1,
+            "color": 1,
+        }
+        samples = list(
+            db.scalars(
+                select(TrainingWideSample).where(
+                    TrainingWideSample.upload_id == upload.id
+                )
+            )
+        )
+        assert all(sample.factory_id == factory.id for sample in samples)
+        assert all(sample.vehicle_model_id == vehicle.id for sample in samples)
+        assert all(sample.color_id == color.id for sample in samples)
         dataset = build_dataset_snapshot(
             db,
             DatasetBuildRequest(
@@ -173,18 +246,21 @@ def test_manual_training_wide_can_build_dataset_without_production_rows() -> Non
         assert validation["TIME_HOLDOUT"]["validation_sample_count"] == 2
         assert validation["PRODUCTION_GROUP_LOO"]["status"] == "EVALUATED"
         assert validation["PRODUCTION_GROUP_LOO"]["validation_sample_count"] == 6
-        assert validation["FACTORY"]["excluded_sample_count"] == 6
+        # 人工样本已带生产同语义上下文；单工厂时轴有数据但多样性不足
+        assert validation["FACTORY"]["excluded_sample_count"] == 0
+        assert validation["FACTORY"]["status"] == "INSUFFICIENT_AXIS_DIVERSITY"
+        assert validation["COLOR"]["excluded_sample_count"] == 0
         assert trained.model_payload["uncertainty_source"] == "TEMPORAL_VALIDATION_RMSE"
 
 
 def test_production_and_manual_rows_enter_same_matrix_without_source_priority() -> None:
     now = datetime.now(UTC) - timedelta(days=2)
     with Session(_engine(), expire_on_commit=False) as db:
-        factory = Factory(code="F", name="工厂")
-        model = VehicleModel(code="M", name="车型")
-        color = Color(code="C", name="颜色", color_type="BASECOAT")
+        factory, model, color = _seed_context(
+            db, factory_code="F", vehicle_code="M", color_code="C"
+        )
         part = Part(code="P", name="零件")
-        db.add_all([factory, model, color, part])
+        db.add(part)
         db.flush()
         point = MeasurementPoint(
             code="MP",
@@ -241,7 +317,12 @@ def test_production_and_manual_rows_enter_same_matrix_without_source_priority() 
         db.commit()
         upload = import_training_file(
             db,
-            _manual_csv(now + timedelta(days=1)),
+            _manual_csv(
+                now + timedelta(days=1),
+                factory_code="F",
+                vehicle_code="M",
+                color_code="C",
+            ),
             "mixed-training.csv",
             "混合训练记录",
             "doi",
@@ -271,6 +352,9 @@ def test_production_and_manual_rows_enter_same_matrix_without_source_priority() 
             "clearcoat_2.spray_flow",
         ]
         manual_samples = list(
-            db.scalars(select(TrainingWideSample).where(TrainingWideSample.upload_id == upload.id))
+            db.scalars(
+                select(TrainingWideSample).where(TrainingWideSample.upload_id == upload.id)
+            )
         )
         assert len(manual_samples) == 6
+        assert all(sample.factory_id == factory.id for sample in manual_samples)

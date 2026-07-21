@@ -151,6 +151,9 @@ CREATE TABLE `training_wide_sample` (
   `upload_id` VARCHAR(36) NOT NULL DEFAULT '' COMMENT '人工训练数据上传ID；应用层逻辑引用 training_data_upload.id',
   `sample_no` VARCHAR(100) NOT NULL DEFAULT '' COMMENT '样本编号',
   `group_value` VARCHAR(100) NOT NULL DEFAULT '' COMMENT '独立车身批次或试验分组',
+  `factory_id` VARCHAR(36) NULL COMMENT '工厂ID；应用层逻辑引用 factory.id；语义同生产事件',
+  `vehicle_model_id` VARCHAR(36) NULL COMMENT '车型ID；应用层逻辑引用 vehicle_model.id；语义同生产事件',
+  `color_id` VARCHAR(36) NULL COMMENT '颜色ID；应用层逻辑引用 color.id；语义同生产事件',
   `occurred_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '样本实际发生时间',
   `target_value` DECIMAL(18,6) NOT NULL DEFAULT 0 COMMENT '目标质量实测值',
   `feature_values` JSON NULL COMMENT '经中文列名转换后的统一特征值',
@@ -161,5 +164,6 @@ CREATE TABLE `training_wide_sample` (
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_training_upload_sample` (`upload_id`, `sample_no`),
-  KEY `idx_training_sample_group` (`upload_id`, `group_value`, `occurred_at`)
+  KEY `idx_training_sample_group` (`upload_id`, `group_value`, `occurred_at`),
+  KEY `idx_training_sample_context` (`factory_id`, `vehicle_model_id`, `color_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='人工训练数据宽表样本';

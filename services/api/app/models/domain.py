@@ -1342,11 +1342,21 @@ class TrainingWideSample(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("upload_id", "sample_no", name="uk_training_upload_sample"),
         Index("idx_training_sample_group", "upload_id", "group_value", "occurred_at"),
+        Index(
+            "idx_training_sample_context",
+            "factory_id",
+            "vehicle_model_id",
+            "color_id",
+        ),
     )
 
     upload_id: Mapped[str] = logical_fk("training_data_upload.id", nullable=False)
     sample_no: Mapped[str] = mapped_column(String(100), nullable=False)
     group_value: Mapped[str] = mapped_column(String(100), nullable=False)
+    # 与 ProductionRun 同语义：主数据工厂/车型/颜色，供多维验证轴与适用范围派生
+    factory_id: Mapped[str | None] = logical_fk("factory.id")
+    vehicle_model_id: Mapped[str | None] = logical_fk("vehicle_model.id")
+    color_id: Mapped[str | None] = logical_fk("color.id")
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     target_value: Mapped[float] = mapped_column(Float, nullable=False)
     feature_values: Mapped[dict] = mapped_column(JSON, nullable=False)
