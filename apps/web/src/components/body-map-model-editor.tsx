@@ -108,6 +108,8 @@ async function uploadFileChunked(options: {
 
   const uploadId = initPayload.uploadId;
   const chunks = initPayload.totalChunks ?? totalChunks;
+  // 给共享盘（JuiceFS）一点时间让其它副本看到刚创建的会话
+  await new Promise((resolve) => setTimeout(resolve, 300));
 
   for (let index = 0; index < chunks; index++) {
     const start = index * CHUNK_SIZE;
@@ -117,6 +119,7 @@ async function uploadFileChunked(options: {
     onProgress(`正在上传 ${percent}%`, percent);
 
     let attempt = 0;
+    const maxAttempts = 6;
     while (true) {
       attempt += 1;
       const form = new FormData();
@@ -126,10 +129,13 @@ async function uploadFileChunked(options: {
         body: form,
       });
       if (chunkResp.ok) break;
-      if (attempt >= 3) {
+      if (attempt >= maxAttempts) {
         throw new Error(await readError(chunkResp));
       }
-      onProgress(`上传中断，正在重试（${attempt}/3）…`, percent);
+      // 404 多为跨 Pod 元数据延迟，退避重试；其它错误也短暂重试
+      const delayMs = chunkResp.status === 404 ? 200 * attempt : 150 * attempt;
+      onProgress(`上传中断，正在重试（${attempt}/${maxAttempts}）…`, percent);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 

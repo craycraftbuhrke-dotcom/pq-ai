@@ -611,11 +611,25 @@ export function uploadMetaPath(uploadId: string): string {
 }
 
 export async function readUploadMeta(uploadId: string): Promise<UploadSessionMeta> {
-  let raw: string;
-  try {
-    raw = await readFile(uploadMetaPath(uploadId), "utf-8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+  const target = uploadMetaPath(uploadId);
+  // JuiceFS 跨节点有短暂元数据延迟：刚在 A 写入，B 立刻读可能 ENOENT。
+  const maxAttempts = 8;
+  let raw: string | null = null;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      raw = await readFile(target, "utf-8");
+      break;
+    } catch (error) {
+      lastError = error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || attempt === maxAttempts) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 80 * attempt));
+    }
+  }
+  if (raw === null) {
+    if ((lastError as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
       throw Object.assign(
         new Error(
           "上传会话不存在或无法在当前实例读取。请确认所有前端 Pod 已挂载同一 RWX PVC，并设置 WEB_RUNTIME_ASSET_DIR；然后重新选择文件上传。",
@@ -623,7 +637,7 @@ export async function readUploadMeta(uploadId: string): Promise<UploadSessionMet
         { status: 404 },
       );
     }
-    throw error;
+    throw lastError instanceof Error ? lastError : new Error("读取上传会话失败");
   }
   const meta = JSON.parse(raw) as UploadSessionMeta;
   const receivedIsValid =
@@ -656,11 +670,29 @@ export async function readUploadMeta(uploadId: string): Promise<UploadSessionMet
 }
 
 export async function writeUploadMeta(meta: UploadSessionMeta): Promise<void> {
-  await mkdir(uploadDir(meta.uploadId), { recursive: true });
+  const dir = uploadDir(meta.uploadId);
+  await mkdir(dir, { recursive: true });
   const target = uploadMetaPath(meta.uploadId);
   const temporaryPath = `${target}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(meta, null, 2)}\n`, "utf-8");
+  const handle = await open(temporaryPath, "w");
+  try {
+    await handle.writeFile(`${JSON.stringify(meta, null, 2)}\n`, "utf-8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
   await rename(temporaryPath, target);
+  // 尽量把目录项也刷到共享文件系统，降低其它 Pod 读不到 meta 的概率
+  try {
+    const dirHandle = await open(dir, "r");
+    try {
+      await dirHandle.sync();
+    } finally {
+      await dirHandle.close();
+    }
+  } catch {
+    // 部分挂载点不支持目录 fsync，忽略即可
+  }
 }
 
 export async function assembleUpload(uploadId: string): Promise<string> {
