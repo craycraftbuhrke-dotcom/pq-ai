@@ -15,12 +15,12 @@ import Link from "next/link";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { BulkDataActions } from "@/components/bulk-data-actions";
+import { BodyMapQualitySummaryGrid, type BodyMapQualitySummary } from "@/components/body-map-quality-summary-grid";
 import { ModalShell } from "@/components/modal-shell";
 import { JsonObjectEditor } from "@/components/structured-json-editor";
 import { MaterialGovernancePanel } from "@/components/material-governance-panel";
 import {
   QUALITY_TYPE_LABELS,
-  RELIABILITY_LABELS,
   stageLabel,
   statusLabel,
 } from "@/lib/display-labels";
@@ -62,16 +62,7 @@ type GroupPointRelation = {
   measurement_point_id: string;
   sequence_no: number;
 };
-type QualitySummary = {
-  quality_type: string;
-  metric_code?: string | null;
-  metric_name?: string | null;
-  value?: number | null;
-  unit?: string | null;
-  measured_at?: string | null;
-  judgement?: string | null;
-  reliability_status?: string | null;
-};
+type QualitySummary = BodyMapQualitySummary;
 type BrushParameter = {
   parameter_code: string;
   parameter_name: string;
@@ -105,12 +96,6 @@ type PointDetail = {
 type ModalKind = "run" | "material" | "stage" | "actual";
 type Modal = { kind: ModalKind; record?: ProductionRun | Material | StageRun | ActualParameter } | null;
 type FormState = Record<string, string>;
-
-const JUDGEMENT_LABELS: Record<string, string> = {
-  PASS: "合格",
-  FAIL: "不合格",
-  WARN: "预警",
-};
 
 const COATING_LABELS: Record<string, string> = {
   MIDCOAT: "中涂",
@@ -719,34 +704,10 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
                                     </small>
                                   </div>
                                 </div>
-                                <div className="body-map-quality-grid">
-                                  {pointDetail.quality_summaries.length ? (
-                                    pointDetail.quality_summaries.map((item) => (
-                                      <article key={item.quality_type} data-judgement={item.judgement ?? "EMPTY"}>
-                                        <span>{QUALITY_TYPE_LABELS[item.quality_type] ?? item.quality_type}</span>
-                                        <strong className="mono">{formatMetricValue(item.value, item.unit)}</strong>
-                                        <small>
-                                          {item.metric_name ?? item.metric_code ?? "—"}
-                                          {item.judgement
-                                            ? ` · ${JUDGEMENT_LABELS[item.judgement] ?? item.judgement}`
-                                            : " · 无已核验数据"}
-                                        </small>
-                                        {item.reliability_status ? (
-                                          <span className={`body-map-reliability reliability-${item.reliability_status.toLowerCase()}`}>
-                                            {RELIABILITY_LABELS[item.reliability_status] ?? item.reliability_status}
-                                          </span>
-                                        ) : null}
-                                        {item.measured_at ? (
-                                          <small className="mono">
-                                            {new Date(item.measured_at).toLocaleString("zh-CN", { hour12: false })}
-                                          </small>
-                                        ) : null}
-                                      </article>
-                                    ))
-                                  ) : (
-                                    <div className="master-empty">本生产事件暂无该点位质量数据。</div>
-                                  )}
-                                </div>
+                                <BodyMapQualitySummaryGrid
+                                  summaries={pointDetail.quality_summaries}
+                                  emptyText="本生产事件暂无该点位质量数据。"
+                                />
                                 <div className="body-map-brush-block">
                                   <div className="program-subheading compact">
                                     <div>

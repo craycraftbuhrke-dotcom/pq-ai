@@ -17,6 +17,7 @@ import {
 } from "react";
 
 import { BodyMapModelEditor } from "@/components/body-map-model-editor";
+import { BodyMapQualitySummaryGrid, type BodyMapQualitySummary } from "@/components/body-map-quality-summary-grid";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type Resource = { id: string; code: string; name: string };
@@ -30,15 +31,7 @@ type ProductionRun = {
   color_id?: string;
 };
 
-type QualitySummary = {
-  quality_type: string;
-  metric_code: string | null;
-  metric_name: string | null;
-  value: number | null;
-  unit: string | null;
-  judgement: string | null;
-  reliability_status: string | null;
-};
+type QualitySummary = BodyMapQualitySummary;
 
 type Point3D = {
   measurement_point_id: string;
@@ -801,17 +794,7 @@ export function BodyPointMap3D() {
                       <small>{[detail.part_code, detail.part_name, detail.region].filter(Boolean).join(" · ") || "—"}</small>
                     </div>
                   </div>
-                  <div className="body-map-quality-grid">
-                    {detail.quality_summaries.map((s) => (
-                      <div key={s.quality_type} className="body-map-quality-card">
-                        <span>{QUALITY_LABELS[s.quality_type] ?? s.quality_type}</span>
-                        <strong className={`judgement judgement-${(s.judgement ?? "").toLowerCase()}`}>
-                          {formatValue(s.value, s.unit)}
-                        </strong>
-                        <small>{s.judgement ?? "—"}</small>
-                      </div>
-                    ))}
-                  </div>
+                  <BodyMapQualitySummaryGrid summaries={detail.quality_summaries} />
                   <div className="body-map-brush-block">
                     <div className="program-subheading compact">
                       <div>

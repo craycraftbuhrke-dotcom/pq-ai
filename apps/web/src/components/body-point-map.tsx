@@ -16,6 +16,7 @@ import Link from "next/link";
 import Image from "next/image";
 
 import { BodyMapImageEditor } from "@/components/body-map-image-editor";
+import { BodyMapQualitySummaryGrid, type BodyMapQualitySummary } from "@/components/body-map-quality-summary-grid";
 import { ModalShell } from "@/components/modal-shell";
 import { PointAiActions } from "@/components/point-ai-actions";
 import { PointParameterVersionEditor } from "@/components/point-parameter-version-editor";
@@ -82,17 +83,7 @@ type ProductionRun = {
   color_id?: string;
 };
 
-type QualitySummary = {
-  quality_type: string;
-  metric_code?: string | null;
-  metric_name?: string | null;
-  value?: number | null;
-  unit?: string | null;
-  measured_at?: string | null;
-  data_no?: string | null;
-  judgement?: string | null;
-  reliability_status?: string | null;
-};
+type QualitySummary = BodyMapQualitySummary;
 
 type MapPoint = {
   measurement_point_id: string;
@@ -1311,32 +1302,7 @@ export function BodyPointMap() {
                     ) : null}
                   </div>
 
-                  <div className="body-map-quality-grid">
-                    {detail.quality_summaries.map((item) => (
-                      <article key={item.quality_type} data-judgement={item.judgement ?? "EMPTY"}>
-                        <span>{qualityLabels[item.quality_type] ?? item.quality_type}</span>
-                        <strong className="mono">{formatValue(item.value, item.unit)}</strong>
-                        <small>
-                          {item.metric_name ?? item.metric_code ?? "—"}
-                          {item.judgement
-                            ? ` · ${judgementLabels[item.judgement] ?? item.judgement}`
-                            : " · 无已核验数据"}
-                        </small>
-                        {item.reliability_status ? (
-                          <span
-                            className={`body-map-reliability reliability-${item.reliability_status.toLowerCase()}`}
-                          >
-                            {reliabilityLabels[item.reliability_status] ?? item.reliability_status}
-                          </span>
-                        ) : null}
-                        {item.measured_at ? (
-                          <small className="mono">
-                            {new Date(item.measured_at).toLocaleString("zh-CN", { hour12: false })}
-                          </small>
-                        ) : null}
-                      </article>
-                    ))}
-                  </div>
+                  <BodyMapQualitySummaryGrid summaries={detail.quality_summaries} />
 
                   <PointAiActions
                     productionRunId={runId || canvas?.production_run_id}

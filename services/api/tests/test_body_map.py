@@ -300,6 +300,9 @@ def test_body_map_create_point_binds_group_and_detail_includes_brush() -> None:
     orange = next(item for item in detail.quality_summaries if item.quality_type == "ORANGE_PEEL")
     assert orange.value == 88.5
     assert orange.reliability_status == VERIFIED
+    assert orange.metrics
+    assert any(item.metric_code == "doi" and item.value == 88.5 for item in orange.metrics)
+    assert any(item.metric_code == "lw" for item in orange.metrics)
     assert len(detail.brush_contributions) == 1
     assert detail.brush_contributions[0].brush_no == "B01"
     assert detail.brush_contributions[0].coating_system == "CLEARCOAT"

@@ -52,6 +52,7 @@ from app.schemas.quality import (
     BodyMapLayoutDeactivate,
     BodyMapLayoutRead,
     BodyMapLayoutUpsert,
+    BodyMapMetricReading,
     BodyMapPointCreate,
     BodyMapPointDetail,
     BodyMapPointItem,
@@ -122,6 +123,9 @@ QUALITY_TYPE_ORDER = ("THICKNESS", "COLOR_DIFFERENCE", "ORANGE_PEEL")
 
 METRIC_NAME_BY_CODE = {item["code"]: item["name"] for item in QUALITY_METRIC_CATALOG}
 METRIC_UNIT_BY_CODE = {item["code"]: item.get("unit") for item in QUALITY_METRIC_CATALOG}
+CATALOG_METRICS_BY_TYPE: dict[str, list[dict]] = defaultdict(list)
+for _catalog_item in QUALITY_METRIC_CATALOG:
+    CATALOG_METRICS_BY_TYPE[_catalog_item["quality_type"]].append(_catalog_item)
 
 
 def _required(db: Session, model: type, resource_id: str, label: str):
@@ -129,6 +133,106 @@ def _required(db: Session, model: type, resource_id: str, label: str):
     if not resource:
         raise HTTPException(status_code=404, detail=f"{label}不存在")
     return resource
+
+
+def _empty_metric_readings(quality_type: str) -> list[BodyMapMetricReading]:
+    primary_code = PRIMARY_METRIC_BY_TYPE.get(quality_type)
+    return [
+        BodyMapMetricReading(
+            metric_code=item["code"],
+            metric_name=item.get("name") or item["code"],
+            unit=item.get("unit"),
+            is_primary=bool(item.get("is_primary")) or item["code"] == primary_code,
+        )
+        for item in CATALOG_METRICS_BY_TYPE.get(quality_type, [])
+    ]
+
+
+def _empty_quality_summary(quality_type: str) -> BodyMapQualitySummary:
+    primary_code = PRIMARY_METRIC_BY_TYPE.get(quality_type)
+    return BodyMapQualitySummary(
+        quality_type=quality_type,
+        metric_code=primary_code,
+        metric_name=METRIC_NAME_BY_CODE.get(primary_code or "", primary_code),
+        unit=METRIC_UNIT_BY_CODE.get(primary_code or ""),
+        metrics=_empty_metric_readings(quality_type),
+    )
+
+
+def _metric_readings_for_measurement(
+    quality_type: str,
+    metrics: list[QualityMetricValue],
+    metric_judgements: dict[str, str],
+) -> list[BodyMapMetricReading]:
+    primary_code = PRIMARY_METRIC_BY_TYPE.get(quality_type)
+    by_code = {item.metric_code: item for item in metrics}
+    readings: list[BodyMapMetricReading] = []
+    seen: set[str] = set()
+    for catalog_item in CATALOG_METRICS_BY_TYPE.get(quality_type, []):
+        code = catalog_item["code"]
+        seen.add(code)
+        measured = by_code.get(code)
+        value = None
+        unit = catalog_item.get("unit")
+        name = catalog_item.get("name") or code
+        if measured is not None:
+            value = (
+                measured.corrected_value
+                if measured.corrected_value is not None
+                else measured.raw_value
+            )
+            unit = measured.unit or unit
+            name = measured.metric_name or name
+        readings.append(
+            BodyMapMetricReading(
+                metric_code=code,
+                metric_name=name,
+                value=value,
+                unit=unit,
+                judgement=metric_judgements.get(code),
+                is_primary=bool(catalog_item.get("is_primary")) or code == primary_code,
+            )
+        )
+    for measured in metrics:
+        if measured.metric_code in seen:
+            continue
+        readings.append(
+            BodyMapMetricReading(
+                metric_code=measured.metric_code,
+                metric_name=measured.metric_name or measured.metric_code,
+                value=(
+                    measured.corrected_value
+                    if measured.corrected_value is not None
+                    else measured.raw_value
+                ),
+                unit=measured.unit,
+                judgement=metric_judgements.get(measured.metric_code),
+                is_primary=measured.metric_code == primary_code,
+            )
+        )
+    return readings
+
+
+def _pick_display_metric(
+    readings: list[BodyMapMetricReading],
+    quality_type: str,
+) -> BodyMapMetricReading | None:
+    primary_code = PRIMARY_METRIC_BY_TYPE.get(quality_type)
+    if primary_code:
+        for item in readings:
+            if item.metric_code == primary_code and item.value is not None:
+                return item
+    for item in readings:
+        if item.is_primary and item.value is not None:
+            return item
+    for item in readings:
+        if item.value is not None:
+            return item
+    if primary_code:
+        for item in readings:
+            if item.metric_code == primary_code:
+                return item
+    return readings[0] if readings else None
 
 
 def _coating_system(process_stage: str) -> str:
@@ -284,18 +388,7 @@ def _latest_quality_summaries(
     else:
         # Without a run scope, refuse cross-run bleed — callers should resolve latest run first.
         return {
-            point_id: [
-                BodyMapQualitySummary(
-                    quality_type=quality_type,
-                    metric_code=PRIMARY_METRIC_BY_TYPE.get(quality_type),
-                    metric_name=METRIC_NAME_BY_CODE.get(
-                        PRIMARY_METRIC_BY_TYPE.get(quality_type, ""),
-                        PRIMARY_METRIC_BY_TYPE.get(quality_type),
-                    ),
-                    unit=METRIC_UNIT_BY_CODE.get(PRIMARY_METRIC_BY_TYPE.get(quality_type, "")),
-                )
-                for quality_type in QUALITY_TYPE_ORDER
-            ]
+            point_id: [_empty_quality_summary(quality_type) for quality_type in QUALITY_TYPE_ORDER]
             for point_id in point_ids
         }
 
@@ -324,55 +417,42 @@ def _latest_quality_summaries(
 
     result: dict[str, list[BodyMapQualitySummary]] = defaultdict(list)
     for (point_id, quality_type), measurement in latest_by_point_type.items():
-        primary_code = PRIMARY_METRIC_BY_TYPE.get(quality_type)
         metrics = metrics_by_measurement.get(measurement.id, [])
-        primary = next((item for item in metrics if item.metric_code == primary_code), None)
-        if primary is None and metrics:
-            primary = metrics[0]
         judgement = None
+        metric_judgements: dict[str, str] = {}
         try:
             evaluation = evaluate_quality_measurement(db, measurement, metrics)
             judgement = evaluation.get("judgement")
+            for metric_result in evaluation.get("metric_results") or []:
+                code = metric_result.get("metric_code")
+                metric_judgement = metric_result.get("judgement")
+                if isinstance(code, str) and isinstance(metric_judgement, str):
+                    metric_judgements[code] = metric_judgement
         except Exception:  # noqa: BLE001 - map overlay should not fail on evaluation edge cases
             judgement = None
         if not measurement.is_valid:
             judgement = "INVALID"
+        readings = _metric_readings_for_measurement(quality_type, metrics, metric_judgements)
+        display = _pick_display_metric(readings, quality_type)
         result[point_id].append(
             BodyMapQualitySummary(
                 quality_type=quality_type,
-                metric_code=primary.metric_code if primary else primary_code,
-                metric_name=(
-                    primary.metric_name
-                    if primary
-                    else METRIC_NAME_BY_CODE.get(primary_code or "", primary_code)
-                ),
-                value=(
-                    primary.corrected_value
-                    if primary and primary.corrected_value is not None
-                    else (primary.raw_value if primary else None)
-                ),
-                unit=primary.unit if primary else METRIC_UNIT_BY_CODE.get(primary_code or ""),
+                metric_code=display.metric_code if display else PRIMARY_METRIC_BY_TYPE.get(quality_type),
+                metric_name=display.metric_name if display else None,
+                value=display.value if display else None,
+                unit=display.unit if display else None,
                 measured_at=measurement.measured_at,
                 data_no=measurement.data_no,
                 judgement=judgement,
                 reliability_status=measurement.reliability_status,
+                metrics=readings,
             )
         )
     for point_id in point_ids:
         existing_types = {item.quality_type for item in result.get(point_id, [])}
         for quality_type in QUALITY_TYPE_ORDER:
             if quality_type not in existing_types:
-                result[point_id].append(
-                    BodyMapQualitySummary(
-                        quality_type=quality_type,
-                        metric_code=PRIMARY_METRIC_BY_TYPE.get(quality_type),
-                        metric_name=METRIC_NAME_BY_CODE.get(
-                            PRIMARY_METRIC_BY_TYPE.get(quality_type, ""),
-                            PRIMARY_METRIC_BY_TYPE.get(quality_type),
-                        ),
-                        unit=METRIC_UNIT_BY_CODE.get(PRIMARY_METRIC_BY_TYPE.get(quality_type, "")),
-                    )
-                )
+                result[point_id].append(_empty_quality_summary(quality_type))
         result[point_id].sort(
             key=lambda item: QUALITY_TYPE_ORDER.index(item.quality_type)
             if item.quality_type in QUALITY_TYPE_ORDER

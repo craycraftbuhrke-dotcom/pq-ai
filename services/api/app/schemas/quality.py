@@ -459,6 +459,15 @@ class BodyMapLayoutDeactivate(BaseModel):
     body_view: str = Field(pattern="^(TOP|SIDE|LEFT|RIGHT|REAR)$")
 
 
+class BodyMapMetricReading(BaseModel):
+    metric_code: str
+    metric_name: str | None = None
+    value: float | None = None
+    unit: str | None = None
+    judgement: str | None = None
+    is_primary: bool = False
+
+
 class BodyMapQualitySummary(BaseModel):
     quality_type: str
     metric_code: str | None = None
@@ -469,6 +478,7 @@ class BodyMapQualitySummary(BaseModel):
     data_no: str | None = None
     judgement: str | None = None
     reliability_status: str | None = None
+    metrics: list[BodyMapMetricReading] = Field(default_factory=list)
 
 
 class BodyMapPointItem(BaseModel):
