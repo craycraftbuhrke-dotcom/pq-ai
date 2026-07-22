@@ -13,7 +13,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 
@@ -177,6 +176,7 @@ function Scene3DInner({
   selectedPointId,
   onPointClick,
   onSurfacePick,
+  onModelLoadError,
 }: {
   scene: Scene3D;
   editMode: boolean;
@@ -184,6 +184,7 @@ function Scene3DInner({
   selectedPointId: string;
   onPointClick: (pointId: string) => void;
   onSurfacePick: (pos: [number, number, number], normal: [number, number, number] | null) => void;
+  onModelLoadError?: (message: string) => void;
 }) {
   const [Canvas, setCanvas] = useState<null | typeof import("@react-three/fiber").Canvas>(null);
   const [OrbitControls, setOrbitControls] = useState<null | typeof import("@react-three/drei").OrbitControls>(null);
@@ -257,7 +258,10 @@ function Scene3DInner({
         <Suspense fallback={null}>
           <ModelMesh
             url={scene.model_url}
+            unitScale={scene.unit_scale || 1}
+            upAxis={scene.up_axis || "Y"}
             onSurfacePick={editMode ? onSurfacePick : undefined}
+            onLoadError={(message) => onModelLoadError?.(message)}
           />
         </Suspense>
       ) : (
@@ -283,46 +287,83 @@ function Scene3DInner({
 
 function ModelMesh({
   url,
+  unitScale,
+  upAxis,
   onSurfacePick,
+  onLoadError,
 }: {
   url: string;
+  unitScale: number;
+  upAxis: string;
   onSurfacePick?: (pos: [number, number, number], normal: [number, number, number] | null) => void;
+  onLoadError?: (message: string) => void;
 }) {
-  const [geometry, setGeometry] = useState<import("three").BufferGeometry | null>(null);
-  const meshRef = useRef<import("three").Mesh>(null);
+  const [root, setRoot] = useState<import("three").Object3D | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setRoot(null);
     (async () => {
+      const THREE = await import("three");
       const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
       const loader = new GLTFLoader();
       loader.load(
         url,
         (gltf) => {
           if (cancelled) return;
-          gltf.scene.traverse((child) => {
-            if ((child as import("three").Mesh).isMesh) {
-              const mesh = child as import("three").Mesh;
-              setGeometry(mesh.geometry);
+          const sceneRoot = gltf.scene;
+          // Prefer the full converted scene (STP→GLB often has many meshes).
+          // Taking only the last mesh leaves most CAD geometry invisible.
+          const scale = Number.isFinite(unitScale) && unitScale > 0 ? unitScale : 1;
+          sceneRoot.scale.setScalar(scale);
+          const axis = (upAxis || "Y").toUpperCase();
+          if (axis === "Z") {
+            sceneRoot.rotation.x = -Math.PI / 2;
+          } else if (axis === "X") {
+            sceneRoot.rotation.z = Math.PI / 2;
+          }
+          sceneRoot.updateMatrixWorld(true);
+          sceneRoot.traverse((child) => {
+            const mesh = child as import("three").Mesh;
+            if (!mesh.isMesh) return;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            if (!mesh.material) {
+              mesh.material = new THREE.MeshStandardMaterial({
+                color: "#8a8a9a",
+                metalness: 0.3,
+                roughness: 0.7,
+              });
             }
           });
+          setRoot(sceneRoot);
         },
         undefined,
-        (err) => console.error("GLB load error:", err),
+        (err) => {
+          console.error("GLB load error:", err);
+          onLoadError?.(
+            err instanceof Error
+              ? `三维数模加载失败：${err.message}`
+              : `三维数模加载失败（${url}）`,
+          );
+        },
       );
     })();
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [onLoadError, unitScale, upAxis, url]);
 
-  if (!geometry) return null;
+  if (!root) return null;
 
   return (
-    <mesh
-      ref={meshRef as never}
-      geometry={geometry}
-      onPointerDown={(e) => {
+    <primitive
+      object={root}
+      onPointerDown={(e: {
+        stopPropagation: () => void;
+        point: { x: number; y: number; z: number };
+        face?: { normal: { x: number; y: number; z: number } } | null;
+      }) => {
         if (!onSurfacePick) return;
         e.stopPropagation();
         const point = e.point;
@@ -331,9 +372,7 @@ function ModelMesh({
           : null;
         onSurfacePick([point.x, point.y, point.z], normal);
       }}
-    >
-      <meshStandardMaterial color="#8a8a9a" metalness={0.3} roughness={0.7} />
-    </mesh>
+    />
   );
 }
 
@@ -462,6 +501,31 @@ export function BodyPointMap3D() {
       if (groupId) params.set("measurement_group_id", groupId);
       if (runId) params.set("production_run_id", runId);
       const payload = await request<Scene3D>(`/api/quality/body-map/3d-scene?${params}`);
+
+      // Prefer JuiceFS/runtime custom GLB from the web upload API. Backend 3d-scene
+      // only reads image-local public/ and often returns builtin MS11 or null.
+      try {
+        const modelMeta = await request<{
+          entry?: {
+            url?: string | null;
+            up_axis?: string;
+            unit_scale?: number;
+            model_asset_key?: string | null;
+          } | null;
+          source?: string;
+        }>(`/api/body-map-models?modelCode=${encodeURIComponent(payload.vehicle_model_code)}`);
+        if (modelMeta.entry?.url) {
+          payload.model_url = modelMeta.entry.url;
+          payload.model_asset_key = modelMeta.entry.model_asset_key ?? modelMeta.entry.url;
+          if (modelMeta.entry.up_axis) payload.up_axis = modelMeta.entry.up_axis;
+          if (typeof modelMeta.entry.unit_scale === "number") {
+            payload.unit_scale = modelMeta.entry.unit_scale;
+          }
+        }
+      } catch {
+        // Keep backend scene when runtime catalog is unavailable.
+      }
+
       setScene(payload);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载 3D 场景失败");
@@ -684,6 +748,7 @@ export function BodyPointMap3D() {
                   selectedPointId={selectedPointId}
                   onPointClick={(pid) => void loadDetail(pid)}
                   onSurfacePick={handleSurfacePick}
+                  onModelLoadError={(message) => setError(message)}
                 />
               ) : loading ? (
                 <div className="body-map-3d-loading"><LoaderCircle className="spin" /> 加载中…</div>
