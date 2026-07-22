@@ -1011,6 +1011,33 @@ def create_body_map_point(
             db,
         )
         in_group = True
+    if payload.brush_id:
+        brush = _required(db, Brush, payload.brush_id, "刷子")
+        version = db.get(SprayProgramVersion, brush.program_version_id)
+        if not version:
+            raise HTTPException(status_code=422, detail="刷子所属程序版本不存在")
+        contribution = db.scalar(
+            select(BrushPointContribution).where(
+                BrushPointContribution.brush_id == brush.id,
+                BrushPointContribution.measurement_point_id == point.id,
+            )
+        )
+        if contribution:
+            contribution.overlap_ratio = payload.overlap_ratio
+            contribution.contribution_weight = payload.contribution_weight
+        else:
+            db.add(
+                BrushPointContribution(
+                    brush_id=brush.id,
+                    measurement_point_id=point.id,
+                    overlap_ratio=payload.overlap_ratio,
+                    contribution_weight=payload.contribution_weight,
+                    source="BODY_MAP",
+                    version="1.0",
+                    is_approved=False,
+                )
+            )
+        db.commit()
     part = db.get(Part, point.part_id)
     return BodyMapPointItem(
         measurement_point_id=point.id,

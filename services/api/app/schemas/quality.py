@@ -449,6 +449,10 @@ class BodyMapPointCreate(BaseModel):
     )
     measurement_group_id: str | None = None
     point_type: str = Field(default="QUALITY", max_length=32)
+    # 可选：与喷涂刷子建立贡献关联（刷子表/刷子号对应 Brush）
+    brush_id: str | None = None
+    overlap_ratio: float = Field(default=1.0, ge=0, le=1)
+    contribution_weight: float = Field(default=1.0, gt=0, le=1)
 
 
 class BodyMapLayoutDeactivate(BaseModel):

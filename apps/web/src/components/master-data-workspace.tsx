@@ -118,20 +118,27 @@ const emptyRelations: Record<RelationKey, RelationRecord[]> = {
   "measurement-group-points": [],
 };
 
+/** Default/full-mode tabs: measurement groups/points are maintained on the body-map page. */
 const resourceOrder: ResourceKey[] = [
   "factories",
   "vehicle-models",
   "colors",
   "parts",
+];
+
+const allResources: ResourceKey[] = [
+  ...resourceOrder,
   "measurement-groups",
   "measurement-points",
 ];
 
+const entityRelationKeys: RelationKey[] = ["factory-vehicle-models", "vehicle-model-colors"];
+
 const statOrder: ResourceKey[] = [
   "factories",
   "vehicle-models",
-  "measurement-groups",
-  "measurement-points",
+  "colors",
+  "parts",
 ];
 
 const qualityTypeOptions = [
@@ -350,13 +357,12 @@ const measurementResources: ResourceKey[] = ["measurement-groups", "measurement-
 
 export function MasterDataWorkspace({ mode = "full" }: { mode?: MasterMode } = {}) {
   const showChrome = mode === "full";
+  // measurement mode kept for API/config reuse; hub pages use mode="entities".
   const visibleResources = mode === "measurement" ? measurementResources : mode === "entities" ? entityResources : resourceOrder;
   const visibleRelations =
     mode === "measurement"
       ? (["measurement-group-points"] as RelationKey[])
-      : mode === "entities"
-        ? (["factory-vehicle-models", "vehicle-model-colors"] as RelationKey[])
-        : (Object.keys(relationConfigs) as RelationKey[]);
+      : entityRelationKeys;
   const [activeResource, setActiveResource] = useState<ResourceKey>(visibleResources[0] ?? "factories");
   const [data, setData] = useState(emptyData);
   const [query, setQuery] = useState("");
@@ -394,16 +400,17 @@ export function MasterDataWorkspace({ mode = "full" }: { mode?: MasterMode } = {
     setLoading(true);
     setError("");
     try {
+      // Keep fetching measurement resources for mode="measurement" / relation pickers; tabs stay on visibleResources.
       const relationOrder = Object.keys(relationConfigs) as RelationKey[];
       const responses = await Promise.all([
-        ...resourceOrder.map((resource) => fetch(`/api/master-data/${resource}`, { cache: "no-store" })),
+        ...allResources.map((resource) => fetch(`/api/master-data/${resource}`, { cache: "no-store" })),
         ...relationOrder.map((resource) => fetch(`/api/master-data/${resource}`, { cache: "no-store" })),
       ]);
       const failed = responses.find((response) => !response.ok);
       if (failed) throw new Error(await readApiError(failed));
       const payloads = await Promise.all(responses.map((response) => response.json()));
       setData(
-        resourceOrder.reduce(
+        allResources.reduce(
           (result, resource, index) => ({ ...result, [resource]: payloads[index] as MasterRecord[] }),
           emptyData,
         ),
@@ -412,7 +419,7 @@ export function MasterDataWorkspace({ mode = "full" }: { mode?: MasterMode } = {
         relationOrder.reduce(
           (result, resource, index) => ({
             ...result,
-            [resource]: payloads[resourceOrder.length + index] as RelationRecord[],
+            [resource]: payloads[allResources.length + index] as RelationRecord[],
           }),
           emptyRelations,
         ),
@@ -654,7 +661,7 @@ export function MasterDataWorkspace({ mode = "full" }: { mode?: MasterMode } = {
 
       <section className="panel master-data-panel">
         <div className="master-tabs" role="tablist" aria-label="主数据类型">
-          {resourceOrder.map((resource) => (
+          {visibleResources.map((resource) => (
             <button
               className={resource === activeResource ? "master-tab master-tab-active" : "master-tab"}
               key={resource}

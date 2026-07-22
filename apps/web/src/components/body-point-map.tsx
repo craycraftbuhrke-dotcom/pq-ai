@@ -1,6 +1,6 @@
 "use client";
 
-import { Image as ImageIcon, Layers, Link2, ListTree, LoaderCircle, MapPinned, Pencil, Plus, RefreshCw, X } from "lucide-react";
+import { Image as ImageIcon, LoaderCircle, MapPinned, Pencil, Plus, RefreshCw, X } from "lucide-react";
 import {
   FormEvent,
   PointerEvent as ReactPointerEvent,
@@ -24,9 +24,32 @@ import { stageLabel } from "@/lib/display-labels";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type BodyView = "RIGHT" | "LEFT" | "TOP" | "REAR";
-type SideTab = "governance" | "detail";
+type PlaceMode = "create" | "place";
 
 type Resource = { id: string; code: string; name: string; vehicle_model_id?: string; quality_type?: string };
+
+type SprayProgram = {
+  id: string;
+  program_code: string;
+  name: string;
+  factory_id?: string;
+  process_stage?: string;
+};
+
+type ProgramVersion = {
+  id: string;
+  spray_program_id: string;
+  version: string;
+  status: string;
+  vehicle_model_ids?: string[];
+};
+
+type BrushOption = {
+  id: string;
+  program_version_id: string;
+  brush_no: string;
+  brush_table_no: string;
+};
 
 type MeasurementGroup = Resource & {
   vehicle_model_id: string;
@@ -201,13 +224,18 @@ type GroupForm = {
   remark: string;
 };
 
-type PointForm = {
+type CreateForm = {
+  mode: PlaceMode;
+  measurement_group_id: string;
   code: string;
   name: string;
   part_id: string;
   region: string;
   quality_types: string[];
-  bind_to_group: boolean;
+  existing_point_id: string;
+  program_id: string;
+  program_version_id: string;
+  brush_id: string;
 };
 
 const BODY_VIEWS: BodyView[] = ["RIGHT", "LEFT", "TOP", "REAR"];
@@ -257,13 +285,18 @@ const emptyGroupForm = (): GroupForm => ({
   remark: "",
 });
 
-const emptyPointForm = (): PointForm => ({
+const emptyCreateForm = (): CreateForm => ({
+  mode: "create",
+  measurement_group_id: "",
   code: "",
   name: "",
   part_id: "",
   region: "",
   quality_types: ["THICKNESS", "COLOR_DIFFERENCE", "ORANGE_PEEL"],
-  bind_to_group: true,
+  existing_point_id: "",
+  program_id: "",
+  program_version_id: "",
+  brush_id: "",
 });
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -352,28 +385,20 @@ export function BodyPointMap() {
   const [canvas, setCanvas] = useState<CanvasPayload | null>(null);
   const [detail, setDetail] = useState<PointDetail | null>(null);
   const [selectedPointId, setSelectedPointId] = useState("");
-  const [pendingPlaceId, setPendingPlaceId] = useState("");
-  const [sideTab, setSideTab] = useState<SideTab>("detail");
-  const [sideTabPinned, setSideTabPinned] = useState(false);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [formError, setFormError] = useState("");
   const [createDraft, setCreateDraft] = useState<CreateDraft | null>(null);
-  const [createForm, setCreateForm] = useState({
-    code: "",
-    name: "",
-    part_id: "",
-    region: "",
-    quality_types: ["THICKNESS", "COLOR_DIFFERENCE", "ORANGE_PEEL"] as string[],
-  });
+  const [createForm, setCreateForm] = useState<CreateForm>(emptyCreateForm);
   const [groupModal, setGroupModal] = useState<"create" | "edit" | null>(null);
   const [groupForm, setGroupForm] = useState<GroupForm>(emptyGroupForm);
   const [editingGroupId, setEditingGroupId] = useState("");
-  const [pointModal, setPointModal] = useState<"create" | "edit" | null>(null);
-  const [pointForm, setPointForm] = useState<PointForm>(emptyPointForm);
-  const [editingPointId, setEditingPointId] = useState("");
-  const [selectedGovPointId, setSelectedGovPointId] = useState("");
+  const [sprayPrograms, setSprayPrograms] = useState<SprayProgram[]>([]);
+  const [programVersions, setProgramVersions] = useState<ProgramVersion[]>([]);
+  const [brushes, setBrushes] = useState<BrushOption[]>([]);
+  const [brushLoading, setBrushLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const stageRefs = useRef<Partial<Record<BodyView, HTMLDivElement | null>>>({});
   const dragRef = useRef<{
@@ -389,18 +414,16 @@ export function BodyPointMap() {
   const closeCreateModal = useCallback(() => {
     if (submitting) return;
     setCreateDraft(null);
+    setFormError("");
+    setCreateForm(emptyCreateForm());
+    setProgramVersions([]);
+    setBrushes([]);
   }, [submitting]);
 
   const closeGroupModal = useCallback(() => {
     if (submitting) return;
     setGroupModal(null);
     setEditingGroupId("");
-  }, [submitting]);
-
-  const closePointModal = useCallback(() => {
-    if (submitting) return;
-    setPointModal(null);
-    setEditingPointId("");
   }, [submitting]);
 
   const gridCols = canvas?.grid_cols ?? 48;
@@ -442,15 +465,6 @@ export function BodyPointMap() {
     [runs, vehicleModelId, factoryId, colorId],
   );
 
-  const boundPointIds = useMemo(() => {
-    if (!groupId) return new Set<string>();
-    return new Set(
-      groupPointRelations
-        .filter((item) => item.measurement_group_id === groupId)
-        .map((item) => item.measurement_point_id),
-    );
-  }, [groupPointRelations, groupId]);
-
   const visiblePointsForView = useCallback(
     (view: BodyView) => {
       const payload = viewsByKey.get(view);
@@ -464,10 +478,11 @@ export function BodyPointMap() {
     [viewsByKey, groupId, showUngrouped],
   );
 
-  const unplaced = useMemo(() => {
-    const points = activeViewData?.points ?? [];
+  const placeCandidates = useMemo(() => {
+    const view = createDraft?.body_view ?? activeView;
+    const points = viewsByKey.get(view)?.points ?? [];
     return points.filter((point) => point.layout_x == null || point.layout_y == null);
-  }, [activeViewData]);
+  }, [createDraft?.body_view, activeView, viewsByKey]);
 
   const loadRefs = useCallback(async () => {
     const [nextModels, nextParts, nextGroups, nextPoints, nextRelations, nextRuns] = await Promise.all([
@@ -522,10 +537,8 @@ export function BodyPointMap() {
     setSelectedPointId("");
     setDetail(null);
     setDetailLoading(false);
-    setPendingPlaceId("");
-    setSelectedGovPointId("");
-    setSideTab("detail");
-    setSideTabPinned(false);
+    setCreateDraft(null);
+    setFormError("");
     setVehicleModelId(nextModelId);
   }, []);
 
@@ -538,7 +551,6 @@ export function BodyPointMap() {
     async (pointId: string, scopedRunId?: string) => {
       const requestId = ++detailRequestIdRef.current;
       setSelectedPointId(pointId);
-      if (!sideTabPinned) setSideTab("detail");
       setDetailLoading(true);
       try {
         const params = new URLSearchParams();
@@ -557,7 +569,7 @@ export function BodyPointMap() {
         if (requestId === detailRequestIdRef.current) setDetailLoading(false);
       }
     },
-    [runId, sideTabPinned],
+    [runId],
   );
 
   useEffect(() => {
@@ -589,11 +601,74 @@ export function BodyPointMap() {
   }, [message]);
 
   useEffect(() => {
-    if (!selectedPointId && !sideTabPinned) {
-      const timer = window.setTimeout(() => setSideTab("detail"), 0);
-      return () => window.clearTimeout(timer);
+    if (!createDraft) return;
+    let cancelled = false;
+    setBrushLoading(true);
+    void request<SprayProgram[]>("/api/process/spray-programs")
+      .then((programs) => {
+        if (!cancelled) setSprayPrograms(programs);
+      })
+      .catch((err) => {
+        if (!cancelled) setFormError(err instanceof Error ? err.message : "加载喷涂程序失败");
+      })
+      .finally(() => {
+        if (!cancelled) setBrushLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [createDraft]);
+
+  useEffect(() => {
+    if (!createDraft || !createForm.program_id) {
+      setProgramVersions([]);
+      return;
     }
-  }, [selectedPointId, sideTabPinned]);
+    let cancelled = false;
+    setBrushLoading(true);
+    void request<ProgramVersion[]>(`/api/process/spray-programs/${createForm.program_id}/versions`)
+      .then((versions) => {
+        if (cancelled) return;
+        const filtered = versions.filter(
+          (item) =>
+            !vehicleModelId ||
+            !item.vehicle_model_ids?.length ||
+            item.vehicle_model_ids.includes(vehicleModelId),
+        );
+        setProgramVersions(filtered.length ? filtered : versions);
+      })
+      .catch((err) => {
+        if (!cancelled) setFormError(err instanceof Error ? err.message : "加载程序版本失败");
+      })
+      .finally(() => {
+        if (!cancelled) setBrushLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [createDraft, createForm.program_id, vehicleModelId]);
+
+  useEffect(() => {
+    if (!createDraft || !createForm.program_version_id) {
+      setBrushes([]);
+      return;
+    }
+    let cancelled = false;
+    setBrushLoading(true);
+    void request<BrushOption[]>(`/api/process/program-versions/${createForm.program_version_id}/brushes`)
+      .then((next) => {
+        if (!cancelled) setBrushes(next);
+      })
+      .catch((err) => {
+        if (!cancelled) setFormError(err instanceof Error ? err.message : "加载刷子失败");
+      })
+      .finally(() => {
+        if (!cancelled) setBrushLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [createDraft, createForm.program_version_id]);
 
   function clientToNormalized(view: BodyView, clientX: number, clientY: number) {
     const stage = stageRefs.current[view];
@@ -676,43 +751,114 @@ export function BodyPointMap() {
     }
   }
 
+  function validateCreateForm(): string | null {
+    if (!createForm.measurement_group_id) return "请选择测量编组";
+    if (createForm.mode === "place") {
+      if (!createForm.existing_point_id) return "请选择要放置的已有点位";
+      return null;
+    }
+    if (!createForm.part_id) return "请选择零件";
+    if (!createForm.code.trim()) return "请填写点位代码";
+    if (!createForm.name.trim()) return "请填写点位名称";
+    if (!createForm.quality_types.length) return "请至少选择一种质量类型";
+    return null;
+  }
+
+  async function ensureGroupBinding(pointId: string, measurementGroupId: string) {
+    const alreadyBound = groupPointRelations.some(
+      (item) => item.measurement_group_id === measurementGroupId && item.measurement_point_id === pointId,
+    );
+    if (alreadyBound) return;
+    await request("/api/master-data/measurement-group-points", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        measurement_group_id: measurementGroupId,
+        measurement_point_id: pointId,
+        sequence_no: 0,
+      }),
+    });
+  }
+
+  async function ensureBrushBinding(pointId: string, brushId: string) {
+    await request(`/api/process/brushes/${brushId}/contributions/${pointId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        overlap_ratio: 1,
+        contribution_weight: 1,
+        source: "BODY_MAP",
+        version: "1.0",
+        is_approved: false,
+      }),
+    });
+  }
+
   async function submitCreate(event: FormEvent) {
     event.preventDefault();
     if (!createDraft || !vehicleModelId) return;
+    const validation = validateCreateForm();
+    if (validation) {
+      setFormError(validation);
+      return;
+    }
     setSubmitting(true);
+    setFormError("");
     setError("");
     try {
-      const created = await request<MapPoint>("/api/quality/body-map/points", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vehicle_model_id: vehicleModelId,
-          body_view: createDraft.body_view,
-          layout_x: createDraft.layout_x,
-          layout_y: createDraft.layout_y,
-          grid_col: createDraft.grid_col,
-          grid_row: createDraft.grid_row,
-          code: createForm.code.trim(),
-          name: createForm.name.trim(),
-          part_id: createForm.part_id,
-          region: createForm.region.trim() || null,
-          quality_types: createForm.quality_types,
-          measurement_group_id: groupId || null,
-        }),
-      });
+      let pointId = "";
+      let pointCode = "";
+      if (createForm.mode === "place") {
+        pointId = createForm.existing_point_id;
+        const existing =
+          placeCandidates.find((item) => item.measurement_point_id === pointId) ??
+          filteredMasterPoints.find((item) => item.id === pointId);
+        pointCode = existing?.code ?? pointId;
+        await saveLayout(
+          createDraft.body_view,
+          pointId,
+          createDraft.layout_x,
+          createDraft.layout_y,
+          createDraft.grid_col,
+          createDraft.grid_row,
+        );
+        await ensureGroupBinding(pointId, createForm.measurement_group_id);
+        if (createForm.brush_id) {
+          await ensureBrushBinding(pointId, createForm.brush_id);
+        }
+        setMessage(`已放置测量点 ${pointCode}`);
+      } else {
+        const created = await request<MapPoint>("/api/quality/body-map/points", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            vehicle_model_id: vehicleModelId,
+            body_view: createDraft.body_view,
+            layout_x: createDraft.layout_x,
+            layout_y: createDraft.layout_y,
+            grid_col: createDraft.grid_col,
+            grid_row: createDraft.grid_row,
+            code: createForm.code.trim(),
+            name: createForm.name.trim(),
+            part_id: createForm.part_id,
+            region: createForm.region.trim() || null,
+            quality_types: createForm.quality_types,
+            measurement_group_id: createForm.measurement_group_id,
+            brush_id: createForm.brush_id || null,
+          }),
+        });
+        pointId = created.measurement_point_id;
+        pointCode = created.code;
+        setMessage(`已创建测量点 ${pointCode}`);
+      }
       setCreateDraft(null);
-      setCreateForm({
-        code: "",
-        name: "",
-        part_id: "",
-        region: "",
-        quality_types: ["THICKNESS", "COLOR_DIFFERENCE", "ORANGE_PEEL"],
-      });
-      setMessage(`已创建测量点 ${created.code}`);
+      setCreateForm(emptyCreateForm());
+      setProgramVersions([]);
+      setBrushes([]);
       await reloadAll();
-      await loadDetail(created.measurement_point_id);
+      await loadDetail(pointId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "创建测量点失败");
+      setFormError(err instanceof Error ? err.message : "保存点位失败");
     } finally {
       setSubmitting(false);
     }
@@ -721,6 +867,10 @@ export function BodyPointMap() {
   async function submitGroupForm(event: FormEvent) {
     event.preventDefault();
     if (!vehicleModelId) return;
+    if (!groupForm.code.trim() || !groupForm.name.trim()) {
+      setError("请填写编组代码和名称");
+      return;
+    }
     setSubmitting(true);
     setError("");
     try {
@@ -748,6 +898,7 @@ export function BodyPointMap() {
           body: JSON.stringify(body),
         });
         setGroupId(created.id);
+        setCreateForm((current) => ({ ...current, measurement_group_id: created.id }));
         setMessage(`已创建测量编组 ${created.code}`);
       }
       setGroupModal(null);
@@ -760,144 +911,10 @@ export function BodyPointMap() {
     }
   }
 
-  async function submitPointForm(event: FormEvent) {
-    event.preventDefault();
-    if (!vehicleModelId) return;
-    if (!pointForm.quality_types.length) {
-      setError("请至少选择一种质量类型");
-      return;
-    }
-    setSubmitting(true);
-    setError("");
-    try {
-      const body = {
-        code: pointForm.code.trim(),
-        name: pointForm.name.trim(),
-        vehicle_model_id: vehicleModelId,
-        part_id: pointForm.part_id,
-        region: pointForm.region.trim() || null,
-        quality_types: pointForm.quality_types,
-        point_type: "QUALITY",
-      };
-      let pointId = editingPointId;
-      if (pointModal === "edit" && editingPointId) {
-        await request(`/api/master-data/measurement-points/${editingPointId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        setMessage(`已更新测量点 ${body.code}`);
-      } else {
-        const created = await request<MeasurementPoint>("/api/master-data/measurement-points", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        pointId = created.id;
-        setMessage(`已创建测量点 ${created.code}`);
-        if (pointForm.bind_to_group && groupId) {
-          await request("/api/master-data/measurement-group-points", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              measurement_group_id: groupId,
-              measurement_point_id: created.id,
-              sequence_no: 0,
-            }),
-          });
-        }
-      }
-      setPointModal(null);
-      setEditingPointId("");
-      setSelectedGovPointId(pointId);
-      await reloadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "保存测量点失败");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function bindPointToGroup(pointId: string) {
-    if (!groupId) {
-      setMessage("请先选择测量编组");
-      return;
-    }
-    if (boundPointIds.has(pointId)) {
-      setMessage("该点已绑定到当前编组");
-      return;
-    }
-    setSubmitting(true);
-    setError("");
-    try {
-      await request("/api/master-data/measurement-group-points", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          measurement_group_id: groupId,
-          measurement_point_id: pointId,
-          sequence_no: 0,
-        }),
-      });
-      setMessage("已绑定到当前编组");
-      await reloadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "绑定失败");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   function openCreateGroup() {
     setGroupForm(emptyGroupForm());
     setEditingGroupId("");
     setGroupModal("create");
-  }
-
-  function openEditGroup() {
-    const group = filteredGroups.find((item) => item.id === groupId);
-    if (!group) {
-      setMessage("请先选择要编辑的编组");
-      return;
-    }
-    setGroupForm({
-      code: group.code,
-      name: group.name,
-      quality_type: group.quality_type,
-      expected_point_count: group.expected_point_count != null ? String(group.expected_point_count) : "",
-      remark: group.remark ?? "",
-    });
-    setEditingGroupId(group.id);
-    setGroupModal("edit");
-  }
-
-  function openCreatePoint() {
-    setPointForm({
-      ...emptyPointForm(),
-      part_id: parts[0]?.id || "",
-      bind_to_group: Boolean(groupId),
-    });
-    setEditingPointId("");
-    setPointModal("create");
-  }
-
-  function openEditPoint(pointId?: string) {
-    const id = pointId || selectedGovPointId;
-    const point = filteredMasterPoints.find((item) => item.id === id);
-    if (!point) {
-      setMessage("请先选择要编辑的测量点");
-      return;
-    }
-    setPointForm({
-      code: point.code,
-      name: point.name,
-      part_id: point.part_id,
-      region: point.region ?? "",
-      quality_types: point.quality_types?.length ? [...point.quality_types] : ["THICKNESS"],
-      bind_to_group: false,
-    });
-    setEditingPointId(point.id);
-    setPointModal("edit");
   }
 
   function focusPane(view: BodyView) {
@@ -909,21 +926,11 @@ export function BodyPointMap() {
     if (event.button !== 0) return;
     setActiveView(view);
     if ((event.target as HTMLElement).closest(".body-map-point")) return;
+    if (!editMode) return;
     const coords = clientToNormalized(view, event.clientX, event.clientY);
     if (!coords) return;
 
-    if (pendingPlaceId) {
-      const point = viewsByKey.get(view)?.points.find((item) => item.measurement_point_id === pendingPlaceId);
-      void saveLayout(view, pendingPlaceId, coords.x, coords.y, coords.col, coords.row)
-        .then(() => {
-          setMessage(`已放置 ${point?.code ?? "点位"}，可继续拖拽微调`);
-          setPendingPlaceId("");
-        })
-        .catch((err) => setError(err instanceof Error ? err.message : "落图失败"));
-      return;
-    }
-
-    if (!editMode) return;
+    setFormError("");
     setCreateDraft({
       body_view: view,
       layout_x: coords.x,
@@ -931,12 +938,16 @@ export function BodyPointMap() {
       grid_col: coords.col,
       grid_row: coords.row,
     });
-    setCreateForm((current) => ({
-      ...current,
-      code: current.code || `P-${coords.col}-${coords.row}`,
-      name: current.name || `点位 ${coords.col},${coords.row}`,
-      part_id: current.part_id || parts[0]?.id || "",
-    }));
+    setCreateForm({
+      ...emptyCreateForm(),
+      mode: "create",
+      measurement_group_id: groupId || "",
+      code: `P-${coords.col}-${coords.row}`,
+      name: `点位 ${coords.col},${coords.row}`,
+      part_id: parts[0]?.id || "",
+    });
+    setProgramVersions([]);
+    setBrushes([]);
   }
 
   function onPointPointerDown(view: BodyView, event: ReactPointerEvent<HTMLButtonElement>, point: MapPoint) {
@@ -987,15 +998,18 @@ export function BodyPointMap() {
     return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
   }
 
-  const selectedGroup = filteredGroups.find((item) => item.id === groupId) ?? null;
+  const selectedModel = models.find((item) => item.id === vehicleModelId) ?? null;
+  const activeViewPointCount = visiblePointsForView(activeView).length;
 
   return (
     <section className="panel body-map-panel">
       <div className="program-subheading">
         <div>
           <span className="eyebrow">车身点位图</span>
-          <h3>白车身网格与质量分布</h3>
-          <small>四视图 canvas + 测量编组/点位一站式治理（主数据测量体系已迁入此页）。</small>
+          <h3>四视图维护测量点</h3>
+          <small>
+            编辑布局是维护测量点、编组、零件与刷子关联的主入口。引导：进入编辑布局 → 点击空白网格 → 填写关联 → 保存。
+          </small>
         </div>
         <div className="row-actions">
           <button
@@ -1019,10 +1033,7 @@ export function BodyPointMap() {
           <button
             className={`button ${editMode ? "button-primary" : "button-secondary"}`}
             type="button"
-            onClick={() => {
-              setEditMode((value) => !value);
-              setPendingPlaceId("");
-            }}
+            onClick={() => setEditMode((value) => !value)}
           >
             <Pencil />
             {editMode ? "退出编辑" : "编辑布局"}
@@ -1049,9 +1060,9 @@ export function BodyPointMap() {
               <small>仅统计 VERIFIED 判定</small>
             </article>
             <article>
-              <span>未落图</span>
-              <strong>{unplaced.length}</strong>
-              <small>当前活动视图 · {viewLabel(activeView, viewLabels)}</small>
+              <span>活动视图点位数</span>
+              <strong>{activeViewPointCount}</strong>
+              <small>{viewLabel(activeView, viewLabels)}</small>
             </article>
             <article className="body-map-stat-scope">
               <span>质量范围</span>
@@ -1064,7 +1075,7 @@ export function BodyPointMap() {
         <div className="governance-scope-bar body-map-scope-bar">
           <div>
             <strong>工作范围</strong>
-            <span>四视图同屏；先选车型与编组 / 生产事件，再点击视图进行编辑落图。着色仅基于已核验质量数据。</span>
+            <span>四视图同屏；编辑布局后点击空白网格即可新建或放置点位。着色仅基于已核验质量数据。</span>
           </div>
           <div className="governance-scope-fields body-map-scope-fields">
             <label className="form-field">
@@ -1159,19 +1170,6 @@ export function BodyPointMap() {
 
         {error ? <div className="form-error">{error}</div> : null}
         {message ? <div className="form-success">{message}</div> : null}
-        {pendingPlaceId ? (
-          <div className="body-map-hint is-active">
-            <div className="body-map-hint-copy">
-              <MapPinned />
-              <span>
-                放置模式：在「{viewLabel(activeView, viewLabels)}」点击目标网格，将未落图点位放到该位置。
-              </span>
-            </div>
-            <button type="button" className="button button-secondary" onClick={() => setPendingPlaceId("")}>
-              取消
-            </button>
-          </div>
-        ) : null}
 
         {!vehicleModelId ? (
           <div className="program-empty large-empty body-map-empty">
@@ -1218,7 +1216,7 @@ export function BodyPointMap() {
                         ref={(node) => {
                           stageRefs.current[view] = node;
                         }}
-                        className={`body-map-stage ${editMode || pendingPlaceId ? "is-editing" : ""}`}
+                        className={`body-map-stage ${editMode ? "is-editing" : ""}`}
                         onPointerDown={(event) => onStagePointerDown(view, event)}
                       >
                         <Image
@@ -1265,187 +1263,14 @@ export function BodyPointMap() {
                 <div className="body-map-hint">
                   <Plus />
                   <span>
-                    编辑模式：先点击激活视图，再拖拽点位吸附到网格；点击空白格新建测量点。图上「移除」仅停用当前活动视图布局。
+                    编辑模式：点击空白网格打开关联弹窗（新建或放置已有点位）；拖拽已落图点位可微调。侧栏「从图移除」仅停用当前活动视图布局。
                   </span>
-                </div>
-              ) : null}
-
-              {(editMode || unplaced.length > 0) && unplaced.length ? (
-                <div className="body-map-unplaced">
-                  <div className="body-map-unplaced-head">
-                    <strong>未落图点位 · {viewLabel(activeView, viewLabels)}</strong>
-                    <span>{unplaced.length}</span>
-                  </div>
-                  <div className="body-map-unplaced-list">
-                    {unplaced.map((point) => (
-                      <button
-                        key={point.measurement_point_id}
-                        type="button"
-                        className={`button button-secondary ${pendingPlaceId === point.measurement_point_id ? "is-pending" : ""}`}
-                        onClick={() => {
-                          setEditMode(true);
-                          setPendingPlaceId(point.measurement_point_id);
-                          setMessage(`请在「${viewLabel(activeView, viewLabels)}」点击放置 ${point.code}`);
-                        }}
-                      >
-                        放置 {point.code}
-                      </button>
-                    ))}
-                  </div>
                 </div>
               ) : null}
             </div>
 
             <aside className="body-map-detail">
-              <div className="body-map-side-tabs" role="tablist" aria-label="侧栏">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={sideTab === "governance"}
-                  className={sideTab === "governance" ? "is-active" : ""}
-                  onClick={() => {
-                    setSideTab("governance");
-                    setSideTabPinned(true);
-                  }}
-                >
-                  <ListTree />
-                  测量治理
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={sideTab === "detail"}
-                  className={sideTab === "detail" ? "is-active" : ""}
-                  onClick={() => {
-                    setSideTab("detail");
-                    setSideTabPinned(true);
-                  }}
-                >
-                  <Layers />
-                  点位详情
-                </button>
-              </div>
-
-              {sideTab === "governance" ? (
-                <div className="body-map-governance">
-                  <div className="body-map-detail-head">
-                    <div>
-                      <span className="eyebrow">测量编组</span>
-                      <h4>{selectedGroup ? `${selectedGroup.code} · ${selectedGroup.name}` : "未选择编组"}</h4>
-                      <small>
-                        {selectedGroup
-                          ? `${qualityLabels[selectedGroup.quality_type] ?? selectedGroup.quality_type}${selectedGroup.expected_point_count != null ? ` · 预期 ${selectedGroup.expected_point_count} 点` : ""}`
-                          : "选择或新建编组后可绑定点位"}
-                      </small>
-                    </div>
-                    <div className="row-actions">
-                      <button className="button button-secondary" type="button" onClick={openCreateGroup}>
-                        <Plus />
-                        新建
-                      </button>
-                      <button
-                        className="button button-secondary"
-                        type="button"
-                        disabled={!groupId}
-                        onClick={openEditGroup}
-                      >
-                        <Pencil />
-                        编辑
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="body-map-gov-list">
-                    {filteredGroups.length ? (
-                      filteredGroups.map((group) => (
-                        <button
-                          key={group.id}
-                          type="button"
-                          className={`body-map-gov-item ${groupId === group.id ? "is-selected" : ""}`}
-                          onClick={() => setGroupId(group.id)}
-                        >
-                          <strong>
-                            {group.code} / {group.name}
-                          </strong>
-                          <small>
-                            {qualityLabels[group.quality_type] ?? group.quality_type}
-                            {group.expected_point_count != null ? ` · 预期 ${group.expected_point_count}` : ""}
-                          </small>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="program-empty">当前车型暂无测量编组</div>
-                    )}
-                  </div>
-
-                  <div className="program-subheading compact">
-                    <div>
-                      <span className="eyebrow">测量点</span>
-                      <h4>车型点位主数据</h4>
-                    </div>
-                    <div className="row-actions">
-                      <button className="button button-secondary" type="button" onClick={openCreatePoint}>
-                        <Plus />
-                        新建点
-                      </button>
-                      <button
-                        className="button button-secondary"
-                        type="button"
-                        disabled={!selectedGovPointId}
-                        onClick={() => openEditPoint()}
-                      >
-                        <Pencil />
-                        编辑
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="body-map-gov-list body-map-gov-points">
-                    {filteredMasterPoints.length ? (
-                      filteredMasterPoints.map((point) => {
-                        const bound = boundPointIds.has(point.id);
-                        return (
-                          <div
-                            key={point.id}
-                            className={`body-map-gov-item ${selectedGovPointId === point.id ? "is-selected" : ""}`}
-                          >
-                            <button
-                              type="button"
-                              className="body-map-gov-point-main"
-                              onClick={() => {
-                                setSelectedGovPointId(point.id);
-                                void loadDetail(point.id, runId || canvas?.production_run_id || undefined);
-                              }}
-                            >
-                              <strong>
-                                {point.code} / {point.name}
-                              </strong>
-                              <small>
-                                {(point.quality_types ?? [])
-                                  .map((item) => qualityLabels[item] ?? item)
-                                  .join(" · ") || "未设质量类型"}
-                                {point.region ? ` · ${point.region}` : ""}
-                              </small>
-                            </button>
-                            <button
-                              type="button"
-                              className={`button button-secondary body-map-bind-btn ${bound ? "is-bound" : ""}`}
-                              disabled={!groupId || bound || submitting}
-                              title={bound ? "已绑定" : "绑定到当前编组"}
-                              onClick={() => void bindPointToGroup(point.id)}
-                            >
-                              <Link2 />
-                              {bound ? "已绑" : "绑定"}
-                            </button>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="program-empty">当前车型暂无测量点</div>
-                    )}
-                  </div>
-                </div>
-              ) : !selectedPointId ? (
+              {!selectedPointId ? (
                 <div className="program-empty body-map-detail-empty">
                   <MapPinned />
                   点击图上点位查看质量与刷子参数。
@@ -1459,7 +1284,7 @@ export function BodyPointMap() {
                 <>
                   <div className="body-map-detail-head">
                     <div>
-                      <span className="eyebrow">测量点</span>
+                      <span className="eyebrow">点位详情</span>
                       <h4>
                         {detail.code} · {detail.name}
                       </h4>
@@ -1596,98 +1421,274 @@ export function BodyPointMap() {
 
       {createDraft ? (
         <ModalShell
-          eyebrow="新建测量点"
-          title="在网格上创建点位"
-          description={`将同步写入测量点主数据，并在${viewLabel(createDraft.body_view, viewLabels)}落图；若已选测量编组会自动绑定。`}
+          eyebrow="编辑布局"
+          title={createForm.mode === "place" ? "放置已有点位" : "新建并落图点位"}
+          description={`${viewLabel(createDraft.body_view, viewLabels)} · 格 (${createDraft.grid_col}, ${createDraft.grid_row})。填写编组与点位关联后保存。`}
           onClose={closeCreateModal}
           busy={submitting}
         >
           <form onSubmit={(event) => void submitCreate(event)}>
+            <div className="body-map-mode-toggle" role="group" aria-label="落点方式">
+              <button
+                type="button"
+                className={createForm.mode === "create" ? "is-active" : ""}
+                disabled={submitting}
+                onClick={() => {
+                  setFormError("");
+                  setCreateForm((current) => ({
+                    ...current,
+                    mode: "create",
+                    existing_point_id: "",
+                  }));
+                }}
+              >
+                新建点位
+              </button>
+              <button
+                type="button"
+                className={createForm.mode === "place" ? "is-active" : ""}
+                disabled={submitting}
+                onClick={() => {
+                  setFormError("");
+                  setCreateForm((current) => ({
+                    ...current,
+                    mode: "place",
+                  }));
+                }}
+              >
+                放置已有点位
+              </button>
+            </div>
+
+            {formError ? <div className="form-error">{formError}</div> : null}
+
             <div className="form-grid">
-              <label className="form-field">
-                <span>
-                  点位代码<b>*</b>
-                </span>
-                <input
-                  required
-                  value={createForm.code}
-                  onChange={(event) => setCreateForm({ ...createForm, code: event.target.value })}
-                />
-              </label>
-              <label className="form-field">
-                <span>
-                  点位名称<b>*</b>
-                </span>
-                <input
-                  required
-                  value={createForm.name}
-                  onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })}
-                />
-              </label>
-              <label className="form-field">
-                <span>
-                  零件<b>*</b>
-                </span>
-                <select
-                  required
-                  value={createForm.part_id}
-                  onChange={(event) => setCreateForm({ ...createForm, part_id: event.target.value })}
-                >
-                  <option value="">请选择</option>
-                  {parts.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.code} / {item.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="form-field">
-                <span>区域</span>
-                <input
-                  value={createForm.region}
-                  onChange={(event) => setCreateForm({ ...createForm, region: event.target.value })}
-                />
-              </label>
-              <div className="form-field form-field-wide">
-                <span>质量类型</span>
-                <div className="body-map-multiselect">
-                  {QUALITY_TYPE_OPTIONS.map((type) => (
-                    <label key={type} className="governance-chip">
-                      <input
-                        type="checkbox"
-                        checked={createForm.quality_types.includes(type)}
-                        onChange={() =>
-                          setCreateForm({
-                            ...createForm,
-                            quality_types: toggleQualityType(createForm.quality_types, type),
-                          })
-                        }
-                      />
-                      {qualityLabels[type]}
-                    </label>
-                  ))}
+              <div className="form-field">
+                <span>车型</span>
+                <div className="mono">
+                  {selectedModel
+                    ? `${selectedModel.code} / ${selectedModel.name}`
+                    : canvas
+                      ? `${canvas.vehicle_model_code} / ${canvas.vehicle_model_name}`
+                      : "—"}
                 </div>
               </div>
+
               <div className="form-field">
-                <span>落点</span>
-                <div className="mono">
-                  视图 {createDraft.body_view} · 格 ({createDraft.grid_col}, {createDraft.grid_row}) · (
-                  {createDraft.layout_x.toFixed(3)}, {createDraft.layout_y.toFixed(3)})
+                <span>
+                  测量编组<b>*</b>
+                </span>
+                <div className="row-actions body-map-inline-field">
+                  <select
+                    required
+                    value={createForm.measurement_group_id}
+                    disabled={submitting}
+                    onChange={(event) =>
+                      setCreateForm({ ...createForm, measurement_group_id: event.target.value })
+                    }
+                  >
+                    <option value="">请选择测量编组</option>
+                    {filteredGroups.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.code} / {item.name}
+                        {item.quality_type ? ` · ${qualityLabels[item.quality_type] ?? item.quality_type}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    disabled={submitting}
+                    onClick={openCreateGroup}
+                    title="快速新建测量编组"
+                  >
+                    <Plus />
+                    新建编组
+                  </button>
                 </div>
+              </div>
+
+              {createForm.mode === "place" ? (
+                <label className="form-field form-field-wide">
+                  <span>
+                    已有点位（当前视图未落图）<b>*</b>
+                  </span>
+                  <select
+                    required
+                    value={createForm.existing_point_id}
+                    disabled={submitting}
+                    onChange={(event) =>
+                      setCreateForm({ ...createForm, existing_point_id: event.target.value })
+                    }
+                  >
+                    <option value="">
+                      {placeCandidates.length ? "请选择点位" : "当前视图没有未落图点位"}
+                    </option>
+                    {placeCandidates.map((item) => (
+                      <option key={item.measurement_point_id} value={item.measurement_point_id}>
+                        {item.code} / {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <>
+                  <label className="form-field">
+                    <span>
+                      零件<b>*</b>
+                    </span>
+                    <select
+                      required
+                      value={createForm.part_id}
+                      disabled={submitting}
+                      onChange={(event) => setCreateForm({ ...createForm, part_id: event.target.value })}
+                    >
+                      <option value="">请选择零件</option>
+                      {parts.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.code} / {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="form-field">
+                    <span>
+                      点位代码<b>*</b>
+                    </span>
+                    <input
+                      required
+                      value={createForm.code}
+                      disabled={submitting}
+                      onChange={(event) => setCreateForm({ ...createForm, code: event.target.value })}
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span>
+                      点位名称<b>*</b>
+                    </span>
+                    <input
+                      required
+                      value={createForm.name}
+                      disabled={submitting}
+                      onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })}
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span>区域</span>
+                    <input
+                      value={createForm.region}
+                      disabled={submitting}
+                      onChange={(event) => setCreateForm({ ...createForm, region: event.target.value })}
+                    />
+                  </label>
+                  <div className="form-field form-field-wide">
+                    <span>
+                      质量类型<b>*</b>
+                    </span>
+                    <div className="body-map-multiselect">
+                      {QUALITY_TYPE_OPTIONS.map((type) => (
+                        <label key={type} className="governance-chip">
+                          <input
+                            type="checkbox"
+                            checked={createForm.quality_types.includes(type)}
+                            disabled={submitting}
+                            onChange={() =>
+                              setCreateForm({
+                                ...createForm,
+                                quality_types: toggleQualityType(createForm.quality_types, type),
+                              })
+                            }
+                          />
+                          {qualityLabels[type]}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div className="form-field form-field-wide">
+                <span>喷涂程序版本与刷子（可选）</span>
+                <div className="form-grid body-map-brush-pick">
+                  <label className="form-field">
+                    <span>喷涂程序</span>
+                    <select
+                      value={createForm.program_id}
+                      disabled={submitting || brushLoading}
+                      onChange={(event) =>
+                        setCreateForm({
+                          ...createForm,
+                          program_id: event.target.value,
+                          program_version_id: "",
+                          brush_id: "",
+                        })
+                      }
+                    >
+                      <option value="">不关联刷子</option>
+                      {sprayPrograms.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.program_code} / {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="form-field">
+                    <span>程序版本</span>
+                    <select
+                      value={createForm.program_version_id}
+                      disabled={submitting || brushLoading || !createForm.program_id}
+                      onChange={(event) =>
+                        setCreateForm({
+                          ...createForm,
+                          program_version_id: event.target.value,
+                          brush_id: "",
+                        })
+                      }
+                    >
+                      <option value="">请选择版本</option>
+                      {programVersions.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.version}
+                          {item.status ? ` · ${item.status}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="form-field">
+                    <span>刷子</span>
+                    <select
+                      value={createForm.brush_id}
+                      disabled={submitting || brushLoading || !createForm.program_version_id}
+                      onChange={(event) => setCreateForm({ ...createForm, brush_id: event.target.value })}
+                    >
+                      <option value="">请选择刷子</option>
+                      {brushes.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.brush_table_no} · {item.brush_no}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {brushLoading ? (
+                  <small className="muted">
+                    <LoaderCircle className="spin" /> 正在加载刷子选项…
+                  </small>
+                ) : null}
               </div>
             </div>
             <div className="modal-actions">
               <button
                 className="button button-secondary"
                 type="button"
-                onClick={() => setCreateDraft(null)}
+                onClick={closeCreateModal}
                 disabled={submitting}
               >
                 取消
               </button>
               <button className="button button-primary" type="submit" disabled={submitting}>
                 {submitting ? <LoaderCircle className="spin" /> : null}
-                创建并落图
+                {createForm.mode === "place" ? "放置并保存" : "创建并落图"}
               </button>
             </div>
           </form>
@@ -1764,116 +1765,6 @@ export function BodyPointMap() {
                 className="button button-secondary"
                 type="button"
                 onClick={closeGroupModal}
-                disabled={submitting}
-              >
-                取消
-              </button>
-              <button className="button button-primary" type="submit" disabled={submitting}>
-                {submitting ? <LoaderCircle className="spin" /> : null}
-                保存
-              </button>
-            </div>
-          </form>
-        </ModalShell>
-      ) : null}
-
-      {pointModal ? (
-        <ModalShell
-          eyebrow={pointModal === "create" ? "新建测量点" : "编辑测量点"}
-          title={pointModal === "create" ? "创建测量点主数据" : "更新测量点主数据"}
-          description="质量类型多选；创建时可选择绑定到当前测量编组。落图请在左侧四视图编辑模式中操作。"
-          onClose={closePointModal}
-          busy={submitting}
-        >
-          <form onSubmit={(event) => void submitPointForm(event)}>
-            <div className="form-grid">
-              <label className="form-field">
-                <span>
-                  点位代码<b>*</b>
-                </span>
-                <input
-                  required
-                  value={pointForm.code}
-                  onChange={(event) => setPointForm({ ...pointForm, code: event.target.value })}
-                />
-              </label>
-              <label className="form-field">
-                <span>
-                  点位名称<b>*</b>
-                </span>
-                <input
-                  required
-                  value={pointForm.name}
-                  onChange={(event) => setPointForm({ ...pointForm, name: event.target.value })}
-                />
-              </label>
-              <label className="form-field">
-                <span>
-                  零件<b>*</b>
-                </span>
-                <select
-                  required
-                  value={pointForm.part_id}
-                  onChange={(event) => setPointForm({ ...pointForm, part_id: event.target.value })}
-                >
-                  <option value="">请选择</option>
-                  {parts.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.code} / {item.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="form-field">
-                <span>区域</span>
-                <input
-                  value={pointForm.region}
-                  onChange={(event) => setPointForm({ ...pointForm, region: event.target.value })}
-                />
-              </label>
-              <div className="form-field form-field-wide">
-                <span>
-                  质量类型<b>*</b>
-                </span>
-                <div className="body-map-multiselect">
-                  {QUALITY_TYPE_OPTIONS.map((type) => (
-                    <label key={type} className="governance-chip">
-                      <input
-                        type="checkbox"
-                        checked={pointForm.quality_types.includes(type)}
-                        onChange={() =>
-                          setPointForm({
-                            ...pointForm,
-                            quality_types: toggleQualityType(pointForm.quality_types, type),
-                          })
-                        }
-                      />
-                      {qualityLabels[type]}
-                    </label>
-                  ))}
-                </div>
-              </div>
-              {pointModal === "create" ? (
-                <label className="governance-chip form-field-wide">
-                  <input
-                    type="checkbox"
-                    checked={pointForm.bind_to_group && Boolean(groupId)}
-                    disabled={!groupId}
-                    onChange={(event) =>
-                      setPointForm({ ...pointForm, bind_to_group: event.target.checked })
-                    }
-                  />
-                  {groupId
-                    ? `创建后绑定到编组 ${selectedGroup?.code ?? groupId}`
-                    : "创建后绑定到当前编组（请先选择编组）"}
-                </label>
-              ) : null}
-            </div>
-            <div className="modal-actions">
-              <button
-                className="button button-secondary"
-                type="button"
-                onClick={closePointModal}
                 disabled={submitting}
               >
                 取消

@@ -7980,6 +7980,55 @@ a.calibration-alert-row:hover {
   font-weight: 650;
 }
 
+.body-map-mode-toggle {
+  display: inline-flex;
+  gap: 0;
+  margin-bottom: 14px;
+}
+
+.body-map-mode-toggle button {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 13px;
+  min-width: 108px;
+  padding: 8px 14px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.body-map-mode-toggle button:first-child {
+  border-radius: 7px 0 0 7px;
+}
+
+.body-map-mode-toggle button:last-child {
+  border-left: 0;
+  border-radius: 0 7px 7px 0;
+}
+
+.body-map-mode-toggle button.is-active {
+  background: color-mix(in srgb, var(--teal) 14%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--teal) 42%, var(--line));
+  color: var(--teal-700);
+  font-weight: 650;
+}
+
+.body-map-inline-field {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.body-map-inline-field select {
+  flex: 1;
+  min-width: 0;
+}
+
+.body-map-brush-pick {
+  margin-top: 6px;
+}
+
 .body-map-check-chip {
   align-self: end;
   margin-bottom: 1px;
