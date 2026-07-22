@@ -9,17 +9,17 @@ from app.core.config import settings
 # MySQL 连接超时：过短会导致鉴权中间件偶发 503，前端误踢登录。
 # 启动探针仍依赖 /health/live（不查库），不必为启动把超时压到 3s。
 _connect_args: dict = {}
+_engine_kwargs: dict = {
+    "pool_pre_ping": True,
+    "pool_recycle": 1800,
+    "connect_args": _connect_args,
+}
 if settings.database_url.startswith(("mysql", "mariadb")):
     _connect_args["connect_timeout"] = 8
+    _engine_kwargs["pool_size"] = 5
+    _engine_kwargs["max_overflow"] = 10
 
-engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    pool_recycle=1800,
-    pool_size=5,
-    max_overflow=10,
-    connect_args=_connect_args,
-)
+engine = create_engine(settings.database_url, **_engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 FORBIDDEN_MYSQL_RUNTIME_PREFIXES = (

@@ -70,12 +70,13 @@ from app.services.modeling import (
     create_model_acceptance_policy,
     create_model_applicability_scope,
     diagnose_prediction,
+    enqueue_model_training,
+    expire_stale_training_models,
     model_governance_check,
     model_drift_report,
     predict_with_model,
     recommend_with_model,
     record_model_acceptance,
-    train_model,
     update_model_applicability_scope,
     update_model_acceptance_policy_status,
     update_model_ood_policy,
@@ -87,6 +88,7 @@ router = APIRouter(prefix="/ai/models", tags=["ai-modeling"])
 
 @router.get("", response_model=list[ModelVersionRead])
 def list_models(db: Session = Depends(get_db)) -> list[ModelVersion]:
+    expire_stale_training_models(db)
     return list(db.scalars(select(ModelVersion).order_by(ModelVersion.created_at.desc())))
 
 
@@ -316,12 +318,12 @@ def list_feature_snapshots(db: Session = Depends(get_db)) -> list[dict]:
     ]
 
 
-@router.post("/train", response_model=ModelVersionRead, status_code=status.HTTP_201_CREATED)
+@router.post("/train", response_model=ModelVersionRead, status_code=status.HTTP_202_ACCEPTED)
 def train_baseline_model(
     payload: ModelTrainingRequest, db: Session = Depends(get_db)
 ) -> ModelVersion:
     check_fk(db, DatasetSnapshot, payload.dataset_snapshot_id, label="数据集快照")
-    return train_model(db, payload)
+    return enqueue_model_training(db, payload)
 
 
 @router.get("/acceptance-policies")

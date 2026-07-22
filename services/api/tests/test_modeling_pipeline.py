@@ -1,9 +1,10 @@
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.routes.modeling import (
@@ -21,6 +22,7 @@ from app.api.routes.modeling import (
     list_model_artifacts,
     list_ood_policies,
     list_validation_folds,
+    list_models,
     predict_from_snapshot,
     recommend_from_snapshot,
     train_baseline_model,
@@ -48,6 +50,7 @@ from app.models.domain import (
     ControlledTrial,
     Factory,
     MeasurementPoint,
+    ModelVersion,
     ParameterConstraintSource,
     ParameterDefinition,
     Part,
@@ -81,6 +84,7 @@ from app.schemas.modeling import (
     ModelTrainingRequest,
 )
 from app.services.dashboard_snapshot import dashboard_snapshot
+from app.services.modeling import expire_stale_training_models, train_model
 
 
 def test_train_predict_and_diagnose_real_point_snapshots() -> None:
@@ -222,7 +226,8 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert dataset.validation_group_count == 2
         assert dataset.leakage_check["passed"] is True
         assert dataset.leakage_check["group_overlap_count"] == 0
-        trained = train_baseline_model(
+        trained = train_model(
+            db,
             ModelTrainingRequest(
                 model_code="DOI-BASELINE",
                 version="1.0",
@@ -231,7 +236,6 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
                 min_samples=5,
                 ridge_lambda=0.01,
             ),
-            db,
         )
         assert trained.model_type in {"RIDGE_REGRESSION", "ELASTIC_NET_REGRESSION"}
         assert trained.status == "DRAFT"
@@ -635,7 +639,8 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert dashboard["diagnosis"]["point_code"] == "P1"
         assert dashboard["diagnosis"]["factors"]
 
-        next_model = train_baseline_model(
+        next_model = train_model(
+            db,
             ModelTrainingRequest(
                 model_code="DOI-BASELINE",
                 version="2.0",
@@ -644,7 +649,6 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
                 min_samples=5,
                 ridge_lambda=0.01,
             ),
-            db,
         )
         assert trained.status == "ACTIVE"
         assert next_model.status == "DRAFT"
@@ -800,3 +804,199 @@ def test_ineffective_controlled_trial_records_rollback_snapshot() -> None:
         assert list_rollback_executions(db)[0]["id"] == rollback["id"]
         db.expire_all()
         assert db.get(ControlledTrial, trial.id).status == "ROLLED_BACK"
+
+
+def _seed_doi_dataset(db: Session) -> tuple[str, object]:
+    """Minimal DOI dataset for async training tests. Returns (dataset_id, factory unused)."""
+    now = datetime.now(UTC)
+    factory = Factory(code="AF1", name="异步工厂")
+    model = VehicleModel(code="AM1", name="异步车型")
+    color = Color(code="AC1", name="异步颜色", color_type="BASECOAT")
+    part = Part(code="AROOF", name="车顶")
+    db.add_all([factory, model, color, part])
+    db.flush()
+    point = MeasurementPoint(
+        code="AP1",
+        name="点位",
+        vehicle_model_id=model.id,
+        part_id=part.id,
+        quality_types=["ORANGE_PEEL"],
+    )
+    db.add(point)
+    db.flush()
+    for index in range(8):
+        run = ProductionRun(
+            run_no=f"ARUN-{index}",
+            factory_id=factory.id,
+            vehicle_model_id=model.id,
+            color_id=color.id,
+            started_at=now + timedelta(minutes=index),
+        )
+        db.add(run)
+        db.flush()
+        x1 = float(index)
+        x2 = float((index * 2) % 5)
+        target = 10.0 + 2.0 * x1 - 0.5 * x2
+        db.add(
+            PointFeatureSnapshot(
+                production_run_id=run.id,
+                measurement_point_id=point.id,
+                feature_set_version=CURRENT_FEATURE_SET_VERSION,
+                feature_values={"clearcoat_2.spray_flow": x1, "clearcoat_2.outer_air": x2},
+                completeness_score=1.0,
+                generated_at=now,
+            )
+        )
+        measurement = QualityMeasurement(
+            data_no=f"AQM-{index}",
+            production_run_id=run.id,
+            measurement_point_id=point.id,
+            quality_type="ORANGE_PEEL",
+            measured_at=now + timedelta(minutes=index),
+            reliability_status="VERIFIED",
+        )
+        db.add(measurement)
+        db.flush()
+        db.add(
+            QualityMetricValue(
+                measurement_id=measurement.id,
+                metric_code="doi",
+                metric_name="DOI",
+                raw_value=target,
+            )
+        )
+    db.commit()
+    dataset = build_dataset(
+        DatasetBuildRequest(
+            dataset_code="ASYNC-DOI",
+            version="1.0",
+            target_metric="doi",
+            holdout_ratio=0.25,
+        ),
+        db,
+    )
+    return dataset.id, factory
+
+
+def test_enqueue_model_training_returns_training_then_draft(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    create_transient_test_schema(engine)
+    TestSession = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    monkeypatch.setattr("app.db.session.SessionLocal", TestSession)
+
+    with Session(engine, expire_on_commit=False) as db:
+        dataset_id, _factory = _seed_doi_dataset(db)
+        payload = ModelTrainingRequest(
+            model_code="ASYNC-DOI",
+            version="1.0",
+            target_metric="doi",
+            dataset_snapshot_id=dataset_id,
+            min_samples=5,
+            ridge_lambda=0.01,
+        )
+        enqueued = train_baseline_model(payload, db)
+        assert enqueued.status == "TRAINING"
+        assert enqueued.model_type == "PENDING_TRAINING"
+        assert enqueued.evaluation_metrics.get("phase") == "TRAINING"
+
+        finished: ModelVersion | None = None
+        for _ in range(100):
+            time.sleep(0.05)
+            db.expire_all()
+            finished = db.get(ModelVersion, enqueued.id)
+            assert finished is not None
+            if finished.status != "TRAINING":
+                break
+        assert finished is not None
+        assert finished.status == "DRAFT"
+        assert finished.training_sample_count >= 5
+        assert "validation_rmse" in finished.evaluation_metrics
+
+
+def test_expire_stale_training_models_marks_failed() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    create_transient_test_schema(engine)
+    with Session(engine, expire_on_commit=False) as db:
+        dataset_id, _factory = _seed_doi_dataset(db)
+        stale = ModelVersion(
+            model_code="STALE-TRAIN",
+            version="1.0",
+            model_type="PENDING_TRAINING",
+            target_metric="doi",
+            feature_set_version=CURRENT_FEATURE_SET_VERSION,
+            artifact_uri="mysql://model-version/STALE-TRAIN/1.0",
+            dataset_snapshot_id=dataset_id,
+            model_payload={},
+            evaluation_metrics={"phase": "TRAINING"},
+            training_sample_count=0,
+            status="TRAINING",
+        )
+        db.add(stale)
+        db.flush()
+        stale.created_at = datetime.now(UTC) - timedelta(minutes=45)
+        db.commit()
+
+        expired = expire_stale_training_models(db, max_age_minutes=30)
+        assert expired == 1
+        db.refresh(stale)
+        assert stale.status == "FAILED"
+        assert "超时" in stale.evaluation_metrics["error"]
+
+        rows = list_models(db)
+        assert any(row.id == stale.id and row.status == "FAILED" for row in rows)
+
+
+def test_cannot_activate_training_or_failed_model() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    create_transient_test_schema(engine)
+    with Session(engine, expire_on_commit=False) as db:
+        dataset_id, _factory = _seed_doi_dataset(db)
+        training = ModelVersion(
+            model_code="GATE-TRAIN",
+            version="1.0",
+            model_type="PENDING_TRAINING",
+            target_metric="doi",
+            feature_set_version=CURRENT_FEATURE_SET_VERSION,
+            artifact_uri="mysql://model-version/GATE-TRAIN/1.0",
+            dataset_snapshot_id=dataset_id,
+            model_payload={},
+            evaluation_metrics={"phase": "TRAINING"},
+            training_sample_count=0,
+            status="TRAINING",
+        )
+        db.add(training)
+        db.commit()
+        with pytest.raises(HTTPException) as error:
+            change_model_status(training.id, ModelStatusUpdate(status="ACTIVE"), db)
+        assert error.value.status_code == 409
+
+        failed = ModelVersion(
+            model_code="GATE-FAIL",
+            version="1.0",
+            model_type="PENDING_TRAINING",
+            target_metric="doi",
+            feature_set_version=CURRENT_FEATURE_SET_VERSION,
+            artifact_uri="mysql://model-version/GATE-FAIL/1.0",
+            dataset_snapshot_id=dataset_id,
+            model_payload={},
+            evaluation_metrics={"phase": "FAILED", "error": "forced"},
+            training_sample_count=0,
+            status="FAILED",
+        )
+        db.add(failed)
+        db.commit()
+        with pytest.raises(HTTPException) as error:
+            change_model_status(failed.id, ModelStatusUpdate(status="ACTIVE"), db)
+        assert error.value.status_code == 409

@@ -72,7 +72,9 @@ type ModelEvaluationMetrics = {
   validation_rmse?: number;
   multi_axis_validation?: MultiAxisValidation;
   model_selection?: ModelSelection;
-  [key: string]: number | boolean | MultiAxisValidation | ModelSelection | undefined | null;
+  phase?: string;
+  error?: string;
+  [key: string]: number | boolean | string | MultiAxisValidation | ModelSelection | undefined | null;
 };
 type DatasetSnapshot = {
   id: string;
@@ -467,6 +469,7 @@ function statusLabel(status: string): string {
   return {
     ACTIVE: "生效",
     DRAFT: "草稿",
+    TRAINING: "训练中",
     RETIRED: "已退役",
     STABLE: "稳定",
     WATCH: "观察",
@@ -513,6 +516,7 @@ function modelTypeLabel(modelType: string): string {
     RIDGE_REGRESSION: "稳健线性模型",
     RIDGE_REGRESSION_BASELINE: "稳健线性基础模型",
     ELASTIC_NET_REGRESSION: "关键参数筛选模型",
+    PENDING_TRAINING: "训练排队中",
   }[modelType] ?? modelType;
 }
 
@@ -903,10 +907,11 @@ export function AiWorkbench({
 
   async function trainModel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
     setSubmitting("train");
     try {
-      await request<ModelVersion>("/api/ai/models/train", {
+      const enqueued = await request<ModelVersion>("/api/ai/models/train", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -924,9 +929,34 @@ export function AiWorkbench({
           min_feature_completeness: Number(data.get("min_feature_completeness")),
         }),
       });
-      showSuccess("候选模型比较和训练已完成，最优结果已保存为待验收版本");
-      event.currentTarget.reset();
+      setSelectedModelId(enqueued.id);
+      let trained = enqueued;
+      if (trained.status === "TRAINING") {
+        const deadline = Date.now() + 10 * 60 * 1000;
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => window.setTimeout(resolve, 2000));
+          const rows = await request<ModelVersion[]>("/api/ai/models");
+          const current = rows.find((row) => row.id === enqueued.id);
+          if (!current) {
+            throw new Error("训练任务已消失，请刷新后重试");
+          }
+          trained = current;
+          if (trained.status !== "TRAINING") break;
+        }
+      }
       await reload();
+      if (trained.status === "TRAINING") {
+        throw new Error("训练仍在进行中，请稍后在模型列表查看结果");
+      }
+      if (trained.status === "FAILED") {
+        const detail =
+          typeof trained.evaluation_metrics.error === "string" && trained.evaluation_metrics.error.trim()
+            ? trained.evaluation_metrics.error
+            : "模型训练失败";
+        throw new Error(detail);
+      }
+      showSuccess("候选模型比较和训练已完成，最优结果已保存为待验收版本");
+      form.reset();
     } catch (operationError) {
       showError(operationError);
     } finally {
@@ -1697,8 +1727,10 @@ export function AiWorkbench({
               </article>
               {filteredModels.map((model) => (
                 <article className={`ai-model-card ${model.id === selectedModelId ? "selected" : ""}`} key={model.id} onClick={() => setSelectedModelId(model.id)}>
-                  <div><span className={`record-status ${model.status === "ACTIVE" ? "status-on" : "status-off"}`}>{statusLabel(model.status)}</span><strong>{model.model_code}:{model.version}</strong><small>{modelTypeLabel(model.model_type)}</small></div>
+                  <div><span className={`record-status ${model.status === "ACTIVE" ? "status-on" : model.status === "FAILED" ? "status-risk" : model.status === "TRAINING" ? "status-warning" : "status-off"}`}>{statusLabel(model.status)}</span><strong>{model.model_code}:{model.version}</strong><small>{modelTypeLabel(model.model_type)}</small></div>
                   <div className="ai-model-metrics"><span>目标 <b>{metricName(model.target_metric)}</b></span><span>训练样本 <b>{model.training_sample_count}</b></span><span>验证拟合度 <b>{formatNumber(model.evaluation_metrics.validation_r2)}</b></span><span>验证平均误差 <b>{formatNumber(model.evaluation_metrics.validation_rmse)}</b></span></div>
+                  {model.status === "TRAINING" ? <small>后台训练进行中，请稍候…</small> : null}
+                  {model.status === "FAILED" && typeof model.evaluation_metrics.error === "string" ? <small className="ai-hint">{model.evaluation_metrics.error}</small> : null}
                   {model.evaluation_metrics.model_selection ? <small>系统比较 {model.evaluation_metrics.model_selection.candidate_count} 组候选方案，独立验证数据未参与选型</small> : null}
                 </article>
               ))}
@@ -1730,11 +1762,11 @@ export function AiWorkbench({
                   {selectedArtifact ? <div className="ai-artifact-row"><span><b>{selectedArtifact.artifact_type}</b><small>{selectedArtifact.storage_backend} · {statusLabel(selectedArtifact.status)} · {shortHash(selectedArtifact.payload_hash)}</small></span><code>{selectedArtifact.artifact_uri}</code></div> : <p className="ai-hint">当前模型暂无校验码登记（不影响启用）。</p>}
                 </div>
                 <div className="ai-two-fields">
-                  <button className="button button-primary" disabled={!selectedModel || selectedModel.status === "ACTIVE" || submitting === "model-status-ACTIVE"} onClick={() => void changeModelStatus("ACTIVE")}>{submitting === "model-status-ACTIVE" ? <LoaderCircle className="spin" /> : <Check />} 启用模型</button>
-                  <button className="button button-secondary danger-button" disabled={!selectedModel || selectedModel.status === "RETIRED" || submitting === "model-status-RETIRED"} onClick={() => void changeModelStatus("RETIRED")}>停用模型</button>
+                  <button className="button button-primary" disabled={!selectedModel || selectedModel.status === "ACTIVE" || selectedModel.status === "TRAINING" || selectedModel.status === "FAILED" || submitting === "model-status-ACTIVE"} onClick={() => void changeModelStatus("ACTIVE")}>{submitting === "model-status-ACTIVE" ? <LoaderCircle className="spin" /> : <Check />} 启用模型</button>
+                  <button className="button button-secondary danger-button" disabled={!selectedModel || selectedModel.status === "RETIRED" || selectedModel.status === "TRAINING" || selectedModel.status === "FAILED" || submitting === "model-status-RETIRED"} onClick={() => void changeModelStatus("RETIRED")}>停用模型</button>
                 </div>
                 <div className="ai-two-fields">
-                  <button className="button button-secondary" disabled={!selectedModel || selectedModel.status === "DRAFT" || submitting === "model-status-DRAFT"} onClick={() => void changeModelStatus("DRAFT")}>转为草稿</button>
+                  <button className="button button-secondary" disabled={!selectedModel || selectedModel.status === "DRAFT" || selectedModel.status === "TRAINING" || selectedModel.status === "FAILED" || submitting === "model-status-DRAFT"} onClick={() => void changeModelStatus("DRAFT")}>转为草稿</button>
                   <button className="button button-secondary" disabled={!selectedModel || submitting === "acceptance-ACCEPTED"} onClick={() => void decideModelAcceptance("ACCEPTED")}><ShieldCheck /> 记录验收（可选）</button>
                 </div>
                 <div className="ai-governance-block">

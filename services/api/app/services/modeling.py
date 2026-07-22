@@ -1,11 +1,17 @@
 import hashlib
 import json
-from datetime import UTC, datetime
+import logging
+import threading
+from datetime import UTC, datetime, timedelta
 from math import ceil, sqrt
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
+
+STALE_TRAINING_MINUTES = 30
 
 from app.domain.scope_policy import (
     ScopeViolation,
@@ -1390,18 +1396,65 @@ def build_dataset_snapshot(db: Session, payload) -> DatasetSnapshot:
     return dataset
 
 
-def train_model(db: Session, payload) -> ModelVersion:
+def _training_payload_dict(payload) -> dict:
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump()
+    return dict(payload)
+
+
+def _http_detail(exc: BaseException) -> str:
+    if isinstance(exc, HTTPException):
+        detail = exc.detail
+        if isinstance(detail, str):
+            return detail
+        return str(detail)
+    return str(exc) or "训练失败"
+
+
+def expire_stale_training_models(
+    db: Session, *, max_age_minutes: int = STALE_TRAINING_MINUTES
+) -> int:
+    """Mark orphaned TRAINING rows as FAILED (e.g. after pod restart)."""
+    cutoff = datetime.now(UTC) - timedelta(minutes=max_age_minutes)
+    stale = list(
+        db.scalars(
+            select(ModelVersion).where(
+                ModelVersion.status == "TRAINING",
+                ModelVersion.created_at < cutoff,
+            )
+        )
+    )
+    if not stale:
+        return 0
+    for model in stale:
+        metrics = dict(model.evaluation_metrics or {})
+        metrics["phase"] = "FAILED"
+        metrics["error"] = "训练超时未完成（可能因服务重启中断），请重新发起训练"
+        model.status = "FAILED"
+        model.evaluation_metrics = metrics
+    db.commit()
+    return len(stale)
+
+
+def _validate_training_request(db: Session, payload) -> tuple[DatasetSnapshot, list, list]:
     try:
         require_scope_safe_model(payload.target_metric, payload.feature_set_version, [])
     except ScopeViolation as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if db.scalar(
+    existing = db.scalar(
         select(ModelVersion).where(
             ModelVersion.model_code == payload.model_code,
             ModelVersion.version == payload.version,
         )
-    ):
-        raise HTTPException(status_code=409, detail="模型代码与版本已存在")
+    )
+    if existing:
+        if existing.status == "FAILED":
+            db.delete(existing)
+            db.flush()
+        elif existing.status == "TRAINING":
+            raise HTTPException(status_code=409, detail="相同代码与版本的训练任务进行中")
+        else:
+            raise HTTPException(status_code=409, detail="模型代码与版本已存在")
 
     dataset = db.get(DatasetSnapshot, payload.dataset_snapshot_id)
     if not dataset:
@@ -1413,6 +1466,62 @@ def train_model(db: Session, payload) -> ModelVersion:
         raise HTTPException(status_code=422, detail="模型目标或特征版本与数据集不一致")
     if not dataset.leakage_check.get("passed"):
         raise HTTPException(status_code=422, detail="数据集未通过分组与时间泄漏检查")
+    members = list(
+        db.scalars(
+            select(DatasetSplitMember).where(
+                DatasetSplitMember.dataset_snapshot_id == dataset.id,
+            )
+        )
+    )
+    train_members = [member for member in members if member.split == "TRAIN"]
+    validation_members = [member for member in members if member.split == "VALIDATION"]
+    if len(train_members) < payload.min_samples:
+        raise HTTPException(
+            status_code=422,
+            detail=f"有效训练样本不足：需要 {payload.min_samples}，当前 {len(train_members)}",
+        )
+    if not validation_members:
+        raise HTTPException(status_code=422, detail="数据集没有独立验证样本")
+    return dataset, train_members, validation_members
+
+
+def _create_training_placeholder(db: Session, payload, dataset: DatasetSnapshot) -> ModelVersion:
+    model = ModelVersion(
+        model_code=payload.model_code,
+        version=payload.version,
+        model_type="PENDING_TRAINING",
+        target_metric=payload.target_metric,
+        feature_set_version=payload.feature_set_version,
+        artifact_uri=f"mysql://model-version/{payload.model_code}/{payload.version}",
+        dataset_snapshot_id=dataset.id,
+        model_payload={},
+        evaluation_metrics={"phase": "TRAINING"},
+        training_sample_count=0,
+        trained_at=None,
+        status="TRAINING",
+    )
+    db.add(model)
+    db.flush()
+    return model
+
+
+def complete_model_training(db: Session, model_id: str, payload_dict: dict) -> ModelVersion:
+    """Finish a TRAINING placeholder (same session). Used by worker and sync train_model."""
+    from types import SimpleNamespace
+
+    payload = SimpleNamespace(**payload_dict)
+    model = db.get(ModelVersion, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="训练任务不存在")
+    if model.status not in {"TRAINING", "FAILED"}:
+        # Idempotent: already finished
+        if model.status == "DRAFT":
+            return model
+        raise HTTPException(status_code=409, detail=f"模型状态为 {model.status}，无法继续训练")
+
+    dataset = db.get(DatasetSnapshot, payload.dataset_snapshot_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="训练数据集快照不存在")
     members = list(
         db.scalars(
             select(DatasetSplitMember).where(
@@ -1465,29 +1574,21 @@ def train_model(db: Session, payload) -> ModelVersion:
         "validation_group_count": dataset.validation_group_count,
         "leakage_check_passed": dataset.leakage_check.get("passed", False),
         "model_selection": model_selection,
+        "phase": "COMPLETED",
     }
     now = datetime.now(UTC)
-    model = ModelVersion(
-        model_code=payload.model_code,
-        version=payload.version,
-        model_type=(
-            "ELASTIC_NET_REGRESSION"
-            if fitted["model_family"] == "ELASTIC_NET"
-            else "RIDGE_REGRESSION"
-        ),
-        target_metric=payload.target_metric,
-        feature_set_version=payload.feature_set_version,
-        artifact_uri=f"mysql://model-version/{payload.model_code}/{payload.version}",
-        dataset_snapshot_id=dataset.id,
-        model_payload={
-            key: value for key, value in fitted.items() if key != "evaluation_metrics"
-        },
-        evaluation_metrics=evaluation_metrics,
-        training_sample_count=len(train_samples),
-        trained_at=now,
-        status="DRAFT",
+    model.model_type = (
+        "ELASTIC_NET_REGRESSION"
+        if fitted["model_family"] == "ELASTIC_NET"
+        else "RIDGE_REGRESSION"
     )
-    db.add(model)
+    model.model_payload = {
+        key: value for key, value in fitted.items() if key != "evaluation_metrics"
+    }
+    model.evaluation_metrics = evaluation_metrics
+    model.training_sample_count = len(train_samples)
+    model.trained_at = now
+    model.status = "DRAFT"
     db.flush()
     multi_axis_validation = _create_validation_folds(
         db,
@@ -1512,6 +1613,63 @@ def train_model(db: Session, payload) -> ModelVersion:
     db.commit()
     db.refresh(model)
     return model
+
+
+def _mark_training_failed(db: Session, model_id: str, error: str) -> None:
+    model = db.get(ModelVersion, model_id)
+    if not model or model.status != "TRAINING":
+        return
+    metrics = dict(model.evaluation_metrics or {})
+    metrics["phase"] = "FAILED"
+    metrics["error"] = error
+    model.status = "FAILED"
+    model.evaluation_metrics = metrics
+    db.commit()
+
+
+def _run_training_job(model_id: str, payload_dict: dict) -> None:
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        try:
+            complete_model_training(db, model_id, payload_dict)
+        except Exception as exc:
+            logger.exception("async model training failed", extra={"model_version_id": model_id})
+            try:
+                db.rollback()
+                _mark_training_failed(db, model_id, _http_detail(exc))
+            except Exception:
+                logger.exception(
+                    "failed to mark training job as FAILED",
+                    extra={"model_version_id": model_id},
+                )
+
+
+def enqueue_model_training(db: Session, payload) -> ModelVersion:
+    """Validate quickly, persist TRAINING row, train in a background thread."""
+    expire_stale_training_models(db)
+    dataset, _train_members, _validation_members = _validate_training_request(db, payload)
+    model = _create_training_placeholder(db, payload, dataset)
+    db.commit()
+    db.refresh(model)
+    payload_dict = _training_payload_dict(payload)
+    thread = threading.Thread(
+        target=_run_training_job,
+        args=(model.id, payload_dict),
+        name=f"model-train-{model.id}",
+        daemon=True,
+    )
+    thread.start()
+    return model
+
+
+def train_model(db: Session, payload) -> ModelVersion:
+    """Synchronous train for tests/internal callers. Blocks until DRAFT."""
+    expire_stale_training_models(db)
+    dataset, _train_members, _validation_members = _validate_training_request(db, payload)
+    model = _create_training_placeholder(db, payload, dataset)
+    db.flush()
+    return complete_model_training(db, model.id, _training_payload_dict(payload))
 
 
 def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelAcceptanceDecision:
@@ -1768,6 +1926,11 @@ def model_drift_report(db: Session, model: ModelVersion, recent_limit: int = 100
 
 
 def update_model_status(db: Session, model: ModelVersion, next_status: str) -> ModelVersion:
+    if model.status in {"TRAINING", "FAILED"}:
+        raise HTTPException(
+            status_code=409,
+            detail="训练未完成或已失败的模型不能变更状态，请等待完成或重新训练",
+        )
     if next_status == "ACTIVE":
         _ensure_model_scope(model)
         if not model.dataset_snapshot_id:
