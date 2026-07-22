@@ -404,49 +404,50 @@ export function QualityWorkspace({
     setLoading(true);
     setError("");
     try {
-      const [nextSummary, nextMeasurements, nextStandards, nextDefinitions, nextRuns, nextGroups, nextGroupPoints, nextPoints, nextModels, nextColors, nextParts, nextFactories, nextInstruments, nextMethods, nextCalibrations, nextReferences, nextProfiles] =
-        await Promise.all([
-          request<Summary>("/api/quality/summary"),
-          request<Measurement[]>("/api/quality/measurements?limit=500"),
-          request<Standard[]>("/api/quality/standards"),
-          request<MetricDefinition[]>("/api/quality/metric-definitions"),
-          request<ProductionRun[]>("/api/process/production-runs?limit=500"),
-          request<Resource[]>("/api/master-data/measurement-groups"),
-          request<MeasurementGroupPointRelation[]>("/api/master-data/measurement-group-points"),
-          request<Resource[]>("/api/master-data/measurement-points"),
-          request<Resource[]>("/api/master-data/vehicle-models"),
-          request<Resource[]>("/api/master-data/colors"),
-          request<Resource[]>("/api/master-data/parts"),
-          request<Resource[]>("/api/master-data/factories"),
-          request<Instrument[]>("/api/quality/governance/instruments"),
-          request<Method[]>("/api/quality/governance/methods"),
-          request<Calibration[]>("/api/quality/governance/calibrations"),
-          request<ReferenceStandard[]>("/api/quality/governance/references"),
-          request<ImportProfile[]>("/api/quality/governance/import-profiles"),
-        ]);
-      setSummary(nextSummary);
-      setMeasurements(nextMeasurements);
-      setStandards(nextStandards);
-      setDefinitions(nextDefinitions);
-      setRuns(nextRuns);
-      setGroups(nextGroups);
-      setGroupPoints(nextGroupPoints);
-      setPoints(nextPoints);
-      setVehicleModels(nextModels);
-      setColors(nextColors);
-      setParts(nextParts);
-      setFactories(nextFactories);
-      setInstruments(nextInstruments);
-      setMethods(nextMethods);
-      setCalibrations(nextCalibrations);
-      setReferences(nextReferences);
-      setImportProfiles(nextProfiles);
+      // Shared refs used by upload / measurement forms.
+      const needRefs = tab === "upload" || tab === "measurements" || tab === "standards";
+      const needMeasurements = tab === "measurements" || tab === "upload";
+      const needStandards = tab === "standards" || tab === "measurements";
+      const needGovernance = tab === "upload";
+
+      const tasks: Array<Promise<unknown>> = [
+        request<Summary>("/api/quality/summary").then(setSummary),
+        request<MetricDefinition[]>("/api/quality/metric-definitions").then(setDefinitions),
+      ];
+      if (needRefs) {
+        tasks.push(
+          request<ProductionRun[]>("/api/process/production-runs?limit=500").then(setRuns),
+          request<Resource[]>("/api/master-data/measurement-groups").then(setGroups),
+          request<MeasurementGroupPointRelation[]>("/api/master-data/measurement-group-points").then(setGroupPoints),
+          request<Resource[]>("/api/master-data/measurement-points").then(setPoints),
+          request<Resource[]>("/api/master-data/vehicle-models").then(setVehicleModels),
+          request<Resource[]>("/api/master-data/colors").then(setColors),
+          request<Resource[]>("/api/master-data/parts").then(setParts),
+          request<Resource[]>("/api/master-data/factories").then(setFactories),
+        );
+      }
+      if (needMeasurements) {
+        tasks.push(request<Measurement[]>("/api/quality/measurements?limit=500").then(setMeasurements));
+      }
+      if (needStandards) {
+        tasks.push(request<Standard[]>("/api/quality/standards").then(setStandards));
+      }
+      if (needGovernance) {
+        tasks.push(
+          request<Instrument[]>("/api/quality/governance/instruments").then(setInstruments),
+          request<Method[]>("/api/quality/governance/methods").then(setMethods),
+          request<Calibration[]>("/api/quality/governance/calibrations").then(setCalibrations),
+          request<ReferenceStandard[]>("/api/quality/governance/references").then(setReferences),
+          request<ImportProfile[]>("/api/quality/governance/import-profiles").then(setImportProfiles),
+        );
+      }
+      await Promise.all(tasks);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "质量数据加载失败");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tab]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reload(), 0);

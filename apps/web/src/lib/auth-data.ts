@@ -68,6 +68,26 @@ export function isUpstreamTimeout(error: unknown): boolean {
   return error instanceof DOMException && error.name === "TimeoutError";
 }
 
+/** Soften layout SSR auth: reuse a successful /auth/me result briefly across navigations. */
+const ACTOR_CACHE_TTL_MS = 30_000;
+const actorByToken = new Map<string, { expiresAt: number; actor: CurrentActor }>();
+
+function readCachedActor(token: string | undefined): CurrentActor | null {
+  if (!token) return null;
+  const hit = actorByToken.get(token);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    actorByToken.delete(token);
+    return null;
+  }
+  return hit.actor;
+}
+
+function writeCachedActor(token: string | undefined, actor: CurrentActor): void {
+  if (!token || !actor.userId) return;
+  actorByToken.set(token, { expiresAt: Date.now() + ACTOR_CACHE_TTL_MS, actor });
+}
+
 export async function requireApiActor(request: Request, permission?: string): Promise<ApiActor> {
   if (!authEnabledEnv) {
     return {
@@ -214,6 +234,10 @@ export async function getCurrentActor(): Promise<CurrentActor> {
   if (!token) {
     return fallbackActor;
   }
+  const cachedActor = readCachedActor(token);
+  if (cachedActor) {
+    return cachedActor;
+  }
   try {
     const response = await fetch(`${apiUrl}/auth/me`, {
       cache: "no-store",
@@ -222,6 +246,7 @@ export async function getCurrentActor(): Promise<CurrentActor> {
       signal: AbortSignal.timeout(5000),
     });
     if (response.status === 401) {
+      actorByToken.delete(token);
       // 会话明确失效；cookie 清理由 /api/auth/me 或登出接口负责
       return fallbackActor;
     }
@@ -237,7 +262,9 @@ export async function getCurrentActor(): Promise<CurrentActor> {
           `后端认证接口暂时不可用（HTTP ${response.status}）`,
       };
     }
-    return mapActor(await parseApiActor(response));
+    const actor = mapActor(await parseApiActor(response));
+    writeCachedActor(token, actor);
+    return actor;
   } catch (error) {
     const message = error instanceof Error ? error.message : "无法连接后端认证接口";
     return {

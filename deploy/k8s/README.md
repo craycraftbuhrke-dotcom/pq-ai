@@ -11,7 +11,10 @@ Platform prerequisites in the target namespace:
    upload sessions, and override manifests across restarts and frontend replicas.
    Built-in models and body-map images remain immutable inside each release image;
    no init container copies release files into the shared volume.
-4. An Ingress/Gateway maintained by the platform team. Route browser traffic to
+4. `deploy/k8s/redis.yaml` (`pq-ai-redis`) for shared actor/summary cache across
+   backend replicas. Backend sets `REDIS_URL=redis://pq-ai-redis:6379/0`; if Redis
+   is unavailable the API falls back to in-process TTL cache automatically.
+5. An Ingress/Gateway maintained by the platform team. Route browser traffic to
    `pq-ai-frontend:80`; the frontend BFF accesses `pq-ai-backend:8000` internally.
 
 ### 小米云 / 平台发布：三维数模上传必备配置

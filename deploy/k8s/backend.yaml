@@ -54,6 +54,12 @@ spec:
               value: "false"
             - name: SEED_ON_STARTUP
               value: "false"
+            - name: REDIS_URL
+              value: redis://pq-ai-redis:6379/0
+            - name: ACTOR_CACHE_TTL_SECONDS
+              value: "60"
+            - name: SUMMARY_CACHE_TTL_SECONDS
+              value: "30"
             - name: API_CORS_ORIGINS
               valueFrom:
                 configMapKeyRef:

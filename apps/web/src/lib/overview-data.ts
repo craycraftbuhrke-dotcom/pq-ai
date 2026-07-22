@@ -2,14 +2,20 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { CLIENT_CACHE_TTL, getCachedValue, invalidateClientCache, setCachedValue } from "@/lib/client-cache";
+
 async function fetchJson<T>(path: string, fallback: T): Promise<T> {
+  const cacheKey = `overview:${path}`;
+  const cached = getCachedValue<T>(cacheKey);
+  if (cached !== undefined) return cached;
   try {
     const resp = await fetch(path, {
       cache: "no-store",
       signal: AbortSignal.timeout(3000),
     });
     if (!resp.ok) return fallback;
-    return (await resp.json()) as T;
+    const value = (await resp.json()) as T;
+    return setCachedValue(cacheKey, value, CLIENT_CACHE_TTL.overview);
   } catch {
     return fallback;
   }
@@ -202,11 +208,15 @@ export function useOverviewData(): OverviewData {
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
 
-  const refresh = useCallback(() => setTick((n) => n + 1), []);
+  const refresh = useCallback(() => {
+    invalidateClientCache("overview:");
+    setTick((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
+      setLoading(true);
       const [d, p, a] = await Promise.all([
         fetchJson("/api/dashboard", EMPTY_DASHBOARD as unknown as Record<string, unknown>).then((d) =>
           mapDashboard(d as Record<string, unknown>),

@@ -13,6 +13,10 @@
 | `API_AUTH_ENABLED` | 是 | 否 | 是否启用会话/API Key 鉴权；部署必须为 `true`。 |
 | `ALLOW_SELF_REGISTRATION` | 否 | 否 | 是否允许公开自助注册；生产默认且建议保持 `false`，账号由管理员创建。 |
 | `SEED_ON_STARTUP` | 否 | 否 | 仅受控目录初始化任务可设为 `true`；部署默认且必须保持 `false`。 |
+| `REDIS_URL` | 否 | 否 | Redis 连接串，例如 `redis://pq-ai-redis:6379/0`。用于多副本共享会话身份与摘要缓存；未配置时回退进程内 TTL 缓存。 |
+| `ACTOR_CACHE_TTL_SECONDS` | 否 | 否 | 会话 Actor（角色/权限）缓存秒数，默认 `60`。 |
+| `SUMMARY_CACHE_TTL_SECONDS` | 否 | 否 | 质量摘要等热点只读接口缓存秒数，默认 `30`。 |
+| `CACHE_DEFAULT_TTL_SECONDS` | 否 | 否 | 通用缓存默认 TTL，默认 `45`。 |
 | `API_HOST` | 是 | 否 | Uvicorn 监听地址，由容器运行时注入。 |
 | `API_PORT` | 是 | 否 | Uvicorn 监听端口，由容器运行时注入。 |
 
@@ -58,6 +62,9 @@
 | `MYSQL_PASSWORD` | 是 | 是 | MySQL 应用用户密码。 |
 | `MYSQL_ROOT_PASSWORD` | 是 | 是 | MySQL root 密码。 |
 | `MYSQL_PORT` | 是 | 否 | 本机映射 MySQL 端口。 |
+| `REDIS_IMAGE` | 否 | 否 | Redis Docker 镜像，默认 `redis:7.4-alpine`。 |
+| `REDIS_PORT` | 否 | 否 | 本机映射 Redis 端口，默认 `6379`。 |
+| `REDIS_URL` | 否 | 否 | Compose 内 API 访问 Redis 的地址，默认 `redis://redis:6379/0`。 |
 | `API_PUBLISH_PORT` | 是 | 否 | 本机映射 API 端口。 |
 | `FRONTEND_HOSTNAME` | 是 | 否 | Compose 注入到前端容器的 `LISTEN_HOST`。 |
 | `FRONTEND_PORT` | 是 | 否 | Compose 注入到前端容器的 `PORT`。 |

@@ -9,6 +9,7 @@ from secrets import token_urlsafe
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.cache import cache_delete, cache_get, cache_set
 from app.core.config import settings
 from app.models.domain import ApiKey, AppUser, Permission, Role, RolePermission, UserRole, UserSession
 
@@ -198,10 +199,38 @@ def authenticate_api_key(db: Session, raw_key: str) -> Actor | None:
     return actor
 
 
+def _actor_cache_key(token_hash: str) -> str:
+    return f"actor:session:{token_hash}"
+
+
+def _actor_from_cache(payload: dict) -> Actor:
+    return Actor(
+        user_id=payload.get("user_id"),
+        username=str(payload["username"]),
+        display_name=str(payload["display_name"]),
+        roles=tuple(payload.get("roles") or ()),
+        permissions=frozenset(payload.get("permissions") or ()),
+    )
+
+
+def _actor_to_cache(actor: Actor) -> dict:
+    return {
+        "user_id": actor.user_id,
+        "username": actor.username,
+        "display_name": actor.display_name,
+        "roles": list(actor.roles),
+        "permissions": sorted(actor.permissions),
+    }
+
+
 def authenticate_session_token(db: Session, raw_token: str) -> Actor | None:
     if not raw_token:
         return None
     token_hash = hash_session_token(raw_token)
+    cached = cache_get(_actor_cache_key(token_hash))
+    if isinstance(cached, dict) and cached.get("username"):
+        return _actor_from_cache(cached)
+
     session = db.scalar(
         select(UserSession).where(
             UserSession.token_hash == token_hash,
@@ -222,7 +251,9 @@ def authenticate_session_token(db: Session, raw_token: str) -> Actor | None:
     if last_seen is None or (now - last_seen) >= timedelta(minutes=5):
         session.last_seen_at = now
         db.commit()
-    return _actor_for_user(db, user)
+    actor = _actor_for_user(db, user)
+    cache_set(_actor_cache_key(token_hash), _actor_to_cache(actor), settings.actor_cache_ttl_seconds)
+    return actor
 
 
 def login_with_password(
@@ -269,9 +300,10 @@ def login_with_password(
 def revoke_session_token(db: Session, raw_token: str) -> bool:
     if not raw_token:
         return False
+    token_hash = hash_session_token(raw_token)
     session = db.scalar(
         select(UserSession).where(
-            UserSession.token_hash == hash_session_token(raw_token),
+            UserSession.token_hash == token_hash,
             UserSession.revoked_at.is_(None),
         )
     )
@@ -279,6 +311,7 @@ def revoke_session_token(db: Session, raw_token: str) -> bool:
         return False
     session.revoked_at = datetime.now(UTC)
     db.commit()
+    cache_delete(_actor_cache_key(token_hash))
     return True
 
 

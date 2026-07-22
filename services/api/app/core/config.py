@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     file_import_max_bytes: int = 50 * 1024 * 1024
     # 生产启动不得隐式写库。仅在受控初始化任务中显式开启目录预置。
     seed_on_startup: bool = False
+    # Optional Redis for multi-replica actor/summary cache. Empty = in-process TTL only.
+    redis_url: str | None = None
+    cache_default_ttl_seconds: int = 45
+    actor_cache_ttl_seconds: int = 60
+    summary_cache_ttl_seconds: int = 30
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 

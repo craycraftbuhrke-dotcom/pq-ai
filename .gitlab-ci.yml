@@ -116,6 +116,8 @@ backend:deploy:
   needs:
     - backend:image
   script:
+    - kubectl -n "${K8S_NAMESPACE}" apply -f deploy/k8s/redis.yaml
+    - kubectl -n "${K8S_NAMESPACE}" rollout status deployment/pq-ai-redis --timeout=5m
     - sed "s|pq-ai-backend:replace-by-ci|${BACKEND_IMAGE}|g" deploy/k8s/backend.yaml > /tmp/pq-ai-backend.yaml
     - kubectl -n "${K8S_NAMESPACE}" apply -f /tmp/pq-ai-backend.yaml
     - kubectl -n "${K8S_NAMESPACE}" rollout status deployment/pq-ai-backend --timeout=10m

@@ -39,6 +39,8 @@ from app.models.domain import (
     QualityStandard,
     VehicleModel,
 )
+from app.core.cache import cache_delete, cache_get, cache_set
+from app.core.config import settings
 from app.services.catalog_seed import seed_quality_metric_catalog
 from app.services.measurement_reliability import measurement_is_eligible
 from app.schemas.quality import (
@@ -58,7 +60,16 @@ from app.services.measurement_reliability import (
     VERIFIED,
     refresh_measurement_reliability,
 )
-from app.services.quality_evaluation import evaluate_quality_measurement
+from app.services.quality_evaluation import (
+    evaluate_quality_measurement,
+    evaluate_quality_measurement_with_context,
+)
+
+QUALITY_SUMMARY_CACHE_KEY = "quality:summary:v2"
+
+
+def _invalidate_quality_summary_cache() -> None:
+    cache_delete(QUALITY_SUMMARY_CACHE_KEY)
 
 router = APIRouter(prefix="/quality", tags=["quality-data"])
 
@@ -256,76 +267,136 @@ def _measurement_result(db: Session, measurement: QualityMeasurement) -> dict:
 
 @router.get("/summary", response_model=QualitySummary)
 def quality_summary(db: Session = Depends(get_db)) -> dict:
-    measurements = list(
-        db.scalars(
-            select(QualityMeasurement).where(
-                QualityMeasurement.quality_type.in_(APPROVED_QUALITY_TYPES)
-            )
-        )
+    cached = cache_get(QUALITY_SUMMARY_CACHE_KEY)
+    if isinstance(cached, dict):
+        return cached
+
+    type_filter = QualityMeasurement.quality_type.in_(APPROVED_QUALITY_TYPES)
+    measurements_count = int(
+        db.scalar(select(func.count()).select_from(QualityMeasurement).where(type_filter)) or 0
     )
-    judgements = []
-    metric_value_count = 0
-    for measurement in measurements:
-        refresh_measurement_reliability(db, measurement)
-        metrics = list(
-            db.scalars(
-                select(QualityMetricValue).where(
-                    QualityMetricValue.measurement_id == measurement.id
-                )
-            )
-        )
-        metrics = [
-            metric
-            for metric in metrics
-            if (measurement.quality_type, metric.metric_code) in APPROVED_METRIC_KEYS
-        ]
-        metric_value_count += len(metrics)
-        judgements.append(evaluate_quality_measurement(db, measurement, metrics)["judgement"])
     by_type = {
-        quality_type: count
+        quality_type: int(count)
         for quality_type, count in db.execute(
             select(QualityMeasurement.quality_type, func.count())
-            .where(QualityMeasurement.quality_type.in_(APPROVED_QUALITY_TYPES))
+            .where(type_filter)
             .group_by(QualityMeasurement.quality_type)
         )
     }
-    return {
-        "measurements": len(measurements),
-        "valid_measurements": int(
-            db.scalar(
-                select(func.count())
-                .select_from(QualityMeasurement)
+    reliability_counts = {
+        status: int(count)
+        for status, count in db.execute(
+            select(QualityMeasurement.reliability_status, func.count())
+            .where(type_filter)
+            .group_by(QualityMeasurement.reliability_status)
+        )
+    }
+    valid_measurements = int(
+        db.scalar(
+            select(func.count())
+            .select_from(QualityMeasurement)
+            .where(
+                type_filter,
+                QualityMeasurement.is_valid.is_(True),
+                QualityMeasurement.reliability_status == VERIFIED,
+            )
+        )
+        or 0
+    )
+    metric_value_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(QualityMetricValue)
+            .join(
+                QualityMeasurement,
+                QualityMeasurement.id == QualityMetricValue.measurement_id,
+            )
+            .where(type_filter)
+        )
+        or 0
+    )
+    standards_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(QualityStandard)
+            .where(QualityStandard.quality_type.in_(APPROVED_QUALITY_TYPES))
+        )
+        or 0
+    )
+
+    # Judgement counts only for verified+valid rows; batch-load to avoid N+1.
+    verified_rows = list(
+        db.scalars(
+            select(QualityMeasurement).where(
+                type_filter,
+                QualityMeasurement.is_valid.is_(True),
+                QualityMeasurement.reliability_status == VERIFIED,
+            )
+        )
+    )
+    pass_count = fail_count = no_standard_count = 0
+    if verified_rows:
+        measurement_ids = [row.id for row in verified_rows]
+        run_ids = {row.production_run_id for row in verified_rows}
+        point_ids = {row.measurement_point_id for row in verified_rows}
+        metrics_by_measurement: dict[str, list[QualityMetricValue]] = defaultdict(list)
+        for metric in db.scalars(
+            select(QualityMetricValue).where(QualityMetricValue.measurement_id.in_(measurement_ids))
+        ):
+            metrics_by_measurement[metric.measurement_id].append(metric)
+        runs = {
+            run.id: run
+            for run in db.scalars(select(ProductionRun).where(ProductionRun.id.in_(run_ids)))
+        }
+        points = {
+            point.id: point
+            for point in db.scalars(select(MeasurementPoint).where(MeasurementPoint.id.in_(point_ids)))
+        }
+        standards = list(
+            db.scalars(
+                select(QualityStandard)
                 .where(
-                    QualityMeasurement.quality_type.in_(APPROVED_QUALITY_TYPES),
-                    QualityMeasurement.is_valid.is_(True),
-                    QualityMeasurement.reliability_status == VERIFIED,
+                    QualityStandard.is_active.is_(True),
+                    QualityStandard.quality_type.in_(APPROVED_QUALITY_TYPES),
                 )
+                .order_by(QualityStandard.updated_at.desc())
             )
-            or 0
-        ),
+        )
+        for measurement in verified_rows:
+            metrics = [
+                metric
+                for metric in metrics_by_measurement.get(measurement.id, [])
+                if (measurement.quality_type, metric.metric_code) in APPROVED_METRIC_KEYS
+            ]
+            judgement = evaluate_quality_measurement_with_context(
+                measurement,
+                metrics,
+                runs.get(measurement.production_run_id),
+                points.get(measurement.measurement_point_id),
+                standards,
+            )["judgement"]
+            if judgement == "PASS":
+                pass_count += 1
+            elif judgement == "FAIL":
+                fail_count += 1
+            elif judgement == "NO_STANDARD":
+                no_standard_count += 1
+
+    payload = {
+        "measurements": measurements_count,
+        "valid_measurements": valid_measurements,
         "metric_values": metric_value_count,
-        "standards": int(
-            db.scalar(
-                select(func.count())
-                .select_from(QualityStandard)
-                .where(QualityStandard.quality_type.in_(APPROVED_QUALITY_TYPES))
-            )
-            or 0
-        ),
-        "pass_measurements": judgements.count("PASS"),
-        "fail_measurements": judgements.count("FAIL"),
-        "no_standard_measurements": judgements.count("NO_STANDARD"),
-        "verified_measurements": sum(
-            measurement.reliability_status == VERIFIED for measurement in measurements
-        ),
-        "unverified_measurements": sum(
-            measurement.reliability_status == UNVERIFIED for measurement in measurements
-        ),
-        "failed_reliability_measurements": sum(
-            measurement.reliability_status == FAILED for measurement in measurements
-        ),
+        "standards": standards_count,
+        "pass_measurements": pass_count,
+        "fail_measurements": fail_count,
+        "no_standard_measurements": no_standard_count,
+        "verified_measurements": reliability_counts.get(VERIFIED, 0),
+        "unverified_measurements": reliability_counts.get(UNVERIFIED, 0),
+        "failed_reliability_measurements": reliability_counts.get(FAILED, 0),
         "measurements_by_type": by_type,
     }
+    cache_set(QUALITY_SUMMARY_CACHE_KEY, payload, settings.summary_cache_ttl_seconds)
+    return payload
 
 
 def _ratio(numerator: int, denominator: int) -> float:
@@ -646,6 +717,7 @@ def create_quality_measurement(
     db.flush()
     refresh_measurement_reliability(db, measurement)
     db.commit()
+    _invalidate_quality_summary_cache()
     return _measurement_result(db, measurement)
 
 
@@ -753,6 +825,7 @@ def update_quality_measurement(
     db.flush()
     refresh_measurement_reliability(db, measurement)
     db.commit()
+    _invalidate_quality_summary_cache()
     db.refresh(measurement)
     return _measurement_result(db, measurement)
 
@@ -795,6 +868,7 @@ def create_quality_standard(
     standard = QualityStandard(**payload.model_dump())
     db.add(standard)
     db.commit()
+    _invalidate_quality_summary_cache()
     db.refresh(standard)
     return standard
 
@@ -842,6 +916,7 @@ def update_quality_standard(
     for field, value in changes.items():
         setattr(standard, field, value)
     db.commit()
+    _invalidate_quality_summary_cache()
     db.refresh(standard)
     return standard
 

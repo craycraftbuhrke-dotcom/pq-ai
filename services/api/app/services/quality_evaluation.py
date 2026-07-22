@@ -57,10 +57,51 @@ def resolve_quality_standard(
     return candidates[0] if candidates else None
 
 
-def evaluate_quality_measurement(
-    db: Session,
+def pick_quality_standard(
+    standards: list[QualityStandard],
+    quality_type: str,
+    metric_code: str,
+    production_run: ProductionRun,
+    point: MeasurementPoint,
+) -> QualityStandard | None:
+    candidates = [
+        standard
+        for standard in standards
+        if standard.is_active
+        and standard.quality_type == quality_type
+        and standard.metric_code == metric_code
+        and (
+            standard.vehicle_model_id is None
+            or standard.vehicle_model_id == production_run.vehicle_model_id
+        )
+        and (standard.color_id is None or standard.color_id == production_run.color_id)
+        and (standard.part_id is None or standard.part_id == point.part_id)
+        and (
+            standard.measurement_point_id is None
+            or standard.measurement_point_id == point.id
+        )
+    ]
+    candidates.sort(
+        key=lambda standard: sum(
+            value is not None
+            for value in (
+                standard.vehicle_model_id,
+                standard.color_id,
+                standard.part_id,
+                standard.measurement_point_id,
+            )
+        ),
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+def evaluate_quality_measurement_with_context(
     measurement: QualityMeasurement,
     metrics: list[QualityMetricValue],
+    production_run: ProductionRun | None,
+    point: MeasurementPoint | None,
+    standards: list[QualityStandard],
 ) -> dict:
     if not measurement.is_valid:
         return {"judgement": "INVALID", "violations": ["质量数据被标记为无效"], "metric_results": []}
@@ -71,9 +112,6 @@ def evaluate_quality_measurement(
             "violations": issues,
             "metric_results": [],
         }
-
-    production_run = db.get(ProductionRun, measurement.production_run_id)
-    point = db.get(MeasurementPoint, measurement.measurement_point_id)
     if not production_run or not point:
         return {
             "judgement": "NO_STANDARD",
@@ -85,8 +123,12 @@ def evaluate_quality_measurement(
     metric_results: list[dict] = []
     matched_count = 0
     for metric in metrics:
-        standard = resolve_quality_standard(
-            db, measurement.quality_type, metric.metric_code, production_run, point
+        standard = pick_quality_standard(
+            standards,
+            measurement.quality_type,
+            metric.metric_code,
+            production_run,
+            point,
         )
         value = metric.corrected_value if metric.corrected_value is not None else metric.raw_value
         if not standard:
@@ -131,3 +173,39 @@ def evaluate_quality_measurement(
         "violations": violations,
         "metric_results": metric_results,
     }
+
+
+def evaluate_quality_measurement(
+    db: Session,
+    measurement: QualityMeasurement,
+    metrics: list[QualityMetricValue],
+) -> dict:
+    if not measurement.is_valid:
+        return {"judgement": "INVALID", "violations": ["质量数据被标记为无效"], "metric_results": []}
+    if measurement.reliability_status != "VERIFIED":
+        issues = measurement.reliability_issues or ["测量可靠性尚未验证"]
+        return {
+            "judgement": "INVALID",
+            "violations": issues,
+            "metric_results": [],
+        }
+
+    production_run = db.get(ProductionRun, measurement.production_run_id)
+    point = db.get(MeasurementPoint, measurement.measurement_point_id)
+    standards = list(
+        db.scalars(
+            select(QualityStandard)
+            .where(
+                QualityStandard.is_active.is_(True),
+                QualityStandard.quality_type == measurement.quality_type,
+            )
+            .order_by(QualityStandard.updated_at.desc())
+        )
+    )
+    return evaluate_quality_measurement_with_context(
+        measurement,
+        metrics,
+        production_run,
+        point,
+        standards,
+    )

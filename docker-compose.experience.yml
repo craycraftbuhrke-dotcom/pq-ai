@@ -1,4 +1,13 @@
 services:
+  redis:
+    image: ${REDIS_IMAGE:-redis:7.4-alpine}
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   api:
     image: ${API_IMAGE:?API_IMAGE is required}
     build:
@@ -8,12 +17,18 @@ services:
       APP_NAME: ${APP_NAME:?APP_NAME is required}
       API_PREFIX: ${API_PREFIX:?API_PREFIX is required}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      ACTOR_CACHE_TTL_SECONDS: ${ACTOR_CACHE_TTL_SECONDS:-60}
+      SUMMARY_CACHE_TTL_SECONDS: ${SUMMARY_CACHE_TTL_SECONDS:-30}
       API_CORS_ORIGINS: ${API_CORS_ORIGINS:?API_CORS_ORIGINS is required}
       API_AUTH_ENABLED: "true"
       API_HOST: ${API_HOST:?API_HOST is required}
       API_PORT: ${API_PORT:?API_PORT is required}
     ports:
       - "${API_PUBLISH_PORT:?API_PUBLISH_PORT is required}:${API_PORT:?API_PORT is required}"
+    depends_on:
+      redis:
+        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

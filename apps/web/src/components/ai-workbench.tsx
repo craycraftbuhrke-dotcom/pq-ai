@@ -630,60 +630,88 @@ export function AiWorkbench({
     setLoading(true);
     setError("");
     try {
-      const [nextModels, nextDatasets, nextTrainingUploads, nextAcceptanceDecisions, nextAcceptancePolicies, nextApplicabilityScopes, nextOodPolicies, nextValidationFolds, nextModelArtifacts, nextSnapshots, nextPredictions, nextDiagnoses, nextRecommendations, nextControlledTrials, nextRollbacks, nextMeasurements, nextMetrics] =
-        await Promise.all([
-          request<ModelVersion[]>("/api/ai/models"),
-          request<DatasetSnapshot[]>("/api/ai/models/datasets"),
-          request<TrainingUpload[]>("/api/ai/models/training-wide/uploads"),
-          request<AcceptanceDecision[]>("/api/ai/models/acceptance-decisions"),
-          request<AcceptancePolicy[]>("/api/ai/models/acceptance-policies"),
-          request<ApplicabilityScope[]>("/api/ai/models/applicability-scopes"),
-          request<OodPolicy[]>("/api/ai/models/ood-policies"),
-          request<ModelValidationFold[]>("/api/ai/models/validation-folds"),
-          request<ModelArtifact[]>("/api/ai/models/artifacts"),
-          request<Snapshot[]>("/api/ai/models/feature-snapshots"),
-          request<Prediction[]>("/api/ai/predictions"),
-          request<Diagnosis[]>("/api/ai/diagnoses"),
-          request<Recommendation[]>("/api/ai/recommendations"),
-          request<ControlledTrial[]>("/api/ai/controlled-trials"),
-          request<RollbackExecution[]>("/api/ai/rollback-executions"),
-          request<Measurement[]>("/api/quality/measurements?limit=500"),
-          request<MetricDefinition[]>("/api/quality/metric-definitions"),
-        ]);
-      setModels(nextModels);
-      setDatasets(nextDatasets);
-      setTrainingUploads(nextTrainingUploads);
-      setAcceptanceDecisions(nextAcceptanceDecisions);
-      setAcceptancePolicies(nextAcceptancePolicies);
-      setApplicabilityScopes(nextApplicabilityScopes);
-      setOodPolicies(nextOodPolicies);
-      setValidationFolds(nextValidationFolds);
-      setModelArtifacts(nextModelArtifacts);
-      setSnapshots(nextSnapshots);
-      setPredictions(nextPredictions);
-      setDiagnoses(nextDiagnoses);
-      setRecommendations(nextRecommendations);
-      setControlledTrials(nextControlledTrials);
-      setRollbackExecutions(nextRollbacks);
-      setMeasurements(nextMeasurements);
-      setMetrics(nextMetrics);
-      setSelectedModelId((current) => current || nextModels[0]?.id || "");
-      setSelectedDatasetId((current) => current || nextDatasets[0]?.id || "");
-      setSelectedSnapshotId((current) => current || nextSnapshots[0]?.id || "");
-      setSelectedBuildMeasurementId((current) =>
-        nextMeasurements.some((measurement) => measurement.id === current)
-          ? current
-          : nextMeasurements[0]?.id || "",
-      );
-      setTrainingTargetMetric((current) => current || nextMetrics.find((item) => item.is_primary)?.code || nextMetrics[0]?.code || "");
-      setSelectedPredictionId((current) => current || nextPredictions[0]?.id || "");
-      setSelectedRecommendationId((current) => current || nextRecommendations[0]?.id || "");
+      const needModels = ["models", "governance", "predictions", "recommendations", "comparison"].includes(activeTab);
+      const needTraining = activeTab === "models";
+      const needGovernance = activeTab === "governance" || activeTab === "comparison";
+      const needPredictions = activeTab === "predictions" || activeTab === "recommendations";
+      const needRecommendations = activeTab === "recommendations";
+
+      const tasks: Array<Promise<unknown>> = [
+        request<MetricDefinition[]>("/api/quality/metric-definitions").then((nextMetrics) => {
+          setMetrics(nextMetrics);
+          setTrainingTargetMetric(
+            (current) => current || nextMetrics.find((item) => item.is_primary)?.code || nextMetrics[0]?.code || "",
+          );
+        }),
+      ];
+      if (needModels) {
+        tasks.push(
+          request<ModelVersion[]>("/api/ai/models").then((nextModels) => {
+            setModels(nextModels);
+            setSelectedModelId((current) => current || nextModels[0]?.id || "");
+          }),
+        );
+      }
+      if (needTraining) {
+        tasks.push(
+          request<DatasetSnapshot[]>("/api/ai/models/datasets").then((nextDatasets) => {
+            setDatasets(nextDatasets);
+            setSelectedDatasetId((current) => current || nextDatasets[0]?.id || "");
+          }),
+          request<TrainingUpload[]>("/api/ai/models/training-wide/uploads").then(setTrainingUploads),
+          request<Snapshot[]>("/api/ai/models/feature-snapshots").then((nextSnapshots) => {
+            setSnapshots(nextSnapshots);
+            setSelectedSnapshotId((current) => current || nextSnapshots[0]?.id || "");
+          }),
+          request<Measurement[]>("/api/quality/measurements?limit=500").then((nextMeasurements) => {
+            setMeasurements(nextMeasurements);
+            setSelectedBuildMeasurementId((current) =>
+              nextMeasurements.some((measurement) => measurement.id === current)
+                ? current
+                : nextMeasurements[0]?.id || "",
+            );
+          }),
+        );
+      }
+      if (needGovernance) {
+        tasks.push(
+          request<AcceptanceDecision[]>("/api/ai/models/acceptance-decisions").then(setAcceptanceDecisions),
+          request<AcceptancePolicy[]>("/api/ai/models/acceptance-policies").then(setAcceptancePolicies),
+          request<ApplicabilityScope[]>("/api/ai/models/applicability-scopes").then(setApplicabilityScopes),
+          request<OodPolicy[]>("/api/ai/models/ood-policies").then(setOodPolicies),
+          request<ModelValidationFold[]>("/api/ai/models/validation-folds").then(setValidationFolds),
+          request<ModelArtifact[]>("/api/ai/models/artifacts").then(setModelArtifacts),
+        );
+      }
+      if (needPredictions) {
+        tasks.push(
+          request<Prediction[]>("/api/ai/predictions").then((nextPredictions) => {
+            setPredictions(nextPredictions);
+            setSelectedPredictionId((current) => current || nextPredictions[0]?.id || "");
+          }),
+          request<Diagnosis[]>("/api/ai/diagnoses").then(setDiagnoses),
+        );
+      }
+      if (needRecommendations) {
+        tasks.push(
+          request<Recommendation[]>("/api/ai/recommendations").then((nextRecommendations) => {
+            setRecommendations(nextRecommendations);
+            setSelectedRecommendationId((current) => current || nextRecommendations[0]?.id || "");
+          }),
+          request<ControlledTrial[]>("/api/ai/controlled-trials").then(setControlledTrials),
+          request<RollbackExecution[]>("/api/ai/rollback-executions").then(setRollbackExecutions),
+          request<Measurement[]>("/api/quality/measurements?limit=500").then((nextMeasurements) => {
+            setMeasurements(nextMeasurements);
+          }),
+        );
+      }
+      await Promise.all(tasks);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "智能分析页面加载失败");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeTab]);
 
   const loadDrift = useCallback(async (modelId: string) => {
     setDriftLoading(true);

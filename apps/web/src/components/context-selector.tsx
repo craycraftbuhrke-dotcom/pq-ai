@@ -4,6 +4,7 @@ import { Cog, Factory, Layers, PaintBucket } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/lib/auth-context";
+import { CLIENT_CACHE_TTL, cachedJsonFetchSoft } from "@/lib/client-cache";
 import { PROCESS_STAGE_LABELS } from "@/lib/display-labels";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
@@ -18,12 +19,10 @@ const COATING_SYSTEMS = [
 ] as const;
 
 async function fetchList<T>(path: string): Promise<T[]> {
-  try {
-    const resp = await fetch(path, { cache: "no-store" });
-    return resp.ok ? ((await resp.json()) as T[]) : [];
-  } catch {
-    return [];
-  }
+  return cachedJsonFetchSoft<T[]>(path, [], {
+    ttlMs: CLIENT_CACHE_TTL.masterData,
+    key: `master:${path}`,
+  });
 }
 
 export function ContextSelector() {
