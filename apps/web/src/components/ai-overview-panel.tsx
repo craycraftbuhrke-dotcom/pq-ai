@@ -35,7 +35,7 @@ function PredictionQueueCard({ a }: { a: AiOverview }) {
       kpiValue={a.predictions24h}
       kpiUnit="次"
       accent="info"
-      viewAllHref="/ai?tab=predictions"
+      viewAllHref="/process?tab=predictions"
     >
       <OvpCardList items={items} />
     </OvpCard>
@@ -55,7 +55,7 @@ function RecommendationQueueCard({ a }: { a: AiOverview }) {
       kpiValue={a.recommendationsPending}
       kpiUnit="条"
       accent={a.recommendationsPending > 0 ? "warning" : "positive"}
-      viewAllHref="/ai?tab=recommendations"
+      viewAllHref="/process?tab=recommendations"
     >
       <OvpCardStatusStrip segments={segments} />
     </OvpCard>
@@ -74,7 +74,7 @@ function TrialStatusCard({ a }: { a: AiOverview }) {
       kpiValue={a.trialsActive}
       kpiUnit="项"
       accent={a.trialsActive > 0 ? "info" : "neutral"}
-      viewAllHref="/ai?tab=recommendations"
+      viewAllHref="/process?tab=recommendations"
     >
       <OvpCardList items={items} />
     </OvpCard>
@@ -92,7 +92,7 @@ function EngineeringChangeCard({ a }: { a: AiOverview }) {
       kpiValue={a.openChanges}
       kpiUnit="项"
       accent={a.openChanges > 0 ? "warning" : "positive"}
-      viewAllHref="/ai?tab=changes"
+      viewAllHref="/process?tab=changes"
     >
       <OvpCardList items={items} />
     </OvpCard>
@@ -104,8 +104,8 @@ export function AiOverviewPanel() {
   return (
     <div className="domain-overview">
       <div className="domain-overview-intro">
-        <strong>智能分析与试验闭环</strong>
-        <span>模型验收、预测诊断、推荐试验与工艺变更的关键指标；点击卡片进入对应工作台。</span>
+        <strong>模型与闭环指标</strong>
+        <span>模型验收与对比在本中心；预测、推荐与工艺变更请到工艺管理对应页签。</span>
       </div>
       <div className="ovp-card-grid">
         <ModelStatusCard a={ai} />

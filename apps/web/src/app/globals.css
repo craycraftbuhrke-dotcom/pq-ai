@@ -4996,6 +4996,81 @@ button.message-banner {
   border-bottom: 1px solid var(--line);
 }
 
+.production-drawer-section > .master-empty {
+  padding: 0 20px 16px;
+}
+
+.production-measure-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 20px 4px;
+}
+
+.production-measure-chip {
+  align-items: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.production-measure-chip:hover {
+  border-color: color-mix(in srgb, var(--teal) 35%, var(--line));
+}
+
+.production-measure-chip.is-active {
+  background: color-mix(in srgb, var(--teal) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+}
+
+.production-measure-chip strong {
+  font-size: 0.92rem;
+}
+
+.production-measure-chip span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.production-measure-points {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.production-measure-points-label,
+.production-measure-hint {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin: 0;
+  padding: 0 20px;
+}
+
+.production-point-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 0 20px 8px;
+}
+
+.production-point-detail-head h4 {
+  margin: 4px 0;
+}
+
+.production-point-detail-head small {
+  color: var(--text-muted);
+}
+
 .production-stage-heading {
   align-items: center;
   display: flex;

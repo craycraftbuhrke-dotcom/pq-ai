@@ -1,15 +1,20 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { AiOverviewPanel } from "@/components/ai-overview-panel";
 import { AiWorkbench } from "@/components/ai-workbench";
-import ControlledTrialsPage from "@/app/controlled-trials/page";
 import { DomainHub } from "@/components/domain-hub";
-import { EngineeringWorkspace } from "@/components/engineering-workspace";
 import { useAuth } from "@/lib/auth-context";
 import { AI_HUB_TABS, aiHomeTab, aiShortcuts, type AiHubTab } from "@/lib/ai-hub";
+
+const LEGACY_AI_TABS: Record<string, string> = {
+  predictions: "/process?tab=predictions",
+  recommendations: "/process?tab=recommendations",
+  changes: "/process?tab=changes",
+  issues: "/process?tab=changes",
+};
 
 function AiHubInner() {
   const { actor } = useAuth();
@@ -17,7 +22,14 @@ function AiHubInner() {
   const searchParams = useSearchParams();
   const defaultTab = useMemo(() => aiHomeTab(actor.roles), [actor.roles]);
   const shortcuts = useMemo(() => aiShortcuts(actor.roles), [actor.roles]);
-  const activeTab = (searchParams.get("tab") as AiHubTab | null) ?? defaultTab;
+  const requestedTab = searchParams.get("tab");
+  const activeTab = (requestedTab as AiHubTab | null) ?? defaultTab;
+
+  useEffect(() => {
+    if (!requestedTab) return;
+    const target = LEGACY_AI_TABS[requestedTab];
+    if (target) router.replace(target);
+  }, [requestedTab, router]);
 
   function goTab(tab: AiHubTab) {
     const params = new URLSearchParams(searchParams.toString());
@@ -25,6 +37,14 @@ function AiHubInner() {
     else params.set("tab", tab);
     const query = params.toString();
     router.replace(query ? `/ai?${query}` : "/ai", { scroll: false });
+  }
+
+  if (requestedTab && LEGACY_AI_TABS[requestedTab]) {
+    return (
+      <div className="page-stack">
+        <div className="master-empty">正在跳转到工艺管理…</div>
+      </div>
+    );
   }
 
   return (
@@ -50,24 +70,10 @@ function AiHubInner() {
     >
       {(tab) => {
         if (tab === "overview") return <AiOverviewPanel />;
-        if (tab === "recommendations") {
-          return (
-            <div className="ai-split-embed">
-              <AiWorkbench mode="embed" lockedTab="recommendations" />
-              <ControlledTrialsPage embedded />
-            </div>
-          );
-        }
-        if (tab === "changes") {
-          return <EngineeringWorkspace mode="embed" lockedTab="issues" />;
-        }
-        if (tab === "models") {
-          return <AiWorkbench mode="embed" allowedTabs={["models", "governance"]} />;
-        }
         if (tab === "comparison") {
           return <AiWorkbench mode="embed" lockedTab="comparison" />;
         }
-        return <AiWorkbench mode="embed" lockedTab="predictions" />;
+        return <AiWorkbench mode="embed" allowedTabs={["models", "governance"]} />;
       }}
     </DomainHub>
   );

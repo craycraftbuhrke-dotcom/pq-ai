@@ -181,7 +181,7 @@ function ClosedLoopRail({
       key: "predict",
       label: "预测风险",
       value: a.topRiskPoint ?? (a.predictions24h > 0 ? `${a.predictions24h} 次/24h` : "—"),
-      href: "/ai?tab=predictions",
+      href: "/process?tab=predictions",
       emphasize: Boolean(a.topRiskPoint),
     },
     {
@@ -190,21 +190,21 @@ function ClosedLoopRail({
       value: topRec
         ? `${a.recommendationsPending} · +${topRec.predictedImprovement.toFixed(2)}`
         : String(a.recommendationsPending),
-      href: "/ai?tab=recommendations",
+      href: "/process?tab=recommendations",
       emphasize: a.recommendationsPending > 0,
     },
     {
       key: "trial",
       label: "活动试验",
       value: String(a.trialsActive),
-      href: "/ai?tab=recommendations",
+      href: "/process?tab=recommendations",
       emphasize: a.trialsActive > 0,
     },
     {
       key: "change",
       label: "未关闭变更",
       value: String(a.openChanges),
-      href: "/ai?tab=changes",
+      href: "/process?tab=changes",
       emphasize: a.openChanges > 0,
     },
   ];

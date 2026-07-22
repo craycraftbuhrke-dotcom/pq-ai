@@ -484,7 +484,7 @@ export function MaterialTrendsPanel({ embedded = false }: { embedded?: boolean }
                 <span className="eyebrow">智能分析</span>
                 <h2>材料特性 → AI 推荐</h2>
               </div>
-              <Link className="button button-secondary" href="/ai?tab=recommendations">
+              <Link className="button button-secondary" href="/process?tab=recommendations">
                 进入 AI 推荐
                 <ArrowRight aria-hidden="true" />
               </Link>

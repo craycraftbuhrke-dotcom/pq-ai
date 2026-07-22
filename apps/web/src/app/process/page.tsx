@@ -2,7 +2,10 @@
 
 import { Suspense } from "react";
 
+import ControlledTrialsPage from "@/app/controlled-trials/page";
+import { AiWorkbench } from "@/components/ai-workbench";
 import { DomainHub } from "@/components/domain-hub";
+import { EngineeringWorkspace } from "@/components/engineering-workspace";
 import { OvpCard, OvpCardList, OvpCardStatusStrip, type OvpAccent } from "@/components/ovp-card";
 import { PaintLineSimulation } from "@/components/paint-line-simulation";
 import { ProductionWorkspace } from "@/components/production-workspace";
@@ -14,6 +17,9 @@ const TABS = [
   { key: "simulation", label: "虚拟产线" },
   { key: "recipes", label: "配方与刷子" },
   { key: "runs", label: "生产实绩" },
+  { key: "predictions", label: "预测与诊断" },
+  { key: "recommendations", label: "推荐与试验" },
+  { key: "changes", label: "工艺变更" },
 ];
 
 function ProcessOverviewPanel({ data }: { data: ProcessOverviewData }) {
@@ -32,7 +38,7 @@ function ProcessOverviewPanel({ data }: { data: ProcessOverviewData }) {
     <div className="domain-overview">
       <div className="domain-overview-intro">
         <strong>从这里进入工艺工作台</strong>
-        <span>配方配置与生产实绩在本中心完成；推荐试验与工艺变更请到 AI 分析中心。</span>
+        <span>配方、生产实绩、质量预测、推荐试验与工艺变更均在本中心完成。</span>
       </div>
       <div className="ovp-card-grid">
         <OvpCard
@@ -78,8 +84,8 @@ function ProcessOverviewPanel({ data }: { data: ProcessOverviewData }) {
           kpiValue={data.openIssueTasks}
           kpiUnit="项"
           accent={data.openIssueTasks > 0 ? "warning" : "positive"}
-          viewAllHref="/ai?tab=changes"
-          viewAllLabel="去智能分析"
+          viewAllHref="/process?tab=changes"
+          viewAllLabel="去工艺变更"
         >
           <OvpCardList items={[{ label: "待处理问题", value: String(data.openIssueTasks) }]} />
         </OvpCard>
@@ -104,6 +110,20 @@ function ProcessHubInner() {
         if (tab === "simulation") return <PaintLineSimulation />;
         if (tab === "recipes") return <ProgramWorkspace mode="recipes" />;
         if (tab === "runs") return <ProductionWorkspace mode="runs" />;
+        if (tab === "predictions") {
+          return <AiWorkbench mode="embed" lockedTab="predictions" />;
+        }
+        if (tab === "recommendations") {
+          return (
+            <div className="ai-split-embed">
+              <AiWorkbench mode="embed" lockedTab="recommendations" />
+              <ControlledTrialsPage embedded />
+            </div>
+          );
+        }
+        if (tab === "changes") {
+          return <EngineeringWorkspace mode="embed" lockedTab="issues" />;
+        }
         return <ProcessOverview />;
       }}
     </DomainHub>

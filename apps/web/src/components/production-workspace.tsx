@@ -18,7 +18,12 @@ import { BulkDataActions } from "@/components/bulk-data-actions";
 import { ModalShell } from "@/components/modal-shell";
 import { JsonObjectEditor } from "@/components/structured-json-editor";
 import { MaterialGovernancePanel } from "@/components/material-governance-panel";
-import { stageLabel, statusLabel } from "@/lib/display-labels";
+import {
+  QUALITY_TYPE_LABELS,
+  RELIABILITY_LABELS,
+  stageLabel,
+  statusLabel,
+} from "@/lib/display-labels";
 import { useWorkspaceContext } from "@/lib/workspace-context";
 
 type Resource = { id: string; code: string; name: string };
@@ -41,9 +46,83 @@ type ActualParameter = {
   sampled_at: string; source_system?: string | null;
 };
 type Definition = { id: string; code: string; name: string; unit: string };
+type MeasurementGroup = Resource & {
+  vehicle_model_id: string;
+  quality_type: string;
+  expected_point_count?: number | null;
+};
+type MeasurementPoint = Resource & {
+  vehicle_model_id: string;
+  part_id: string;
+  region?: string | null;
+  quality_types?: string[];
+};
+type GroupPointRelation = {
+  measurement_group_id: string;
+  measurement_point_id: string;
+  sequence_no: number;
+};
+type QualitySummary = {
+  quality_type: string;
+  metric_code?: string | null;
+  metric_name?: string | null;
+  value?: number | null;
+  unit?: string | null;
+  measured_at?: string | null;
+  judgement?: string | null;
+  reliability_status?: string | null;
+};
+type BrushParameter = {
+  parameter_code: string;
+  parameter_name: string;
+  configured_value?: number | null;
+  actual_value?: number | null;
+  unit: string;
+};
+type BrushContribution = {
+  brush_id: string;
+  brush_no: string;
+  brush_table_no: string;
+  process_stage: string;
+  coating_system: string;
+  overlap_ratio: number;
+  contribution_weight: number;
+  contribution_source?: string;
+  is_approved: boolean;
+  target_family?: string | null;
+  parameters: BrushParameter[];
+};
+type PointDetail = {
+  measurement_point_id: string;
+  code: string;
+  name: string;
+  part_code?: string | null;
+  part_name?: string | null;
+  region?: string | null;
+  quality_summaries: QualitySummary[];
+  brush_contributions: BrushContribution[];
+};
 type ModalKind = "run" | "material" | "stage" | "actual";
 type Modal = { kind: ModalKind; record?: ProductionRun | Material | StageRun | ActualParameter } | null;
 type FormState = Record<string, string>;
+
+const JUDGEMENT_LABELS: Record<string, string> = {
+  PASS: "合格",
+  FAIL: "不合格",
+  WARN: "预警",
+};
+
+const COATING_LABELS: Record<string, string> = {
+  MIDCOAT: "中涂",
+  BASECOAT: "色漆",
+  CLEARCOAT: "清漆",
+};
+
+function formatMetricValue(value?: number | null, unit?: string | null): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  const text = Number.isInteger(value) ? String(value) : value.toFixed(2);
+  return unit ? `${text} ${unit}` : text;
+}
 
 const stages = [
   ["MIDCOAT_EXT", "中涂外喷"],
@@ -108,6 +187,14 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [measurementGroups, setMeasurementGroups] = useState<MeasurementGroup[]>([]);
+  const [measurementPoints, setMeasurementPoints] = useState<MeasurementPoint[]>([]);
+  const [groupPointRelations, setGroupPointRelations] = useState<GroupPointRelation[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [selectedPointId, setSelectedPointId] = useState("");
+  const [pointDetail, setPointDetail] = useState<PointDetail | null>(null);
+  const [pointDetailLoading, setPointDetailLoading] = useState(false);
+  const [measurementLoading, setMeasurementLoading] = useState(false);
 
   const loadStagesForRuns = useCallback(async (runList: ProductionRun[]) => {
     if (!runList.length) {
@@ -188,6 +275,45 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
     }
   }, []);
 
+  const loadMeasurementCatalog = useCallback(async () => {
+    setMeasurementLoading(true);
+    try {
+      const [groups, points, relations] = await Promise.all([
+        request<MeasurementGroup[]>("/api/master-data/measurement-groups"),
+        request<MeasurementPoint[]>("/api/master-data/measurement-points"),
+        request<GroupPointRelation[]>("/api/master-data/measurement-group-points"),
+      ]);
+      setMeasurementGroups(groups);
+      setMeasurementPoints(points);
+      setGroupPointRelations(relations);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "测量编组加载失败");
+    } finally {
+      setMeasurementLoading(false);
+    }
+  }, []);
+
+  const loadPointDetail = useCallback(async (pointId: string, runId: string) => {
+    if (!pointId || !runId) {
+      setPointDetail(null);
+      return;
+    }
+    setPointDetailLoading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams({ production_run_id: runId });
+      const detail = await request<PointDetail>(
+        `/api/quality/body-map/points/${pointId}/detail?${params.toString()}`,
+      );
+      setPointDetail(detail);
+    } catch (loadError) {
+      setPointDetail(null);
+      setError(loadError instanceof Error ? loadError.message : "点位质量详情加载失败");
+    } finally {
+      setPointDetailLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => void reload(), 0);
     return () => window.clearTimeout(timer);
@@ -202,10 +328,41 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
     const timer = window.setTimeout(() => void loadActuals(selectedStageId), 0);
     return () => window.clearTimeout(timer);
   }, [drawerOpen, loadActuals, selectedStageId]);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const timer = window.setTimeout(() => void loadMeasurementCatalog(), 0);
+    return () => window.clearTimeout(timer);
+  }, [drawerOpen, loadMeasurementCatalog]);
+  useEffect(() => {
+    if (!drawerOpen || !selectedPointId || !selectedRunId) {
+      setPointDetail(null);
+      return;
+    }
+    const timer = window.setTimeout(() => void loadPointDetail(selectedPointId, selectedRunId), 0);
+    return () => window.clearTimeout(timer);
+  }, [drawerOpen, loadPointDetail, selectedPointId, selectedRunId]);
 
   const selectedRun = runs.find((run) => run.id === selectedRunId);
   const stageRuns = selectedRunId ? stagesByRunId[selectedRunId] ?? [] : [];
   const selectedStage = stageRuns.find((stage) => stage.id === selectedStageId);
+  const runGroups = useMemo(() => {
+    if (!selectedRun) return [];
+    return measurementGroups
+      .filter((group) => group.vehicle_model_id === selectedRun.vehicle_model_id)
+      .sort((a, b) => a.code.localeCompare(b.code, "zh-CN"));
+  }, [measurementGroups, selectedRun]);
+  const runGroupPoints = useMemo(() => {
+    if (!selectedGroupId) return [];
+    const pointIds = groupPointRelations
+      .filter((item) => item.measurement_group_id === selectedGroupId)
+      .sort((a, b) => a.sequence_no - b.sequence_no)
+      .map((item) => item.measurement_point_id);
+    const byId = new Map(measurementPoints.map((point) => [point.id, point]));
+    return pointIds
+      .map((id) => byId.get(id))
+      .filter((point): point is MeasurementPoint => Boolean(point));
+  }, [groupPointRelations, measurementPoints, selectedGroupId]);
+  const selectedGroup = runGroups.find((group) => group.id === selectedGroupId);
   const filteredRuns = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return runs.filter((run) => {
@@ -293,11 +450,27 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
   function openRunDrawer(runId: string, stageId?: string) {
     setSelectedRunId(runId);
     setSelectedStageId(stageId ?? "");
+    setSelectedGroupId("");
+    setSelectedPointId("");
+    setPointDetail(null);
     setDrawerOpen(true);
   }
 
   function closeRunDrawer() {
     setDrawerOpen(false);
+    setSelectedGroupId("");
+    setSelectedPointId("");
+    setPointDetail(null);
+  }
+
+  function selectMeasurementGroup(groupId: string) {
+    setSelectedGroupId(groupId);
+    setSelectedPointId("");
+    setPointDetail(null);
+  }
+
+  function selectMeasurementPoint(pointId: string) {
+    setSelectedPointId(pointId);
   }
 
   function stageForRun(runId: string, processStage: string): StageRun | undefined {
@@ -436,7 +609,7 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
               ) : null}
             </div>
 
-            {drawerOpen && selectedRun ? (
+            {drawerOpen && selectedRun && !modal ? (
               <div className="production-drawer-backdrop" role="presentation" onMouseDown={closeRunDrawer}>
                 <aside
                   className="production-drawer"
@@ -463,6 +636,177 @@ export function ProductionWorkspace({ mode = "full" }: { mode?: ProductionMode }
                         <X aria-hidden="true" />
                       </button>
                     </div>
+                  </div>
+
+                  <div className="production-drawer-section">
+                    <div className="production-stage-heading">
+                      <div>
+                        <span className="eyebrow">质量追溯</span>
+                        <h4>测量编组与点位</h4>
+                      </div>
+                      <Link className="button button-secondary" href="/quality?tab=body-map">
+                        车身点位图
+                      </Link>
+                    </div>
+                    {measurementLoading ? (
+                      <div className="master-empty"><LoaderCircle className="spin" /> 正在加载测量编组…</div>
+                    ) : !runGroups.length ? (
+                      <div className="master-empty">当前车型还没有测量编组，请先在车身点位图维护编组与点位。</div>
+                    ) : (
+                      <>
+                        <div className="production-measure-chip-row" role="list" aria-label="测量编组">
+                          {runGroups.map((group) => (
+                            <button
+                              key={group.id}
+                              type="button"
+                              role="listitem"
+                              className={`production-measure-chip ${group.id === selectedGroupId ? "is-active" : ""}`}
+                              onClick={() => selectMeasurementGroup(group.id)}
+                            >
+                              <strong>{group.code}</strong>
+                              <span>
+                                {group.name}
+                                {group.quality_type
+                                  ? ` · ${QUALITY_TYPE_LABELS[group.quality_type] ?? group.quality_type}`
+                                  : ""}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        {selectedGroup ? (
+                          <div className="production-measure-points">
+                            <div className="production-measure-points-label">
+                              编组点位 · {selectedGroup.code} / {selectedGroup.name}
+                            </div>
+                            {!runGroupPoints.length ? (
+                              <div className="master-empty">该编组尚未绑定测量点位。</div>
+                            ) : (
+                              <div className="production-measure-chip-row" role="list" aria-label="测量点位">
+                                {runGroupPoints.map((point) => (
+                                  <button
+                                    key={point.id}
+                                    type="button"
+                                    role="listitem"
+                                    className={`production-measure-chip ${point.id === selectedPointId ? "is-active" : ""}`}
+                                    onClick={() => selectMeasurementPoint(point.id)}
+                                  >
+                                    <strong>{point.code}</strong>
+                                    <span>{point.name}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="production-measure-hint">请选择测量编组，再点开点位查看本车质量与喷涂参数。</p>
+                        )}
+                        {selectedPointId ? (
+                          <div className="production-point-detail">
+                            {pointDetailLoading ? (
+                              <div className="master-empty"><LoaderCircle className="spin" /> 正在加载点位详情…</div>
+                            ) : pointDetail ? (
+                              <>
+                                <div className="production-point-detail-head">
+                                  <div>
+                                    <span className="eyebrow">点位质量与喷涂</span>
+                                    <h4>
+                                      {pointDetail.code} · {pointDetail.name}
+                                    </h4>
+                                    <small>
+                                      {[pointDetail.part_code, pointDetail.part_name, pointDetail.region]
+                                        .filter(Boolean)
+                                        .join(" · ") || "未标注零件/区域"}
+                                    </small>
+                                  </div>
+                                </div>
+                                <div className="body-map-quality-grid">
+                                  {pointDetail.quality_summaries.length ? (
+                                    pointDetail.quality_summaries.map((item) => (
+                                      <article key={item.quality_type} data-judgement={item.judgement ?? "EMPTY"}>
+                                        <span>{QUALITY_TYPE_LABELS[item.quality_type] ?? item.quality_type}</span>
+                                        <strong className="mono">{formatMetricValue(item.value, item.unit)}</strong>
+                                        <small>
+                                          {item.metric_name ?? item.metric_code ?? "—"}
+                                          {item.judgement
+                                            ? ` · ${JUDGEMENT_LABELS[item.judgement] ?? item.judgement}`
+                                            : " · 无已核验数据"}
+                                        </small>
+                                        {item.reliability_status ? (
+                                          <span className={`body-map-reliability reliability-${item.reliability_status.toLowerCase()}`}>
+                                            {RELIABILITY_LABELS[item.reliability_status] ?? item.reliability_status}
+                                          </span>
+                                        ) : null}
+                                        {item.measured_at ? (
+                                          <small className="mono">
+                                            {new Date(item.measured_at).toLocaleString("zh-CN", { hour12: false })}
+                                          </small>
+                                        ) : null}
+                                      </article>
+                                    ))
+                                  ) : (
+                                    <div className="master-empty">本生产事件暂无该点位质量数据。</div>
+                                  )}
+                                </div>
+                                <div className="body-map-brush-block">
+                                  <div className="program-subheading compact">
+                                    <div>
+                                      <span className="eyebrow">喷涂关联</span>
+                                      <h4>刷子号与参数</h4>
+                                    </div>
+                                  </div>
+                                  {!pointDetail.brush_contributions.length ? (
+                                    <div className="program-empty">暂无点位喷涂参数贡献。</div>
+                                  ) : (
+                                    pointDetail.brush_contributions.map((brush) => (
+                                      <div
+                                        className="body-map-brush-card"
+                                        key={`${brush.brush_id}-${brush.process_stage}-${brush.target_family ?? brush.brush_no}`}
+                                      >
+                                        <div className="body-map-brush-head">
+                                          <div className="body-map-brush-title">
+                                            <strong>
+                                              {COATING_LABELS[brush.coating_system] ?? brush.coating_system} · {brush.brush_no}
+                                            </strong>
+                                          </div>
+                                          <small>
+                                            {stageLabel(brush.process_stage)} · 表 {brush.brush_table_no} · 重叠{" "}
+                                            {(brush.overlap_ratio * 100).toFixed(0)}% · 权重{" "}
+                                            {(brush.contribution_weight * 100).toFixed(0)}%
+                                            {brush.is_approved ? " · 已审批" : " · 待审批"}
+                                          </small>
+                                        </div>
+                                        {brush.parameters.length ? (
+                                          <div className="body-map-param-table">
+                                            {brush.parameters.map((parameter) => (
+                                              <div className="body-map-param-row" key={parameter.parameter_code}>
+                                                <span>
+                                                  <strong>{parameter.parameter_name}</strong>
+                                                  <small>{parameter.unit || "无单位"}</small>
+                                                </span>
+                                                <span className="mono">
+                                                  <em>设定</em> {formatMetricValue(parameter.configured_value, parameter.unit)}
+                                                </span>
+                                                <span className="mono">
+                                                  <em>实绩</em> {formatMetricValue(parameter.actual_value, parameter.unit)}
+                                                </span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <div className="program-empty">该刷子暂无参数明细。</div>
+                                        )}
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="master-empty">未能加载点位详情。</div>
+                            )}
+                          </div>
+                        ) : null}
+                      </>
+                    )}
                   </div>
 
                   <div className="production-drawer-section">

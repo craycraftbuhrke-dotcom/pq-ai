@@ -982,8 +982,8 @@ function QualityAnalyticsPanel({ analytics, loading }: { analytics: Analytics | 
         <span>发现风险后可继续：</span>
         <Link className="button button-secondary" href="/quality?tab=body-map">车身点位图</Link>
         <Link className="button button-secondary" href="/quality?tab=measurements&filter=fail">超差判定</Link>
-        <Link className="button button-secondary" href="/ai?tab=predictions">AI 预测诊断</Link>
-        <Link className="button button-secondary" href="/ai?tab=issues">问题与调试</Link>
+        <Link className="button button-secondary" href="/process?tab=predictions">AI 预测诊断</Link>
+        <Link className="button button-secondary" href="/process?tab=changes">问题与调试</Link>
       </div>
       <section className="quality-analytics-stat-grid">
         <article><span>样本 / 失控点</span><strong>{statistics.samples} / {statistics.out_of_control_count}</strong><small>控制界限采用均值 ± 3σ</small></article>

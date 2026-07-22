@@ -252,7 +252,7 @@ export function QualityMonitorPanel({ embedded = false }: { embedded?: boolean }
             <Link className="button button-secondary" href="/quality?tab=measurements&filter=unverified">查看未核验测量</Link>
             <Link className="button button-secondary" href="/quality?tab=analytics">打开质量趋势</Link>
             <Link className="button button-secondary" href="/instruments">维护仪器可靠性</Link>
-            <Link className="button button-secondary" href="/ai?tab=predictions">去智能预测与原因排查</Link>
+            <Link className="button button-secondary" href="/process?tab=predictions">去智能预测与原因排查</Link>
           </div>
 
           <div className="monitor-grid">
