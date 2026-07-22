@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { apiRequestHeaders, isUpstreamTimeout, upstreamRequestSignal } from "@/lib/auth-data";
 import { BULK_IMPORT_MAX_BYTES, readBoundedRequestBody } from "@/lib/bounded-request-body";
 
+export const runtime = "nodejs";
+/** Allow long-running train / dataset / wide-import jobs on Matrix/K8s. */
+export const maxDuration = 600;
+
 const allowedRoots = new Set([
   "overview-summary",
   "models",
@@ -44,6 +48,19 @@ function formatUpstreamDetail(detail: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Train / dataset build / wide upload need minutes; default BFF abort was 10s → false 504. */
+function upstreamTimeoutMs(path: string[]): number {
+  const joined = path.join("/");
+  if (
+    joined === "models/train" ||
+    joined === "models/datasets" ||
+    joined.startsWith("models/training-wide")
+  ) {
+    return 10 * 60 * 1000;
+  }
+  return 60_000;
+}
+
 async function proxy(request: Request, context: Context) {
   const { path } = await context.params;
   if (!path.length || !allowedRoots.has(path[0])) {
@@ -63,7 +80,13 @@ async function proxy(request: Request, context: Context) {
     }
     const response = await fetch(
       `${apiUrl}/ai/${path.map(encodeURIComponent).join("/")}${new URL(request.url).search}`,
-      { method: request.method, headers, body, cache: "no-store", signal: upstreamRequestSignal(request) },
+      {
+        method: request.method,
+        headers,
+        body,
+        cache: "no-store",
+        signal: upstreamRequestSignal(request, upstreamTimeoutMs(path)),
+      },
     );
     if (response.status === 204) return new NextResponse(null, { status: 204 });
     const contentType = response.headers.get("content-type") ?? "";
