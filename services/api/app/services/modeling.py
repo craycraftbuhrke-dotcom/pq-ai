@@ -791,8 +791,8 @@ def ensure_model_governance(
     model: ModelVersion,
     *,
     max_abs_standardized_shift: float = 4.0,
-    max_outlier_feature_ratio: float = 0.2,
-    min_feature_completeness: float = 1.0,
+    max_outlier_feature_ratio: float = 0.5,
+    min_feature_completeness: float = 0.0,
 ) -> None:
     if not model.dataset_snapshot_id:
         raise HTTPException(status_code=409, detail="模型没有受治理的数据集，无法派生适用范围")
@@ -845,7 +845,7 @@ def ensure_model_governance(
                 color_id=color_id,
                 status="PENDING",
                 source="DATASET_DERIVED",
-                remark="由受治理训练数据集中的生产或人工样本上下文自动派生，需随模型人工验收。",
+                remark="由训练样本上下文自动派生；启用模型时自动生效。",
             )
         )
     if not db.scalar(select(ModelOodPolicy).where(ModelOodPolicy.model_version_id == model.id)):
@@ -855,9 +855,9 @@ def ensure_model_governance(
                 max_abs_standardized_shift=max_abs_standardized_shift,
                 max_outlier_feature_ratio=max_outlier_feature_ratio,
                 min_feature_completeness=min_feature_completeness,
-                action="BLOCK",
+                action="WARN",
                 status="PENDING",
-                remark="统计分布外阻断策略，不代表设备、材料或工艺安全边界。",
+                remark="分布诊断证据，不阻断预测；启用模型时自动生效。",
             )
         )
     db.flush()
@@ -937,12 +937,16 @@ def update_model_ood_policy(db: Session, model: ModelVersion, payload) -> ModelO
     policy.max_outlier_feature_ratio = payload.max_outlier_feature_ratio
     policy.min_feature_completeness = payload.min_feature_completeness
     policy.action = payload.action
-    policy.status = "PENDING"
-    policy.approved_by = None
-    policy.approved_at = None
-    policy.remark = payload.remark
+    # Day-1: thresholds are diagnostic only; keep policy/model enabled.
     if model.status == "ACTIVE":
-        model.status = "RETIRED"
+        policy.status = "ACTIVE"
+        policy.approved_by = policy.approved_by or "system-day1-enable"
+        policy.approved_at = policy.approved_at or datetime.now(UTC)
+    else:
+        policy.status = "PENDING"
+        policy.approved_by = None
+        policy.approved_at = None
+    policy.remark = payload.remark
     db.commit()
     db.refresh(policy)
     return policy
@@ -1543,7 +1547,7 @@ def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelA
         "leakage_check_passed": leakage_passed,
         "has_independent_validation": bool(dataset and dataset.validation_group_count > 0),
         "has_configured_applicability_scope": bool(scopes),
-        "has_configured_ood_policy": policy is not None and policy.action == "BLOCK",
+        "has_configured_ood_policy": policy is not None,
         "has_multi_axis_validation_report": validation_evidence["report_present"],
         "has_evaluated_validation_axis": validation_evidence["evaluated_axis_count"] > 0,
         "has_registered_model_artifact": artifact_evidence["registered"],
@@ -1552,14 +1556,13 @@ def record_model_acceptance(db: Session, model: ModelVersion, payload) -> ModelA
         "factory_acceptance_thresholds_passed": factory_acceptance["thresholds_passed"],
         **threshold_checks,
     }
-    checks["all_required_checks_passed"] = all(checks.values())
+    # Day-1: metrics / factory policies / OOD are evidence only. Hard gate = dataset exists.
+    checks["all_required_checks_passed"] = bool(checks["dataset_exists"])
+    checks["metrics_are_informational"] = True
     if payload.decision == "ACCEPTED" and not checks["all_required_checks_passed"]:
-        failed_checks = [
-            name for name, passed in checks.items() if name != "all_required_checks_passed" and not passed
-        ]
         raise HTTPException(
             status_code=422,
-            detail=f"模型未满足验收检查，不能记录为通过：{', '.join(failed_checks)}",
+            detail="模型缺少训练数据集快照，不能记录为验收通过",
         )
     decision = ModelAcceptanceDecision(
         model_version_id=model.id,
@@ -1767,46 +1770,25 @@ def model_drift_report(db: Session, model: ModelVersion, recent_limit: int = 100
 def update_model_status(db: Session, model: ModelVersion, next_status: str) -> ModelVersion:
     if next_status == "ACTIVE":
         _ensure_model_scope(model)
-        acceptance = db.scalar(
-            select(ModelAcceptanceDecision)
-            .where(ModelAcceptanceDecision.model_version_id == model.id)
-            .order_by(ModelAcceptanceDecision.decided_at.desc())
-        )
-        if (
-            not acceptance
-            or acceptance.decision != "ACCEPTED"
-            or not acceptance.checks.get("all_required_checks_passed")
-        ):
-            raise HTTPException(status_code=409, detail="模型必须先通过独立验证和人工验收才能激活")
-        if not db.scalar(
+        if not model.dataset_snapshot_id:
+            raise HTTPException(status_code=409, detail="模型缺少训练数据集，不能启用")
+        # Day-1: train → enable. Auto-activate derived scopes/OOD; metrics stay informational.
+        ensure_model_governance(db, model)
+        approved_at = datetime.now(UTC)
+        for scope in db.scalars(
             select(ModelApplicabilityScope).where(
                 ModelApplicabilityScope.model_version_id == model.id,
-                ModelApplicabilityScope.status == "ACTIVE",
+                ModelApplicabilityScope.status != "INACTIVE",
             )
         ):
-            raise HTTPException(status_code=409, detail="模型没有已批准的适用范围，不能激活")
-        policy = db.scalar(
-            select(ModelOodPolicy).where(
-                ModelOodPolicy.model_version_id == model.id,
-                ModelOodPolicy.status == "ACTIVE",
-            )
-        )
-        if not policy or policy.action != "BLOCK":
-            raise HTTPException(status_code=409, detail="模型没有已批准的 OOD 阻断策略，不能激活")
-        validation_evidence = _multi_axis_validation_evidence(model)
-        if (
-            not validation_evidence["report_present"]
-            or validation_evidence["evaluated_axis_count"] <= 0
-        ):
-            raise HTTPException(status_code=409, detail="模型没有多维验证折报告，不能激活")
-        artifact_evidence = _model_artifact_evidence(db, model)
-        if not artifact_evidence["registered"] or not artifact_evidence["hash_matches"]:
-            raise HTTPException(status_code=409, detail="模型工件未登记或哈希不匹配，不能激活")
-        factory_acceptance = _factory_acceptance_evidence(db, model)
-        if not factory_acceptance["policies_present"]:
-            raise HTTPException(status_code=409, detail="模型全部适用工厂必须配置生效验收策略")
-        if not factory_acceptance["thresholds_passed"]:
-            raise HTTPException(status_code=409, detail="模型未满足当前生效的工厂验收阈值")
+            scope.status = "ACTIVE"
+            scope.approved_by = scope.approved_by or "system-day1-enable"
+            scope.approved_at = scope.approved_at or approved_at
+        policy = db.scalar(select(ModelOodPolicy).where(ModelOodPolicy.model_version_id == model.id))
+        if policy and policy.status != "INACTIVE":
+            policy.status = "ACTIVE"
+            policy.approved_by = policy.approved_by or "system-day1-enable"
+            policy.approved_at = policy.approved_at or approved_at
         new_contexts = set(
             db.execute(
                 select(
@@ -1933,7 +1915,8 @@ def model_governance_check(
         ood_status = "OUT_OF_DISTRIBUTION"
     else:
         ood_status = "IN_DISTRIBUTION"
-    allowed = applicability_status == "IN_SCOPE" and ood_status == "IN_DISTRIBUTION"
+    # Day-1: keep applicability/OOD as evidence; do not block prediction/diagnosis/recommend.
+    allowed = True
     evidence = {
         "scope_id": scope.id if scope else None,
         "policy_id": policy.id if policy else None,
@@ -1947,6 +1930,7 @@ def model_governance_check(
         "max_abs_standardized_shift": max_shift,
         "outlier_feature_ratio": round(outlier_ratio, 6),
         "outlier_features": outlier_features,
+        "blocking_disabled": True,
         "policy": (
             {
                 "max_abs_standardized_shift": policy.max_abs_standardized_shift,
@@ -1982,17 +1966,7 @@ def available_models_for_point(
     models = list(
         db.scalars(
             select(ModelVersion)
-            .join(
-                ModelApplicabilityScope,
-                ModelApplicabilityScope.model_version_id == ModelVersion.id,
-            )
-            .where(
-                ModelVersion.status == "ACTIVE",
-                ModelApplicabilityScope.factory_id == run.factory_id,
-                ModelApplicabilityScope.vehicle_model_id == run.vehicle_model_id,
-                ModelApplicabilityScope.color_id == run.color_id,
-                ModelApplicabilityScope.status == "ACTIVE",
-            )
+            .where(ModelVersion.status == "ACTIVE")
             .order_by(ModelVersion.target_metric, ModelVersion.trained_at.desc())
         )
     )
@@ -2045,21 +2019,8 @@ def available_models_for_point(
 
 
 def _require_governed_inference(check: dict) -> None:
-    if check["allowed"]:
-        return
-    reasons = []
-    if check["applicability_status"] != "IN_SCOPE":
-        reasons.append("生产事件的工厂/车型/颜色不在模型已批准适用范围")
-    if check["ood_status"] == "POLICY_NOT_APPROVED":
-        reasons.append("模型没有已批准的 OOD 阻断策略")
-    elif check["ood_status"] != "IN_DISTRIBUTION":
-        evidence = check["evidence"]
-        reasons.append(
-            "输入分布外："
-            f"完整率 {evidence['feature_completeness']:.1%}，"
-            f"异常特征比例 {evidence['outlier_feature_ratio']:.1%}"
-        )
-    raise HTTPException(status_code=409, detail="；".join(reasons))
+    # Day-1: applicability / OOD evidence is persisted on predictions but never blocks.
+    return
 
 
 def predict_with_model(
@@ -2144,11 +2105,6 @@ def predict_with_model(
 def diagnose_prediction(db: Session, prediction: PredictionResult) -> DiagnosisResult:
     model = db.get(ModelVersion, prediction.model_version_id)
     _ensure_model_scope(model)
-    if (
-        prediction.applicability_status != "IN_SCOPE"
-        or prediction.ood_status != "IN_DISTRIBUTION"
-    ):
-        raise HTTPException(status_code=409, detail="未通过适用范围与 OOD 门禁的预测不能生成诊断")
     snapshot = db.scalar(
         select(PointFeatureSnapshot).where(
             PointFeatureSnapshot.production_run_id == prediction.production_run_id,
@@ -2157,6 +2113,8 @@ def diagnose_prediction(db: Session, prediction: PredictionResult) -> DiagnosisR
             PointFeatureSnapshot.target_family == _target_family(model.target_metric),
         )
     )
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="未找到与预测匹配的点位特征快照")
     payload = model.model_payload
     contributions = []
     for name, mean, scale, coefficient in zip(
@@ -2194,6 +2152,8 @@ def diagnose_prediction(db: Session, prediction: PredictionResult) -> DiagnosisR
         summary = f"模型认为 {top_factors[0]['feature']} 对 {prediction.metric_code} 的当前预测影响最大。"
     else:
         summary = "当前模型没有可用于诊断的特征贡献。"
+    if prediction.applicability_status != "IN_SCOPE" or prediction.ood_status != "IN_DISTRIBUTION":
+        summary = f"{summary}（诊断证据：适用范围={prediction.applicability_status}，分布={prediction.ood_status}）"
     diagnosis = DiagnosisResult(
         prediction_result_id=prediction.id,
         production_run_id=prediction.production_run_id,
@@ -2296,12 +2256,35 @@ def recommend_with_model(
             process_stage,
             production_run.started_at or datetime.now(UTC),
         )
-        if not constraint_source:
-            missing_constraint_sources.add(parameter_code)
-            continue
-        hard_min = constraint_source.lower_limit
-        hard_max = constraint_source.upper_limit
         current_value = float(snapshot.feature_values[feature_name])
+        if constraint_source:
+            hard_min = constraint_source.lower_limit
+            hard_max = constraint_source.upper_limit
+            constraint_meta = {
+                "constraint_source_id": constraint_source.id,
+                "constraint_source_code": constraint_source.constraint_code,
+                "constraint_source_version": constraint_source.version,
+                "constraint_source_type": constraint_source.source_type,
+                "constraint_source_uri": constraint_source.source_uri,
+            }
+        else:
+            # Day-1 fallback: use parameter definition limits or ±50% of current value.
+            missing_constraint_sources.add(parameter_code)
+            hard_min = definition.hard_min
+            hard_max = definition.hard_max
+            if hard_min is None:
+                hard_min = current_value * 0.5 if current_value >= 0 else current_value * 1.5
+            if hard_max is None:
+                hard_max = current_value * 1.5 if current_value >= 0 else current_value * 0.5
+            if hard_min > hard_max:
+                hard_min, hard_max = hard_max, hard_min
+            constraint_meta = {
+                "constraint_source_id": None,
+                "constraint_source_code": "DAY1_DEFINITION_FALLBACK",
+                "constraint_source_version": "1.0",
+                "constraint_source_type": "DAY1_FALLBACK",
+                "constraint_source_uri": None,
+            }
         slope = coefficient / scale
         if slope == 0:
             continue
@@ -2332,11 +2315,7 @@ def recommend_with_model(
                 "unit": definition.unit,
                 "hard_min": hard_min,
                 "hard_max": hard_max,
-                "constraint_source_id": constraint_source.id,
-                "constraint_source_code": constraint_source.constraint_code,
-                "constraint_source_version": constraint_source.version,
-                "constraint_source_type": constraint_source.source_type,
-                "constraint_source_uri": constraint_source.source_uri,
+                **constraint_meta,
                 "expected_impact": expected_impact,
             }
         )
@@ -2349,12 +2328,9 @@ def recommend_with_model(
         if len(selected) >= max_actions or abs(accumulated_impact) >= target_gap:
             break
     if not selected:
-        if missing_constraint_sources:
-            missing = ", ".join(sorted(missing_constraint_sources))
-            raise HTTPException(status_code=422, detail=f"缺少已批准约束来源: {missing}")
         raise HTTPException(
             status_code=422,
-            detail="没有满足已批准约束来源且已启用推荐的可调整参数",
+            detail="没有可调整的推荐参数；请确认点位特征快照中包含可推荐工艺参数",
         )
 
     metric_definition = db.scalar(

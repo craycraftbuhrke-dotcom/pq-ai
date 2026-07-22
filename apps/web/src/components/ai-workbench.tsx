@@ -821,8 +821,8 @@ export function AiWorkbench({
     { label: "已有训练数据", ready: snapshots.length > 0 || trainingUploads.length > 0, tab: "models" as Tab },
     { label: "训练集已检查", ready: datasets.some((item) => item.leakage_check.passed), tab: "models" as Tab },
     { label: "模型已训练", ready: models.length > 0, tab: "models" as Tab },
-    { label: "模型已验收", ready: models.some((item) => latestAcceptanceByModel.get(item.id)?.decision === "ACCEPTED"), tab: "governance" as Tab },
-    { label: "现场可以使用", ready: models.some((item) => item.status === "ACTIVE"), tab: "predictions" as Tab },
+    { label: "模型已启用", ready: models.some((item) => item.status === "ACTIVE"), tab: "governance" as Tab },
+    { label: "可预测诊断推荐", ready: models.some((item) => item.status === "ACTIVE"), tab: "predictions" as Tab },
   ];
   const metricName = (metricCode?: string | null) =>
     metrics.find((item) => item.code === metricCode)?.name ?? metricCode ?? "—";
@@ -831,11 +831,8 @@ export function AiWorkbench({
     (item) => !selectedModelFeatureSetVersion || item.feature_set_version === selectedModelFeatureSetVersion,
   );
   const selectedSnapshot = compatibleSnapshots.find((item) => item.id === selectedSnapshotId) ?? compatibleSnapshots[0];
-  const governanceAllowed = Boolean(
-    governanceCheck?.allowed &&
-    governanceCheck.model_version_id === selectedModelId &&
-    governanceCheck.production_run_id === selectedSnapshot?.production_run_id &&
-    governanceCheck.measurement_point_id === selectedSnapshot?.measurement_point_id,
+  const inferenceReady = Boolean(
+    selectedModel?.status === "ACTIVE" && selectedSnapshot && !governanceLoading,
   );
   const selectedPrediction = predictions.find((item) => item.id === selectedPredictionId);
   const selectedDiagnosis = diagnoses.find((item) => item.prediction_result_id === selectedPredictionId);
@@ -1165,7 +1162,7 @@ export function AiWorkbench({
           max_abs_standardized_shift: Number(data.get("max_abs_standardized_shift")),
           max_outlier_feature_ratio: Number(data.get("max_outlier_feature_ratio")),
           min_feature_completeness: Number(data.get("min_feature_completeness")),
-          action: "BLOCK",
+          action: "WARN",
           remark: "由模型治理工作台更新，需重新人工验收后生效。",
         }),
       });
@@ -1257,7 +1254,7 @@ export function AiWorkbench({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
-      showSuccess(`模型已切换为“${statusLabel(status)}”状态`);
+      showSuccess(status === "ACTIVE" ? "模型已启用，可用于预测/诊断/推荐" : status === "RETIRED" ? "模型已停用" : "模型已转为草稿");
       await reload();
       await loadDrift(selectedModel.id);
     } catch (operationError) {
@@ -1724,52 +1721,39 @@ export function AiWorkbench({
               <div className="ai-form-stack">
                 <label className="form-field"><span>模型版本</span><select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {statusLabel(model.status)}</option>)}</select></label>
                 <div className="ai-context-box"><span>目标指标</span><strong>{metricName(selectedModel?.target_metric)}</strong><span>当前状态</span><strong>{statusLabel(selectedModel?.status ?? "—")}</strong><span>数据集</span><strong>{modelDataset ? `${modelDataset.dataset_code}:${modelDataset.version}` : "旧模型未绑定"}</strong><span>分组切分</span><strong>{modelDataset ? `${modelDataset.train_group_count} 训练 / ${modelDataset.validation_group_count} 验证` : "—"}</strong><span>验证拟合度 / 误差</span><strong>{selectedModel ? `${formatNumber(selectedModel.evaluation_metrics.validation_r2)} / ${formatNumber(selectedModel.evaluation_metrics.validation_rmse)}` : "—"}</strong><span>多维验证</span><strong>{selectedMultiAxis ? `${selectedMultiAxis.evaluated_axis_count}/${selectedAxisEntries.length} 轴` : "未生成"}</strong><span>模型校验码</span><strong>{shortHash(selectedArtifact?.payload_hash)}</strong><span>验收结论</span><strong>{selectedAcceptance ? statusLabel(selectedAcceptance.decision) : "待验收"}</strong><span>适用范围</span><strong>{selectedScopes.filter((item) => item.status === "ACTIVE").length} 生效 / {selectedScopes.length} 条</strong><span>异常输入拦截</span><strong>{selectedOodPolicy ? statusLabel(selectedOodPolicy.status) : "未配置"}</strong><span>工厂验收策略</span><strong>{factoryPolicyCoverage ? "全部覆盖" : "覆盖不完整"}</strong></div>
-                <p className="ai-hint">模型必须通过独立验证，并确认工厂/车型/颜色适用范围与异常输入拦截规则后，才允许激活给现场使用。</p>
+                <p className="ai-hint">训练完成后可直接启用或停用。验证 RMSE / R²、多维验证与分布诊断仅作展示，不阻断启用与推理。</p>
                 <div className="ai-governance-block">
-                  <strong>多维验证与模型工件</strong>
+                  <strong>多维验证与模型工件（展示）</strong>
                   {selectedAxisEntries.length ? <div className="ai-validation-grid">
                     {selectedAxisEntries.map(([axis, summary]) => <article key={axis}><span className={`status-badge ${validationStatusClass(summary.status)}`}>{statusLabel(summary.status)}</span><strong>{axis}</strong><small>{summary.evaluated_fold_count ?? 0}/{summary.fold_count ?? 0} 折 · RMSE {formatNumber(summary.rmse)} · R² {formatNumber(summary.r2)}</small></article>)}
-                  </div> : <p className="ai-hint">当前模型没有多维验证折报告，不能验收或激活。</p>}
-                  {selectedArtifact ? <div className="ai-artifact-row"><span><b>{selectedArtifact.artifact_type}</b><small>{selectedArtifact.storage_backend} · {statusLabel(selectedArtifact.status)} · {shortHash(selectedArtifact.payload_hash)}</small></span><code>{selectedArtifact.artifact_uri}</code></div> : <p className="ai-hint">当前模型没有已登记模型校验码，不能验收或激活。</p>}
+                  </div> : <p className="ai-hint">当前模型暂无多维验证折报告（不影响启用）。</p>}
+                  {selectedArtifact ? <div className="ai-artifact-row"><span><b>{selectedArtifact.artifact_type}</b><small>{selectedArtifact.storage_backend} · {statusLabel(selectedArtifact.status)} · {shortHash(selectedArtifact.payload_hash)}</small></span><code>{selectedArtifact.artifact_uri}</code></div> : <p className="ai-hint">当前模型暂无校验码登记（不影响启用）。</p>}
                 </div>
-                <div className="ai-governance-block">
-                  <strong>工厂模型验收策略</strong>
-                  {selectedAcceptancePolicies.map((policy) => <div className="ai-scope-row" key={policy.id}><span><b>{policy.factory_code} · {policy.policy_code}:{policy.version}</b><small>{policy.policy_type} · {statusLabel(policy.status)} · RMSE ≤ {formatNumber(policy.max_validation_rmse)} · R² ≥ {formatNumber(policy.min_validation_r2)}</small></span><div className="ai-inline-actions">{policy.status !== "ACTIVE" ? <button type="button" className="button button-secondary" disabled={submitting === `acceptance-policy-${policy.id}-ACTIVE`} onClick={() => void changeAcceptancePolicyStatus(policy, "ACTIVE")}>批准激活</button> : null}{policy.status === "ACTIVE" ? <button type="button" className="button button-secondary danger-button" disabled={submitting === `acceptance-policy-${policy.id}-RETIRED`} onClick={() => void changeAcceptancePolicyStatus(policy, "RETIRED")}>退役</button> : null}</div></div>)}
-                  {!selectedAcceptancePolicies.length ? <p className="ai-hint">当前目标指标没有工厂验收策略，模型不能验收。</p> : null}
-                </div>
-                <form className="ai-governance-block" onSubmit={createAcceptancePolicy}>
-                  <strong>创建工厂批准策略草稿</strong>
-                  <label className="form-field"><span>工厂</span><select name="factory_id" required>{factoryOptions.map((factory) => <option key={factory.id} value={factory.id}>{factory.code} · {factory.name}</option>)}</select></label>
-                  <input type="hidden" name="target_metric" value={selectedModel?.target_metric ?? ""} />
-                  <div className="ai-two-fields"><label className="form-field"><span>策略代码</span><input name="policy_code" required defaultValue={defaultPolicyCode} /></label><label className="form-field"><span>版本</span><input name="version" required defaultValue="1.0" /></label></div>
-                  <div className="ai-two-fields"><label className="form-field"><span>验证 RMSE 上限</span><input name="max_validation_rmse" type="number" min="0" step="any" required /></label><label className="form-field"><span>验证 R² 下限</span><input name="min_validation_r2" type="number" step="any" required /></label></div>
-                  <div className="ai-two-fields"><label className="form-field"><span>最少训练分组</span><input name="min_train_groups" type="number" min="2" required /></label><label className="form-field"><span>最少验证分组</span><input name="min_validation_groups" type="number" min="1" required /></label></div>
-                  <label className="form-field"><span>批准来源 URI</span><input name="source_uri" required placeholder="例如：dms://factory/model-policy/..." /></label>
-                  <label className="form-field"><span>备注</span><textarea name="remark" rows={2} /></label>
-                  <p className="ai-hint">阈值必须来自工厂批准文件或评审结论，系统不会自动生成或猜测工厂验收阈值。</p>
-                  <button className="button button-secondary" disabled={!selectedModel || !factoryOptions.length || submitting === "acceptance-policy-create"}>{submitting === "acceptance-policy-create" ? <LoaderCircle className="spin" /> : <ShieldCheck />} 创建策略草稿</button>
-                </form>
                 <div className="ai-two-fields">
-                  <button className="button button-secondary danger-button" disabled={!selectedModel || submitting === "acceptance-REJECTED"} onClick={() => void decideModelAcceptance("REJECTED")}><X /> 验收驳回</button>
-                  <button className="button button-secondary" disabled={!selectedModel || !modelDataset?.leakage_check.passed || !hasValidationEvidence || !hasArtifactEvidence || !factoryPolicyCoverage || submitting === "acceptance-ACCEPTED"} onClick={() => void decideModelAcceptance("ACCEPTED")}><ShieldCheck /> 验收通过</button>
+                  <button className="button button-primary" disabled={!selectedModel || selectedModel.status === "ACTIVE" || submitting === "model-status-ACTIVE"} onClick={() => void changeModelStatus("ACTIVE")}>{submitting === "model-status-ACTIVE" ? <LoaderCircle className="spin" /> : <Check />} 启用模型</button>
+                  <button className="button button-secondary danger-button" disabled={!selectedModel || selectedModel.status === "RETIRED" || submitting === "model-status-RETIRED"} onClick={() => void changeModelStatus("RETIRED")}>停用模型</button>
                 </div>
-                <button className="button button-primary" disabled={!selectedModel || selectedModel.status === "ACTIVE" || selectedAcceptance?.decision !== "ACCEPTED" || selectedOodPolicy?.status !== "ACTIVE" || !selectedScopes.some((item) => item.status === "ACTIVE") || !hasValidationEvidence || !hasArtifactEvidence || !factoryPolicyCoverage || submitting === "model-status-ACTIVE"} onClick={() => void changeModelStatus("ACTIVE")}>{submitting === "model-status-ACTIVE" ? <LoaderCircle className="spin" /> : <Check />} 激活版本</button>
                 <div className="ai-two-fields">
                   <button className="button button-secondary" disabled={!selectedModel || selectedModel.status === "DRAFT" || submitting === "model-status-DRAFT"} onClick={() => void changeModelStatus("DRAFT")}>转为草稿</button>
-                  <button className="button button-secondary danger-button" disabled={!selectedModel || selectedModel.status === "RETIRED" || submitting === "model-status-RETIRED"} onClick={() => void changeModelStatus("RETIRED")}>退役版本</button>
+                  <button className="button button-secondary" disabled={!selectedModel || submitting === "acceptance-ACCEPTED"} onClick={() => void decideModelAcceptance("ACCEPTED")}><ShieldCheck /> 记录验收（可选）</button>
+                </div>
+                <div className="ai-governance-block">
+                  <strong>工厂模型验收策略（可选，仅展示）</strong>
+                  {selectedAcceptancePolicies.map((policy) => <div className="ai-scope-row" key={policy.id}><span><b>{policy.factory_code} · {policy.policy_code}:{policy.version}</b><small>{policy.policy_type} · {statusLabel(policy.status)} · RMSE ≤ {formatNumber(policy.max_validation_rmse)} · R² ≥ {formatNumber(policy.min_validation_r2)}</small></span></div>)}
+                  {!selectedAcceptancePolicies.length ? <p className="ai-hint">未配置工厂验收策略不影响启用。</p> : null}
                 </div>
                 <div className="ai-governance-block">
                   <strong>工厂 / 车型 / 颜色适用范围</strong>
                   {selectedScopes.map((scope) => <div className="ai-scope-row" key={scope.id}><span><b>{scope.factory_code}</b> · {scope.vehicle_model_code} · {scope.color_code}<small>{scope.source} · {statusLabel(scope.status)}</small></span>{scope.status !== "INACTIVE" ? <button type="button" className="button button-secondary danger-button" disabled={submitting === `scope-${scope.id}`} onClick={() => void deactivateScope(scope)}>停用</button> : null}</div>)}
-                  {!selectedScopes.length ? <p className="ai-hint">当前模型没有适用范围，不能验收或激活。</p> : null}
-                  <label className="form-field"><span>从现有生产快照申请扩展范围</span><select value={selectedSnapshot?.id ?? ""} onChange={(event) => setSelectedSnapshotId(event.target.value)}>{compatibleSnapshots.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{snapshot.factory_code} / {snapshot.vehicle_model_code} / {snapshot.color_code} · {snapshot.production_run_no}</option>)}</select></label>
-                  <button type="button" className="button button-secondary" disabled={!selectedModel || !selectedSnapshot || submitting === "scope-add"} onClick={() => void addScopeFromSelectedSnapshot()}>{submitting === "scope-add" ? <LoaderCircle className="spin" /> : <Target />} 加入待验收范围</button>
+                  {!selectedScopes.length ? <p className="ai-hint">启用模型时会自动激活训练样本派生的适用范围。</p> : null}
+                  <label className="form-field"><span>从现有生产快照扩展范围</span><select value={selectedSnapshot?.id ?? ""} onChange={(event) => setSelectedSnapshotId(event.target.value)}>{compatibleSnapshots.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{snapshot.factory_code} / {snapshot.vehicle_model_code} / {snapshot.color_code} · {snapshot.production_run_no}</option>)}</select></label>
+                  <button type="button" className="button button-secondary" disabled={!selectedModel || !selectedSnapshot || submitting === "scope-add"} onClick={() => void addScopeFromSelectedSnapshot()}>{submitting === "scope-add" ? <LoaderCircle className="spin" /> : <Target />} 加入适用范围</button>
                 </div>
                 <form className="ai-governance-block" onSubmit={updateOodPolicy}>
-                  <strong>异常输入拦截规则</strong>
-                  <div className="ai-two-fields"><label className="form-field"><span>最大标准化偏移</span><input name="max_abs_standardized_shift" type="number" min="0.1" step="0.1" key={`shift-${selectedOodPolicy?.id}-${selectedOodPolicy?.updated_at}`} defaultValue={selectedOodPolicy?.max_abs_standardized_shift ?? 4} /></label><label className="form-field"><span>最大异常特征比例</span><input name="max_outlier_feature_ratio" type="number" min="0" max="1" step="0.05" key={`ratio-${selectedOodPolicy?.id}-${selectedOodPolicy?.updated_at}`} defaultValue={selectedOodPolicy?.max_outlier_feature_ratio ?? 0.2} /></label></div>
-                  <label className="form-field"><span>最低特征完整率</span><input name="min_feature_completeness" type="number" min="0.1" max="1" step="0.05" key={`complete-${selectedOodPolicy?.id}-${selectedOodPolicy?.updated_at}`} defaultValue={selectedOodPolicy?.min_feature_completeness ?? 1} /></label>
-                  <button className="button button-secondary" disabled={!selectedModel || submitting === "ood-policy"}>{submitting === "ood-policy" ? <LoaderCircle className="spin" /> : <ShieldCheck />} 保存并重新验收</button>
+                  <strong>分布诊断阈值（展示用，不阻断）</strong>
+                  <div className="ai-two-fields"><label className="form-field"><span>最大标准化偏移</span><input name="max_abs_standardized_shift" type="number" min="0.1" step="0.1" key={`shift-${selectedOodPolicy?.id}-${selectedOodPolicy?.updated_at}`} defaultValue={selectedOodPolicy?.max_abs_standardized_shift ?? 4} /></label><label className="form-field"><span>最大异常特征比例</span><input name="max_outlier_feature_ratio" type="number" min="0" max="1" step="0.05" key={`ratio-${selectedOodPolicy?.id}-${selectedOodPolicy?.updated_at}`} defaultValue={selectedOodPolicy?.max_outlier_feature_ratio ?? 0.5} /></label></div>
+                  <label className="form-field"><span>最低特征完整率</span><input name="min_feature_completeness" type="number" min="0" max="1" step="0.05" key={`complete-${selectedOodPolicy?.id}-${selectedOodPolicy?.updated_at}`} defaultValue={selectedOodPolicy?.min_feature_completeness ?? 0} /></label>
+                  <button className="button button-secondary" disabled={!selectedModel || submitting === "ood-policy"}>{submitting === "ood-policy" ? <LoaderCircle className="spin" /> : <ShieldCheck />} 保存诊断阈值</button>
                 </form>
               </div>
             </div>
@@ -1841,8 +1825,8 @@ export function AiWorkbench({
                 <label className="form-field"><span>生效模型</span><select value={selectedModelId} onChange={(event) => { setSelectedModelId(event.target.value); setSelectedSnapshotId(""); }}>{models.map((model) => <option key={model.id} value={model.id}>{model.model_code}:{model.version} / {model.target_metric}</option>)}</select></label>
                 <label className="form-field"><span>选择车身与测量点</span><select value={selectedSnapshot?.id ?? ""} onChange={(event) => setSelectedSnapshotId(event.target.value)}>{compatibleSnapshots.map((snapshot) => <option key={snapshot.id} value={snapshot.id}>{snapshot.production_run_no} · {snapshot.measurement_point_code} · {snapshot.factory_code}/{snapshot.vehicle_model_code}/{snapshot.color_code}</option>)}</select></label>
                 <div className="ai-context-box"><span>生产上下文</span><strong>{selectedSnapshot ? `${selectedSnapshot.factory_code} / ${selectedSnapshot.vehicle_model_code} / ${selectedSnapshot.color_code}` : "—"}</strong><span>参数版本 / 数量</span><strong>{selectedSnapshot ? `${selectedSnapshot.feature_set_version} / ${selectedSnapshot.feature_count}` : "—"}</strong><span>适用范围</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.applicability_status ?? "—")}</strong><span>输入是否正常</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.ood_status ?? "—")}</strong><span>完整率 / 最大偏移</span><strong>{governanceCheck ? `${formatNumber(governanceCheck.evidence.feature_completeness * 100, 1)}% / ${formatNumber(governanceCheck.evidence.max_abs_standardized_shift)}` : "—"}</strong></div>
-                {governanceCheck && !governanceAllowed && !governanceLoading ? <p className="ai-governance-warning">当前车型/颜色不在模型适用范围内，或输入参数偏离训练数据过多，已暂停预测与推荐。</p> : null}
-                <button className="button button-primary" onClick={() => void runPrediction()} disabled={!selectedModel || selectedModel.status !== "ACTIVE" || !selectedSnapshot || governanceLoading || !governanceAllowed || submitting === "predict"}>{submitting === "predict" ? <LoaderCircle className="spin" /> : <Play />} 执行并保存预测</button>
+                {governanceCheck && (governanceCheck.applicability_status !== "IN_SCOPE" || governanceCheck.ood_status !== "IN_DISTRIBUTION") && !governanceLoading ? <p className="ai-governance-warning">诊断提示：适用范围={governanceCheck.applicability_status}，分布={governanceCheck.ood_status}（不阻断预测/推荐）。</p> : null}
+                <button className="button button-primary" onClick={() => void runPrediction()} disabled={!inferenceReady || submitting === "predict"}>{submitting === "predict" ? <LoaderCircle className="spin" /> : <Play />} 执行并保存预测</button>
               </div>
             </div>
             <div className="ai-record-list">
@@ -1880,7 +1864,7 @@ export function AiWorkbench({
                 <div className="ai-context-box"><span>生产上下文</span><strong>{selectedSnapshot ? `${selectedSnapshot.factory_code} / ${selectedSnapshot.vehicle_model_code} / ${selectedSnapshot.color_code}` : "—"}</strong><span>适用范围</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.applicability_status ?? "—")}</strong><span>输入是否正常</span><strong>{governanceLoading ? "检查中" : statusLabel(governanceCheck?.ood_status ?? "—")}</strong><span>异常特征比例</span><strong>{governanceCheck ? `${formatNumber(governanceCheck.evidence.outlier_feature_ratio * 100, 1)}%` : "—"}</strong></div>
                 <div className="ai-two-fields"><label className="form-field"><span>目标下限</span><input type="number" step="any" value={targetMin} onChange={(event) => setTargetMin(event.target.value)} /></label><label className="form-field"><span>目标上限</span><input type="number" step="any" value={targetMax} onChange={(event) => setTargetMax(event.target.value)} /></label></div>
                 <p className="ai-hint">至少填写一个目标上下限。系统会在安全边界内给出可执行的参数调整建议；确认后请到「受控试验」跟进。</p>
-                <button className="button button-primary" disabled={!selectedModel || selectedModel.status !== "ACTIVE" || !selectedSnapshot || governanceLoading || !governanceAllowed || submitting === "recommend"}>{submitting === "recommend" ? <LoaderCircle className="spin" /> : <Sparkles />} 生成约束推荐</button>
+                <button className="button button-primary" disabled={!inferenceReady || submitting === "recommend"}>{submitting === "recommend" ? <LoaderCircle className="spin" /> : <Sparkles />} 生成约束推荐</button>
                 <p className="ai-hint">目标上下限留空时，系统会自动采用当前车型、颜色、零件和点位匹配度最高的生效质量标准。</p>
               </div>
             </form>

@@ -270,67 +270,24 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         assert len(scopes) == 1
         assert scopes[0]["status"] == "PENDING"
         assert policies[0].status == "PENDING"
-        with pytest.raises(HTTPException, match="必须先通过独立验证和人工验收"):
-            change_model_status(trained.id, ModelStatusUpdate(status="ACTIVE"), db)
-        with pytest.raises(HTTPException, match="模型未满足验收检查"):
-            decide_model_acceptance(
-                trained.id,
-                ModelAcceptanceRequest(
-                    decision="ACCEPTED",
-                    decided_by="模型验收人",
-                ),
-                db,
-            )
-        factory_policy = add_acceptance_policy(
-            ModelAcceptancePolicyCreate(
-                policy_code="F1-DOI-ACCEPTANCE",
-                version="1.0",
-                factory_id=factory.id,
-                target_metric="doi",
-                max_validation_rmse=0.5,
-                min_validation_r2=0.9,
-                min_train_groups=5,
-                min_validation_groups=2,
-                source_uri="factory://F1/model-acceptance/doi/1.0",
-            ),
-            db,
-        )
-        assert factory_policy.status == "DRAFT"
-        factory_policy = change_acceptance_policy_status(
-            factory_policy.id,
-            ModelAcceptancePolicyStatusUpdate(
-                status="ACTIVE",
-                approved_by="工厂模型治理委员会",
-            ),
-            db,
-        )
-        assert factory_policy.status == "ACTIVE"
+        # Day-1: train → enable without factory policy / metric thresholds.
+        trained = change_model_status(trained.id, ModelStatusUpdate(status="ACTIVE"), db)
+        assert trained.status == "ACTIVE"
+        assert list_applicability_scopes(db)[0]["status"] == "ACTIVE"
+        assert list_ood_policies(db)[0].status == "ACTIVE"
         acceptance = decide_model_acceptance(
             trained.id,
             ModelAcceptanceRequest(
                 decision="ACCEPTED",
                 decided_by="模型验收人",
-                comment="独立验证指标符合本次受控试验目标",
+                comment="指标仅作展示，不阻断启用",
             ),
             db,
         )
         assert acceptance.decision == "ACCEPTED"
-        assert acceptance.checks["has_configured_applicability_scope"] is True
-        assert acceptance.checks["has_configured_ood_policy"] is True
-        assert acceptance.checks["has_multi_axis_validation_report"] is True
-        assert acceptance.checks["has_evaluated_validation_axis"] is True
-        assert acceptance.checks["has_registered_model_artifact"] is True
-        assert acceptance.checks["model_artifact_hash_matches"] is True
-        assert acceptance.checks["factory_acceptance_policies_present"] is True
-        assert acceptance.checks["factory_acceptance_thresholds_passed"] is True
-        assert acceptance.criteria["model_artifact"]["hash_matches"] is True
-        assert acceptance.criteria["multi_axis_validation"]["evaluated_axis_count"] >= 2
-        assert acceptance.criteria["factory_acceptance_policies"][0]["policy_code"] == (
-            "F1-DOI-ACCEPTANCE:1.0"
-        )
-        assert list_applicability_scopes(db)[0]["status"] == "ACTIVE"
-        assert list_ood_policies(db)[0].status == "ACTIVE"
-        trained = change_model_status(trained.id, ModelStatusUpdate(status="ACTIVE"), db)
+        assert acceptance.checks["all_required_checks_passed"] is True
+        assert acceptance.checks["metrics_are_informational"] is True
+        assert acceptance.checks["dataset_exists"] is True
         snapshots = list_feature_snapshots(db)
         assert len(snapshots) == 8
         assert snapshots[0]["feature_count"] == 2
@@ -435,16 +392,16 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             db,
         )
         assert out_of_scope_check["applicability_status"] == "OUT_OF_SCOPE"
-        assert out_of_scope_check["allowed"] is False
-        with pytest.raises(HTTPException, match="不在模型已批准适用范围"):
-            predict_from_snapshot(
-                trained.id,
-                ModelPredictionRequest(
-                    production_run_id=out_of_scope_run.id,
-                    measurement_point_id=point.id,
-                ),
-                db,
-            )
+        assert out_of_scope_check["allowed"] is True
+        out_of_scope_prediction = predict_from_snapshot(
+            trained.id,
+            ModelPredictionRequest(
+                production_run_id=out_of_scope_run.id,
+                measurement_point_id=point.id,
+            ),
+            db,
+        )
+        assert out_of_scope_prediction["applicability_status"] == "OUT_OF_SCOPE"
         ood_check = check_model_governance(
             trained.id,
             ModelGovernanceCheckRequest(
@@ -455,16 +412,17 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
         )
         assert ood_check["ood_status"] == "OUT_OF_DISTRIBUTION"
         assert ood_check["evidence"]["outlier_features"]
-        with pytest.raises(HTTPException, match="输入分布外"):
-            recommend_from_snapshot(
-                trained.id,
-                ModelRecommendationRequest(
-                    production_run_id=extreme_run.id,
-                    measurement_point_id=point.id,
-                    target_min=100.0,
-                ),
-                db,
-            )
+        assert ood_check["allowed"] is True
+        extreme_prediction = predict_from_snapshot(
+            trained.id,
+            ModelPredictionRequest(
+                production_run_id=extreme_run.id,
+                measurement_point_id=point.id,
+            ),
+            db,
+        )
+        assert extreme_prediction["ood_status"] == "OUT_OF_DISTRIBUTION"
+        assert extreme_prediction["prediction_result_id"]
         incomplete_check = check_model_governance(
             trained.id,
             ModelGovernanceCheckRequest(
@@ -473,21 +431,25 @@ def test_train_predict_and_diagnose_real_point_snapshots() -> None:
             ),
             db,
         )
-        assert incomplete_check["ood_status"] == "OUT_OF_DISTRIBUTION"
         assert incomplete_check["evidence"]["missing_features"] == ["clearcoat_2.outer_air"]
-        with pytest.raises(HTTPException, match="完整率 50.0%"):
-            predict_from_snapshot(
-                trained.id,
-                ModelPredictionRequest(
-                    production_run_id=incomplete_run.id,
-                    measurement_point_id=point.id,
-                ),
-                db,
-            )
+        assert incomplete_check["evidence"]["feature_completeness"] == pytest.approx(0.5)
+        assert incomplete_check["allowed"] is True
+        incomplete_prediction = predict_from_snapshot(
+            trained.id,
+            ModelPredictionRequest(
+                production_run_id=incomplete_run.id,
+                measurement_point_id=point.id,
+            ),
+            db,
+        )
+        assert incomplete_prediction["prediction_result_id"]
+        assert incomplete_prediction["governance_evidence"]["missing_features"] == [
+            "clearcoat_2.outer_air"
+        ]
         drift = get_model_drift(trained.id, db)
         assert drift["monitored_snapshot_count"] == 11
-        assert drift["prediction_count"] == 1
-        assert drift["labeled_prediction_count"] == 1
+        assert drift["prediction_count"] >= 1
+        assert drift["labeled_prediction_count"] >= 1
         assert drift["baseline_source"] == "VALIDATION"
         assert drift["baseline_rmse"] == trained.evaluation_metrics["validation_rmse"]
         assert drift["feature_drift"]

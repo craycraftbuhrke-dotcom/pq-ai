@@ -12,8 +12,8 @@ class DatasetBuildRequest(BaseModel):
     target_metric: str = Field(min_length=1, max_length=64)
     feature_set_version: str = Field(default=CURRENT_FEATURE_SET_VERSION, max_length=64)
     holdout_ratio: float = Field(default=0.25, ge=0.1, le=0.5)
-    min_train_groups: int = Field(default=3, ge=2)
-    min_validation_groups: int = Field(default=2, ge=1)
+    min_train_groups: int = Field(default=2, ge=1)
+    min_validation_groups: int = Field(default=1, ge=1)
     include_all_production: bool = True
     production_snapshot_ids: list[str] = Field(default_factory=list, max_length=5000)
     manual_upload_ids: list[str] = Field(default_factory=list, max_length=500)
@@ -109,13 +109,13 @@ class ModelTrainingRequest(BaseModel):
     target_metric: str = Field(min_length=1, max_length=64)
     feature_set_version: str = Field(default=CURRENT_FEATURE_SET_VERSION, max_length=64)
     dataset_snapshot_id: str
-    min_samples: int = Field(default=5, ge=3)
+    min_samples: int = Field(default=3, ge=2)
     model_family: Literal["AUTO", "RIDGE", "ELASTIC_NET"] = "AUTO"
     ridge_lambda: float = Field(default=0.1, ge=0)
     elastic_net_l1_ratio: float = Field(default=0.5, ge=0.05, le=0.95)
     max_abs_standardized_shift: float = Field(default=4.0, gt=0)
-    max_outlier_feature_ratio: float = Field(default=0.2, ge=0, le=1)
-    min_feature_completeness: float = Field(default=1.0, gt=0, le=1)
+    max_outlier_feature_ratio: float = Field(default=0.5, ge=0, le=1)
+    min_feature_completeness: float = Field(default=0.0, ge=0, le=1)
 
 
 class ModelVersionRead(BaseModel):
@@ -222,8 +222,8 @@ class ModelAcceptancePolicyCreate(BaseModel):
     target_metric: str = Field(min_length=1, max_length=64)
     max_validation_rmse: float = Field(gt=0)
     min_validation_r2: float
-    min_train_groups: int = Field(default=3, ge=2)
-    min_validation_groups: int = Field(default=2, ge=1)
+    min_train_groups: int = Field(default=2, ge=1)
+    min_validation_groups: int = Field(default=1, ge=1)
     source_uri: str = Field(min_length=1, max_length=500)
     remark: str | None = Field(default=None, max_length=1000)
 
@@ -287,8 +287,8 @@ class ModelApplicabilityScopeRead(BaseModel):
 class ModelOodPolicyUpdate(BaseModel):
     max_abs_standardized_shift: float = Field(gt=0)
     max_outlier_feature_ratio: float = Field(ge=0, le=1)
-    min_feature_completeness: float = Field(gt=0, le=1)
-    action: Literal["BLOCK"] = "BLOCK"
+    min_feature_completeness: float = Field(ge=0, le=1)
+    action: Literal["BLOCK", "WARN"] = "WARN"
     remark: str | None = Field(default=None, max_length=1000)
 
 

@@ -119,7 +119,7 @@ export function PointAiActions({
   const contextKey = productionRunId && measurementPointId ? `${productionRunId}:${measurementPointId}` : "";
   const contextModels = loadedContextKey === contextKey ? models : [];
   const selectedModel = contextModels.find((item) => item.id === modelId);
-  const ready = Boolean(productionRunId && measurementPointId && modelId && selectedModel?.allowed);
+  const ready = Boolean(productionRunId && measurementPointId && modelId && selectedModel);
 
   async function predict(): Promise<Prediction> {
     if (!ready || !productionRunId) throw new Error("请先选择有生产记录的点位和生效模型");
@@ -203,11 +203,20 @@ export function PointAiActions({
       <label className="form-field">
         <span>选择要分析的质量指标</span>
         <select value={modelId} onChange={(event) => { setModelId(event.target.value); setPrediction(null); setDiagnosis(null); setRecommendation(null); }} disabled={!contextModels.length}>
-          {contextModels.map((model) => <option key={model.id} value={model.id} disabled={!model.allowed}>{model.target_name} · {model.allowed ? "可分析" : "数据未就绪"}</option>)}
+          {contextModels.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.target_name} · {model.model_code}:{model.version}
+            </option>
+          ))}
         </select>
       </label>
-      {!contextModels.length ? <p className="ai-hint">当前车型、颜色和点位暂无已验收生效的分析模型。</p> : null}
-      {contextModels.length > 0 && !contextModels.some((model) => model.allowed) ? <p className="ai-hint">{contextModels[0]?.reason ?? "当前点位的工艺参数尚未满足模型使用条件。"}</p> : null}
+      {!contextModels.length ? <p className="ai-hint">当前点位暂无已启用的分析模型。</p> : null}
+      {selectedModel && (selectedModel.applicability_status !== "IN_SCOPE" || selectedModel.ood_status !== "IN_DISTRIBUTION") ? (
+        <p className="ai-hint">
+          诊断提示：适用范围={selectedModel.applicability_status}，分布={selectedModel.ood_status}
+          {selectedModel.reason ? ` · ${selectedModel.reason}` : ""}（不阻断分析）。
+        </p>
+      ) : null}
       <div className="point-ai-targets">
         <label className="form-field"><span>期望下限（可选）</span><input type="number" step="any" value={targetMin} onChange={(event) => setTargetMin(event.target.value)} placeholder="留空采用生效质量标准" /></label>
         <label className="form-field"><span>期望上限（可选）</span><input type="number" step="any" value={targetMax} onChange={(event) => setTargetMax(event.target.value)} placeholder="留空采用生效质量标准" /></label>
