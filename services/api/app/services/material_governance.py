@@ -106,7 +106,9 @@ def refresh_material_result_reliability(
             failures.append("批次检测结果超出批准材料规格")
 
     all_issues = failures + issues
-    status = "FAILED" if failures else "UNVERIFIED" if issues else "VERIFIED"
+    # Day-1: soft provenance gaps (source URI / approved spec metadata) stay informational.
+    # Only hard failures keep the result out of feature aggregation.
+    status = "FAILED" if failures else "VERIFIED"
     result.reliability_status = status
     result.reliability_issues = all_issues
     db.flush()

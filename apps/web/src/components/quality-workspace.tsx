@@ -849,7 +849,7 @@ export function QualityWorkspace({
       {showChrome ? <div className="freshness"><span className="live-dot" /> 实时质量数据 · 批量上传可自动创建生产事件</div> : null}
       {showChrome && tab !== "upload" ? (
         <section className="module-stat-strip">
-          <article><span>质量测量</span><strong>{loading ? "…" : summary?.measurements ?? 0}</strong><small>{summary?.verified_measurements ?? 0} 条通过可靠性门禁</small></article>
+          <article><span>质量测量</span><strong>{loading ? "…" : summary?.measurements ?? 0}</strong><small>{summary?.verified_measurements ?? 0} 条可用于训练</small></article>
           <article><span>指标值</span><strong>{loading ? "…" : summary?.metric_values ?? 0}</strong><small>当前受治理目录 {definitions.length} 项</small></article>
           <article><span>合格 / 超差</span><strong>{loading ? "…" : `${summary?.pass_measurements ?? 0} / ${summary?.fail_measurements ?? 0}`}</strong><small>按当前生效标准判定</small></article>
           <article><span>可靠性待处理</span><strong>{loading ? "…" : `${summary?.unverified_measurements ?? 0} / ${summary?.failed_reliability_measurements ?? 0}`}</strong><small>未验证 / 失败</small></article>
@@ -1150,15 +1150,9 @@ function renderMeasurementForm(
         {inputField("测量人", "measured_by", form, setForm)}
       </div>
     </FormSection>,
-    <FormSection key="measurement-governance" title="治理对象与可靠性" description="补齐受治理仪器、方法、校准、参考件和导入模板，支撑可靠性判定。">
+    <FormSection key="measurement-governance" title="仪器与有效性" description="可选关联仪器台账；启用中的仪器不挡上传与训练。方法/校准/参考件/模板已降级为后续迭代。">
       <div className="modal-section-grid">
-        {selectField("受治理仪器", "instrument_id", form, (next) => setForm({ ...next, measurement_method_id: "", calibration_record_id: "", import_profile_id: "" }), options(instruments, true))}
-        {selectField("测量方法", "measurement_method_id", form, (next) => setForm({ ...next, calibration_record_id: "" }), options(methods, true))}
-        {selectField("校准/检查记录", "calibration_record_id", form, setForm, [["", "未关联"], ...calibrations.map((item) => [item.id, `${item.calibration_no} / ${item.result} / ${new Date(item.valid_until).toLocaleDateString("zh-CN")}`] as [string, string])])}
-        {selectField("参考件", "reference_standard_id", form, setForm, options(references, true))}
-        {selectField("导入模板", "import_profile_id", form, setForm, [["", "手工录入 / 未关联"], ...profiles.map((item) => [item.id, `${item.code}:${item.version}`] as [string, string])])}
-        {selectField("测量方向", "measurement_direction", form, setForm, [["", "未记录"], ["LONGITUDINAL", "纵向"], ["TRANSVERSE", "横向"], ["NORMAL", "法向 / 不适用"]])}
-        {inputField("原始文件 URI", "raw_file_uri", form, setForm)}
+        {selectField("测量仪器（可选）", "instrument_id", form, (next) => setForm({ ...next, measurement_method_id: "", calibration_record_id: "", import_profile_id: "" }), options(instruments, true))}
         {inputField("状态分数", "status_score", form, setForm, "number")}
         {checkboxField("数据有效", "is_valid", form, setForm)}
       </div>

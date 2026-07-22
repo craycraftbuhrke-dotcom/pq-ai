@@ -33,7 +33,7 @@ class MeasurementInstrumentCreate(BaseModel):
     serial_no: str = Field(min_length=1, max_length=120)
     firmware_version: str | None = Field(default=None, max_length=64)
     supported_quality_types: list[str] = Field(min_length=1)
-    calibration_required: bool = True
+    calibration_required: bool = False
     status: str = Field(default="ACTIVE", pattern="^(ACTIVE|MAINTENANCE|RETIRED)$")
     remark: str | None = None
 

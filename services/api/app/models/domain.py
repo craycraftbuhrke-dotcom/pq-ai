@@ -1036,7 +1036,7 @@ class MeasurementInstrument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     serial_no: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     firmware_version: Mapped[str | None] = mapped_column(String(64))
     supported_quality_types: Mapped[list] = mapped_column(JSON, nullable=False)
-    calibration_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    calibration_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[str] = mapped_column("row_status", String(24), default="ACTIVE", nullable=False)
     remark: Mapped[str | None] = mapped_column(Text)
 

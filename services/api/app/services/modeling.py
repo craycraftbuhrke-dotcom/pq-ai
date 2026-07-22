@@ -43,6 +43,7 @@ from app.models.domain import (
     VehicleModel,
     VehicleModelColor,
 )
+from app.services.measurement_reliability import refresh_measurement_reliability
 from app.services.quality_evaluation import resolve_quality_standard
 
 
@@ -122,6 +123,15 @@ def _target_value(
 def _target_observation(
     db: Session, production_run_id: str, measurement_point_id: str, target_metric: str
 ) -> dict | None:
+    for measurement in db.scalars(
+        select(QualityMeasurement).where(
+            QualityMeasurement.production_run_id == production_run_id,
+            QualityMeasurement.measurement_point_id == measurement_point_id,
+            QualityMeasurement.is_valid.is_(True),
+        )
+    ):
+        refresh_measurement_reliability(db, measurement)
+
     row = db.execute(
         select(QualityMetricValue, QualityMeasurement)
         .join(QualityMeasurement, QualityMeasurement.id == QualityMetricValue.measurement_id)

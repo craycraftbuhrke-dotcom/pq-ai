@@ -308,7 +308,7 @@ def test_body_map_create_point_binds_group_and_detail_includes_brush() -> None:
     db.close()
 
 
-def test_body_map_ignores_unverified_measurements() -> None:
+def test_body_map_ignores_invalid_measurements() -> None:
     db = build_session()
     context = build_body_map_context(db)
     point = context["point"]
@@ -321,11 +321,12 @@ def test_body_map_ignores_unverified_measurements() -> None:
     )
     create_quality_measurement(
         QualityMeasurementCreate(
-            data_no="QM-UNVERIFIED",
+            data_no="QM-INVALID",
             production_run_id=run.id,
             measurement_point_id=point.id,
             quality_type="THICKNESS",
             measured_at=datetime(2026, 7, 10, 9, 0, tzinfo=UTC),
+            is_valid=False,
             metrics=[
                 QualityMetricInput(
                     metric_code="thickness_total",

@@ -64,7 +64,7 @@ from app.services.body_map_3d_projection import (
     project_point_to_all_views,
     project_point_to_view,
 )
-from app.services.measurement_reliability import VERIFIED
+from app.services.measurement_reliability import VERIFIED, refresh_measurement_reliability
 from app.services.quality_evaluation import evaluate_quality_measurement
 from app.services.stp_convert import StpConvertError, cascadio_available, step_to_glb
 
@@ -272,14 +272,15 @@ def _latest_quality_summaries(
 ) -> dict[str, list[BodyMapQualitySummary]]:
     if not point_ids:
         return {}
-    # Overlay only uses VERIFIED measurements so unverified/failed imports never paint teal.
-    query = select(QualityMeasurement).where(
+    # Re-apply current reliability policy so historical imports paint correctly.
+    base_query = select(QualityMeasurement).where(
         QualityMeasurement.measurement_point_id.in_(point_ids),
         QualityMeasurement.is_valid.is_(True),
-        QualityMeasurement.reliability_status == VERIFIED,
     )
     if production_run_id:
-        query = query.where(QualityMeasurement.production_run_id == production_run_id)
+        base_query = base_query.where(QualityMeasurement.production_run_id == production_run_id)
+        for measurement in db.scalars(base_query):
+            refresh_measurement_reliability(db, measurement)
     else:
         # Without a run scope, refuse cross-run bleed — callers should resolve latest run first.
         return {
@@ -297,6 +298,14 @@ def _latest_quality_summaries(
             ]
             for point_id in point_ids
         }
+
+    # Overlay only uses VERIFIED measurements so failed/invalid imports never paint teal.
+    query = select(QualityMeasurement).where(
+        QualityMeasurement.measurement_point_id.in_(point_ids),
+        QualityMeasurement.is_valid.is_(True),
+        QualityMeasurement.reliability_status == VERIFIED,
+        QualityMeasurement.production_run_id == production_run_id,
+    )
     measurements = list(db.scalars(query.order_by(QualityMeasurement.measured_at.desc())))
 
     latest_by_point_type: dict[tuple[str, str], QualityMeasurement] = {}

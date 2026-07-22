@@ -230,6 +230,8 @@ def _measurement_dict(
 
 
 def _measurement_result(db: Session, measurement: QualityMeasurement) -> dict:
+    # Re-apply current reliability policy so historical rows self-heal after gate changes.
+    refresh_measurement_reliability(db, measurement)
     metrics = list(
         db.scalars(
             select(QualityMetricValue)
@@ -264,6 +266,7 @@ def quality_summary(db: Session = Depends(get_db)) -> dict:
     judgements = []
     metric_value_count = 0
     for measurement in measurements:
+        refresh_measurement_reliability(db, measurement)
         metrics = list(
             db.scalars(
                 select(QualityMetricValue).where(

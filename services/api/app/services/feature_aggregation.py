@@ -36,6 +36,7 @@ from app.models.domain import (
     TrajectoryPathSegment,
     TrajectoryProgram,
 )
+from app.services.measurement_reliability import refresh_measurement_reliability
 
 STAGE_FEATURE_PREFIXES = {
     "MIDCOAT_EXT": "midcoat",
@@ -122,9 +123,9 @@ def build_point_feature_snapshot(
         )
         if device_execution:
             if device_execution.status == "CHECKSUM_MISMATCH":
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"工序 {stage_run.process_stage} 实际轨迹校验和与批准轨迹不一致",
+                # Day-1: keep lineage, do not block snapshot / training on trajectory hash.
+                lineage.setdefault("warnings", []).append(
+                    f"工序 {stage_run.process_stage} 实际轨迹校验和与批准轨迹不一致（已忽略）"
                 )
             lineage["device_execution_ids"].append(device_execution.id)
             lineage["trajectory_program_ids"].append(device_execution.trajectory_program_id)
@@ -316,14 +317,7 @@ def build_point_feature_snapshot(
                     or not specification
                     or specification.status != "ACTIVE"
                 ):
-                    if applicability.is_required:
-                        raise HTTPException(
-                            status_code=422,
-                            detail=(
-                                f"工序 {stage_run.process_stage} 缺少生产前已验证的必需材料特性"
-                                f" {definition.code if definition else applicability.characteristic_definition_id}"
-                            ),
-                        )
+                    # Day-1: missing material provenance is skippable, not a hard block.
                     continue
                 feature_values[f"{stage_prefix}.material.{definition.code}"] = (
                     result.result_value
@@ -338,6 +332,19 @@ def build_point_feature_snapshot(
             stage_coverage.add(stage_run.process_stage)
 
     quality_labels: dict[str, float] = {}
+    candidate_measurements = list(
+        db.scalars(
+            select(QualityMeasurement).where(
+                QualityMeasurement.production_run_id == production_run_id,
+                QualityMeasurement.measurement_point_id == measurement_point_id,
+                QualityMeasurement.quality_type == target_family,
+                QualityMeasurement.is_valid.is_(True),
+            )
+        )
+    )
+    for measurement in candidate_measurements:
+        refresh_measurement_reliability(db, measurement)
+
     quality_rows = db.execute(
         select(QualityMetricValue, QualityMeasurement)
         .join(QualityMeasurement, QualityMeasurement.id == QualityMetricValue.measurement_id)

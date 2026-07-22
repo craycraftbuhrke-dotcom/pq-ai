@@ -63,18 +63,18 @@ type ScopeState = {
   qualityType: string;
 };
 
-const KIND_ORDER: Kind[] = ["instruments", "methods", "references", "calibrations", "import-profiles"];
+const KIND_ORDER: Kind[] = ["instruments"];
 
 const kindLabels: Record<Kind, string> = {
-  instruments: "1. 仪器台账",
-  methods: "2. 测量方法",
-  references: "3. 参考件",
-  calibrations: "4. 校准记录",
-  "import-profiles": "5. 导入模板",
+  instruments: "仪器台账",
+  methods: "测量方法",
+  references: "参考件",
+  calibrations: "校准记录",
+  "import-profiles": "导入模板",
 };
 
 const kindHints: Record<Kind, string> = {
-  instruments: "先建仪器。后续方法、校准、导入模板都按仪器类型继承。",
+  instruments: "维护仪器编号、类型与启用状态即可。方法/校准/参考件/模板暂不参与可靠性门禁，后续再迭代。",
   methods: "方法挂在仪器类型 + 质量类型下；会自动带出默认方法类型。",
   references: "参考件按质量类型维护；校准和方法需要时可关联。",
   calibrations: "校准必须选仪器；方法/参考件按仪器类型与质量类型自动过滤并预填。",
@@ -341,26 +341,12 @@ export function MeasurementGovernancePanel() {
           <strong>
             {summary?.instruments ?? 0} / {summary?.active_instruments ?? 0}
           </strong>
-          <small>BYK 与 Fischer 受治理设备</small>
+          <small>台账总数与启用中</small>
         </article>
         <article>
-          <span>方法 / 参考件</span>
-          <strong>
-            {summary?.methods ?? 0} / {summary?.references ?? 0}
-          </strong>
-          <small>版本化方法与参考状态</small>
-        </article>
-        <article>
-          <span>有效校准</span>
-          <strong>
-            {summary?.valid_calibrations ?? 0} / {summary?.calibrations ?? 0}
-          </strong>
-          <small>PASS 且未过期</small>
-        </article>
-        <article>
-          <span>导入模板</span>
-          <strong>{summary?.import_profiles ?? 0}</strong>
-          <small>固件/导出结构映射</small>
+          <span>当前策略</span>
+          <strong>台账门禁</strong>
+          <small>仅启用/停用影响可靠性</small>
         </article>
       </section>
 
@@ -397,8 +383,8 @@ export function MeasurementGovernancePanel() {
       </div>
 
       <div className="governance-flow-hint">
-        <span>建议顺序</span>
-        <strong>仪器台账 → 测量方法 → 参考件 → 校准记录 → 导入模板</strong>
+        <span>当前策略</span>
+        <strong>仪器台账 + 启用/停用</strong>
         <small>{kindHints[kind]}</small>
       </div>
 
@@ -549,7 +535,7 @@ function initialForm(
       serial_no: record?.serial_no ?? "",
       firmware_version: record?.firmware_version ?? "",
       supported_quality_types: (record?.supported_quality_types ?? [scope.qualityType || defaultQualityForInstrument(scope.instrumentType)]).join(","),
-      calibration_required: record?.calibration_required ?? true,
+      calibration_required: record?.calibration_required ?? false,
       status: record?.status ?? "ACTIVE",
     };
   }
@@ -568,9 +554,9 @@ function initialForm(
       substrate_type: record?.substrate_type ?? "",
       geometry_class: record?.geometry_class ?? "",
       layer_scope: record?.layer_scope ?? "",
-      requires_reference: record?.requires_reference ?? true,
-      requires_direction: record?.requires_direction ?? qualityType !== "THICKNESS",
-      minimum_repeats: String(record?.minimum_repeats ?? (qualityType === "THICKNESS" ? 3 : 1)),
+      requires_reference: record?.requires_reference ?? false,
+      requires_direction: record?.requires_direction ?? false,
+      minimum_repeats: String(record?.minimum_repeats ?? 1),
       is_active: record?.is_active ?? true,
     };
   }

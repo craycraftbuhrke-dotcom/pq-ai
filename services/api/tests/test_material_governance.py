@@ -212,8 +212,9 @@ def test_specification_reassignment_recomputes_old_result_reliability() -> None:
         db,
     )
     db.refresh(result)
-    assert result.reliability_status == "UNVERIFIED"
+    assert result.reliability_status == "VERIFIED"
     assert result.specification_id is None
+    assert any("缺少检测时间有效的批准材料规格" in issue for issue in (result.reliability_issues or []))
     db.close()
 
 
@@ -397,13 +398,14 @@ def test_governed_material_result_enters_features_and_failed_result_blocks_requi
     )
     assert failed.reliability_status == "FAILED"
     assert failed.is_within_spec is False
-    with pytest.raises(HTTPException, match="缺少生产前已验证的必需材料特性"):
-        build_point_snapshot(
-            PointFeatureBuildRequest(
-                production_run_id=run.id,
-                measurement_point_id=point.id,
-                target_family="ORANGE_PEEL",
-            ),
-            db,
-        )
+    # Day-1: required material gaps no longer hard-block snapshot build.
+    blocked = build_point_snapshot(
+        PointFeatureBuildRequest(
+            production_run_id=run.id,
+            measurement_point_id=point.id,
+            target_family="ORANGE_PEEL",
+        ),
+        db,
+    )
+    assert "clearcoat_2.material.viscosity" not in blocked["feature_values"]
     db.close()
